@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Annotate · Pi</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header>
+    <div><strong>Pi / Annotate</strong><p>Select a passage, then add a question. Nothing is sent to the model here.</p></div>
+    <button id="send" disabled>Add to Pi draft <span id="count">(0)</span></button>
+  </header>
+  <p id="status" role="status" aria-live="polite">Loading response…</p>
+  <main>
+    <article aria-label="Assistant response"><div class="label">ASSISTANT RESPONSE <span>· Rendered Markdown</span></div><div id="response" tabindex="0"></div></article>
+    <aside aria-label="Annotations"><h2>Your annotations</h2><p id="empty">Highlight words in the response to ask about them.</p><ol id="annotations"></ol></aside>
+  </main>
+  <dialog id="comment-dialog" aria-labelledby="comment-title">
+    <form id="comment-form">
+      <h2 id="comment-title">Ask about this passage</h2>
+      <blockquote id="selected-quote"></blockquote>
+      <label for="comment">Question or comment</label>
+      <textarea id="comment" rows="4" maxlength="8000" required placeholder="What would you like to ask?"></textarea>
+      <div class="actions"><button id="cancel" type="button" class="secondary">Cancel</button><button type="submit">Add annotation</button></div>
+    </form>
+  </dialog>
+</body>
+</html>

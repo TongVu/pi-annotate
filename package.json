@@ -1,0 +1,32 @@
+{
+  "name": "pi-annotate",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Annotate assistant responses locally and return questions to Pi's draft editor.",
+  "keywords": [
+    "pi-package"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "check": "node --check src/server.ts && node --check src/annotations.ts && node --check src/markdown.ts && node --check web/app.js && npm test"
+  },
+  "devDependencies": {
+    "jsdom": "27.2.0"
+  },
+  "dependencies": {
+    "marked": "18.0.11",
+    "parse5": "8.1.1"
+  }
+}
