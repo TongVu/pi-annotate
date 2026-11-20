@@ -44,4 +44,44 @@ dialog::backdrop { background: #0006; }
 label { display: block; margin: 20px 0 8px; font-size: 14px; }
 textarea { width: 100%; resize: vertical; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 12px; font: inherit; line-height: 1.5; margin-bottom: 16px; }
 @media (max-width: 850px) { main { grid-template-columns: minmax(0, 1fr); } aside { border-left: 0; border-top: 1px solid var(--border); } header { padding: 16px; flex-wrap: wrap; } #status { padding: 12px 16px; } article { padding: 24px 20px 40px; } }
-@media (prefers-color-scheme: light) { :root { --bg: #faf9f6; --panel: #fff; --text: #292d2a; --muted: #64685f; --border: #d4d8ce; --accent: #9cd3c0; } #status { color: #226449; } #status.error { color: #a12d20; } }
+/* Chat keeps the annotation panel and composer in view while the transcript scrolls. */
+.chat-page { display: grid; grid-template-rows: auto auto minmax(0, 1fr); height: 100dvh; overflow: hidden; }
+/* Remove main's vertical auto margins so the grid stays inside the viewport. */
+.chat-page main { grid-template-columns: 30px minmax(0, 1fr) minmax(220px, 340px); grid-template-rows: minmax(0, 1fr); width: 100%; min-height: 0; margin: 0 auto; }
+#chat-state { color: var(--muted); font-size: 14px; }
+#turns { align-self: center; max-height: 100%; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 2px; }
+#turns button { display: grid; place-items: center; width: 100%; height: 16px; padding: 0; background: transparent; color: var(--muted); }
+#turns button::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: .65; }
+#turns button:hover, #turns button:focus-visible { color: var(--text); outline-offset: -2px; }
+#turns button[aria-current] { color: #74baff; }
+#turns button[aria-current]::before { opacity: 1; }
+.chat-page article { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; padding: 0; }
+.chat-page #response { overflow: auto; overscroll-behavior: contain; padding: 20px clamp(16px, 4vw, 46px); }
+.chat-turn { padding: 14px 0; }
+.chat-turn h2 { color: var(--muted); font-size: 13px; margin: 0 0 6px; }
+.user-turn { position: relative; width: fit-content; max-width: min(85%, 64ch); margin: 8px 0 20px auto; padding: 8px 14px; border: 2px solid var(--muted); border-radius: 16px 16px 0 16px; line-height: 1.55; }
+/* Layer the outline and its cutout over the bottom border for a continuous tail. */
+.user-turn::before, .user-turn::after { content: ""; position: absolute; top: 100%; right: -2px; width: 18px; height: 13px; pointer-events: none; }
+.user-turn::before { background: var(--muted); clip-path: path("M0 0H18V11Q18 14 15.5 12L2 2H0Z"); }
+.user-turn::after { background: var(--bg); clip-path: polygon(3px 0, 16px 0, 16px 9.5px); }
+.user-turn > div { white-space: pre-wrap; }
+.chat-page aside { overflow: auto; }
+.chat-page #send { margin-bottom: 12px; }
+@media (min-width: 761px) { .chat-page aside { border-top: 0; border-left: 1px solid var(--border); } }
+#chat-form { padding: 12px 16px; border-top: 1px solid var(--border); }
+.chat-composer { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; }
+.chat-composer:focus-within { border-color: var(--accent); }
+#chat-input { display: block; margin: 0; max-height: 22dvh; border: 0; background: transparent; }
+#chat-input:focus-visible { outline: none; }
+.chat-composer .actions { align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 4px 8px 8px; }
+#chat-send { display: grid; place-items: center; margin-left: auto; width: 38px; height: 38px; padding: 0; }
+#chat-attachments { margin: 0; padding: 0 12px 6px; max-height: 18dvh; overflow: auto; color: var(--muted); font-size: 14px; }
+#chat-attachments li { display: flex; align-items: center; gap: 8px; margin: 2px 0; }
+#chat-attachments li span { overflow-wrap: anywhere; }
+#chat-attachments button { padding: 4px 7px; }
+@media (max-width: 760px) {
+  .chat-page main { grid-template-columns: 26px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .chat-page aside { grid-column: 1 / -1; max-height: 28dvh; padding: 12px 16px; }
+  .chat-page aside h2, .chat-page #empty { margin: 0 0 6px; }
+}
+@media (prefers-color-scheme: light) { :root { --bg: #faf9f6; --panel: #fff; --text: #292d2a; --muted: #64685f; --border: #d4d8ce; --accent: #9cd3c0; } #status { color: #226449; } #status.error { color: #a12d20; } #turns button[aria-current] { color: #1264b4; } }

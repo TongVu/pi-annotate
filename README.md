@@ -1,8 +1,8 @@
 # Pi Annotate
 
-A local Pi extension for asking questions about passages in an assistant response.
-Select text in a browser page, add comments, then return the batch to Pi's **draft
-editor**. You decide when to press Enter. No model call is made by this extension.
+A local Pi extension for chatting and asking questions about passages in assistant
+replies. Use `/chat` to send directly to the current Pi session, or
+`/annotate` to return quotes and questions to Pi's draft editor without sending.
 
 ## Try it
 
@@ -23,6 +23,35 @@ Use your checkout's absolute path on other machines. Do not change into the
 `pi-annotate` directory just to resume a different project's chat; Pi groups
 sessions by working directory. Both regular and fullscreen terminal modes work.
 
+### Live browser chat
+
+1. Run `/chat` in the Pi session you want to use. Use `/chat link` if you prefer to
+   open the link yourself. You can start from an empty session.
+2. Type a message in the bottom composer, or select text in a Pi reply and add a
+   question to the right panel. The dots stay centered on the left as you scroll;
+   the current turn is blue. Hover to preview a message or click to jump to it.
+3. Press **Enter** or click the paper plane to send an ordinary message.
+   **Shift+Enter** inserts a newline. Click **Send questions** to submit the
+   annotation batch. These are separate sends: each leaves the other draft
+   untouched and clears its own draft only after Pi accepts it. The terminal
+   draft is untouched.
+4. New messages appear in the same tab as Pi finishes them. Replies aren't streamed
+   token by token. If Pi needs an approval or other interactive input, use the terminal.
+
+Click **Attach files** to select multiple files, or paste a screenshot into the
+composer. Send up to 10 UTF-8 text/code files or PNG, JPEG, GIF, and WebP images,
+with or without a message. Limits are 5 MiB per file, 10 MiB combined, and 128 KiB
+combined for text files. PDFs, Office documents, and archives aren't supported.
+Images require an image-capable model and must not be blocked in Pi settings.
+
+Chat submissions start a normal Pi turn with the session's model and tools. They
+aren't interpreted as slash commands. If a send can't be confirmed, the draft stays
+in the browser; retrying the unchanged send checks the same request rather than
+starting another turn. If Pi never confirms it, check the terminal and reopen the
+chat before sending again. Live chat was verified with Pi 1.5.2.
+
+### Draft-only annotations
+
 1. Run `/annotate` after the assistant finishes responding. It opens a local page
    in your default browser. Nothing opens merely from loading the extension.
 2. Select a passage in the response. A question/comment dialog appears.
@@ -33,15 +62,15 @@ sessions by working directory. Both regular and fullscreen terminal modes work.
 
 Existing input is preserved: annotations append to the draft as it exists at
 transfer time, including changes you made while the annotation page was open.
-There is no automatic model submission. The browser tab stays open so you can see
+There is no automatic model submission in draft mode. The browser tab stays open so you can see
 whether transfer succeeded; close it when done.
 
 Other commands:
 
 - `/annotate link` — show a local link without opening the browser.
-- `/annotate close` — disconnect the current annotation page.
-- `/reload` — reload extension source changes; old annotation pages are disconnected.
-  Finish unsent annotations first, then run `/annotate` to open a new page.
+- `/chat close` or `/annotate close` — disconnect the current browser page.
+- `/reload` — reload extension source changes; old pages are disconnected.
+  Finish unsent drafts first, then open a new page.
 
 To load it in future chats, optionally install this local package yourself:
 
@@ -55,8 +84,9 @@ Pi settings; it does not publish anything. Remove it with
 
 ## What is implemented
 
-- The latest text-bearing assistant message on the active branch, excluding
-  thinking and tool calls.
+- A live chat view of the active branch's user messages and text-bearing assistant
+  replies. Draft mode shows only the latest such reply. Neither includes thinking
+  or tool calls.
 - Native browser text selection, a comment dialog, multiple annotations,
   edit/remove, and batch return to Pi.
 - Headings, bold/italic text, lists, blockquotes, links, and code blocks rendered
@@ -66,7 +96,7 @@ Pi settings; it does not publish anything. Remove it with
 - Current-draft preservation, duplicate-transfer protection, and retry after a
   busy-agent or connection failure.
 - Mode checks and invalidation on session switches, forks, tree navigation,
-  shutdown, replacement by another `/annotate`, or a 30-minute timeout.
+  shutdown, or replacement by another `/chat` or `/annotate` page.
 
 Selections refer to the **rendered text**, not Markdown punctuation. The server
 renders once and derives canonical text with an HTML5 parser; the browser checks
@@ -85,7 +115,7 @@ not require clipboard access or access to Pi's private transcript selection.
   link carries it in a URL fragment; the page removes the fragment from the address
   bar/history after reading it. Do not share the link.
 - Host and Origin checks prevent cross-origin/rebinding requests. No CORS, external
-  assets, uploads, browser automation, or third-party services are used. A CSP
+  assets, browser automation, or third-party services are used by the browser page. A CSP
   blocks external resources and embedding. Markdown parsing uses local `marked`
   and `parse5` dependencies; no CDN is contacted. Only generated Markdown HTML is
   inserted into the page; original raw HTML and comments are never inserted as
@@ -94,13 +124,20 @@ not require clipboard access or access to Pi's private transcript selection.
   OS, browser, or extension. Response text can contain private data: use a trusted
   browser/profile. `/annotate` uses the OS default browser; `/annotate link` lets
   you choose where to open it.
-- Response text and browser annotations remain in memory. There is no autosave,
-  storage in localStorage, or session-file modification. Closing/reloading the
-  browser page loses unsent annotations. Reloading also loses the page's access
-  token: use `/annotate` again.
-- Returned questions enter the normal chat/session only when **you submit** the
-  Pi draft. No full conversation history, hidden reasoning, credentials, or files
-  are sent to the browser.
+- A connected `/chat` tab keeps its port open by polling. The page asks Pi to close
+  the port when you leave. If the browser crashes, is suspended, or can't send
+  that request, Pi closes the port after 30 minutes without a poll. Draft-only
+  pages still expire 30 minutes after opening.
+- The extension keeps no separate transcript or drafts on disk. Closing/reloading
+  the page loses unsent drafts and reloading discards the access token. Reopen from Pi.
+- Chat mode sends visible user and assistant text from the active branch to the
+  local browser, including older messages. It does not send system prompts, hidden
+  reasoning, tool calls/results, or image bytes. Visible text can contain sensitive
+  information.
+- Selected files are sent to Pi only when you send the message. Pi receives text
+  files inline with their names and images as normal image inputs. The browser
+  transcript shows an attachment label for images, not the image bytes. Draft-only
+  annotations enter the session only when **you submit** the terminal draft.
 - Opening a local annotation page does not modify Pi's MCP/browser allowlist or
   authorize browser automation at any additional origin.
 
@@ -148,6 +185,15 @@ selection or visual layout in a real browser.
   Other OS browser launchers have not been live-tested.
 
 ### Manual acceptance
+
+For live chat: run `/chat`. Use Shift+Enter to create a newline and Enter to send.
+Check that the reply appears in the same tab. Scroll a long transcript and check
+that the dots stay centered, highlight the current turn, and jump to earlier
+messages. Attach several text files and screenshots and check that Pi receives
+all of them. Send an annotation batch and check that the right panel clears. Try a
+narrow browser window and check that closing the tab disconnects its link.
+
+For draft mode:
 
 1. Load the extension and resume the intended chat. Run `/annotate`.
 2. Confirm only the latest assistant text appears, with rendered headings/bold/lists

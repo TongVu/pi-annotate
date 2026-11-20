@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { access, cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { JSDOM } from "jsdom";
 
@@ -86,4 +87,114 @@ test("Pi reload picks up changed local helper modules in the same process", {
   assert.equal(transferred.status, 200);
   assert.match(after.draft(), /^Existing draft\n\nQuestions about assistant response reload-response:/);
   assert.match(after.draft(), /> Reload marker\./);
+});
+
+test("installed Pi accepts a browser prompt before the model finishes, then exposes the reply", {
+  skip: !loaderPath && "Requires an installed Pi loader",
+  timeout: 10000,
+}, async (t) => {
+  const { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } = await import(new URL("../../index.js", pathToFileURL(loaderPath)));
+  if (!ModelRuntime) return t.skip("Requires Pi's ModelRuntime and faux provider");
+  const { fauxProvider, fauxAssistantMessage } = await import(new URL("../../../../pi-ai/dist/index.js", pathToFileURL(loaderPath)));
+  if (!fauxProvider) return t.skip("Requires Pi's faux provider");
+  const cwd = await mkdtemp(join(tmpdir(), "pi-annotate-chat-test-"));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  const faux = fauxProvider({ provider: "annotate-test", models: [{ id: "vision", input: ["text", "image"] }] });
+  const modelRuntime = await ModelRuntime.create({ authPath: join(cwd, "auth.json"), modelsPath: join(cwd, "models.json") });
+  modelRuntime.registerNativeProvider(faux.provider);
+  const model = faux.getModel();
+  const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false } });
+  const loader = new DefaultResourceLoader({
+    cwd, agentDir: cwd, settingsManager,
+    additionalExtensionPaths: [fileURLToPath(new URL("../src/index.ts", import.meta.url))],
+    extensionFactories: [(pi) => pi.on("input", (event) => event.source === "extension"
+      ? { action: "transform", text: `Transformed: ${event.text}` } : undefined)],
+  });
+  await loader.reload();
+  const { session } = await createAgentSession({
+    cwd, agentDir: cwd, modelRuntime, model, settingsManager, resourceLoader: loader,
+    sessionManager: SessionManager.inMemory(cwd), noTools: true,
+  });
+  let link;
+  let finishReply;
+  const replyGate = new Promise((resolve) => { finishReply = resolve; });
+  let imagePrompt;
+  faux.setResponses([
+    async () => {
+      await replyGate;
+      return fauxAssistantMessage("Here is the **answer**.");
+    },
+    fauxAssistantMessage("Here is more detail."),
+    fauxAssistantMessage("Text file received."),
+    (context) => {
+      imagePrompt = context.messages.findLast(({ role }) => role === "user");
+      return fauxAssistantMessage("Image received.");
+    },
+  ]);
+  const errors = [];
+  await session.bindExtensions({ mode: "tui", onError: (error) => errors.push(error), uiContext: {
+    notify(message) { if (message.includes("http://127.0.0.1:")) link = message.split(": ").at(-1); },
+  } });
+  try {
+    await session.prompt("/chat link");
+    assert.ok(link, JSON.stringify(errors));
+    const url = new URL(link);
+    const headers = { Authorization: `Bearer ${url.hash.slice(1)}`, Origin: url.origin, "Content-Type": "application/json" };
+    const state = async (suffix = "") => (await fetch(`${url.origin}/api/response${suffix}`, { headers })).json();
+    const send = (body) => fetch(`${url.origin}/api/chat`, {
+      method: "POST", headers, signal: AbortSignal.timeout(3000), body: JSON.stringify(body),
+    });
+    assert.equal((await send({ requestId: "e126ac9d-7780-4853-8de2-5d6d0a869093", text: "/literal question" })).status, 200, JSON.stringify(errors));
+    const working = await state();
+    assert.equal(working.busy, true);
+    assert.deepEqual(working.messages.map(({ role, text }) => [role, text]), [["user", "Transformed: /literal question"]]);
+    finishReply();
+    await session.waitForIdle();
+    const finished = await state(`?after=${working.cursor}`);
+    assert.equal(finished.busy, false);
+    const [reply] = finished.messages;
+    assert.match(reply.html, /<strong>answer<\/strong>/);
+    const start = reply.text.indexOf("answer");
+    const batch = {
+      requestId: "c5562ee8-daca-4e02-bc16-66d5f1c53289",
+      annotations: [{ responseId: reply.id, start, end: start + 6, quote: "answer", comment: "Explain." }],
+    };
+    assert.equal((await send(batch)).status, 200, JSON.stringify(errors));
+    assert.equal((await send(batch)).status, 200, "retry acknowledges the original send");
+    await session.waitForIdle();
+    const followUp = await state(`?after=${finished.cursor}`);
+    assert.deepEqual(followUp.messages.map(({ role }) => role), ["user", "assistant"]);
+    assert.match(followUp.messages[0].text, /> answer\n\nExplain\./);
+    assert.match(followUp.messages[1].text, /more detail/);
+    assert.equal(faux.state.callCount, 2);
+    const file = { name: "notes.md", mimeType: "text/markdown", data: Buffer.from("# Notes\nHello.").toString("base64") };
+    const image = { name: "picture.png", mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgZGIGAAAOAAfXb+R4AAAAAElFTkSuQmCC" };
+    const picture = {
+      requestId: "423835d4-c14d-4b80-8cd0-4bcf3eb61935", text: "Look at this picture",
+      attachments: [image, file, { ...image, name: "second.png" }],
+    };
+    settingsManager.setBlockImages(true);
+    const blocked = await send(picture);
+    assert.equal(blocked.status, 400);
+    assert.match((await blocked.json()).error, /Images are disabled/);
+    assert.equal((await send({ requestId: "49cda6e1-0914-4c13-9369-84e400e3e6c9", text: "", attachments: [file] })).status, 200);
+    await session.waitForIdle();
+    const afterText = await state(`?after=${followUp.cursor}`);
+    assert.match(afterText.messages[0].text, /Attached file: "notes.md"/);
+    settingsManager.setBlockImages(false);
+    assert.equal((await send(picture)).status, 200, JSON.stringify(errors));
+    await session.waitForIdle();
+    assert.match(imagePrompt.content[0].text, /Look at this picture[\s\S]*# Notes\nHello\./);
+    assert.deepEqual(imagePrompt.content.slice(1).map(({ type, mimeType }) => [type, mimeType]), [["image", "image/png"], ["image", "image/png"]]);
+    const afterImage = await state(`?after=${afterText.cursor}`);
+    assert.match(afterImage.messages[0].text, /\[Image attached\]/);
+    assert.doesNotMatch(JSON.stringify(afterImage), /iVBORw0KGgo/);
+    assert.equal(faux.state.callCount, 4);
+    assert.deepEqual(errors, []);
+  } finally {
+    finishReply();
+    await session.waitForIdle();
+    await session.prompt("/chat close");
+    session.dispose();
+  }
 });

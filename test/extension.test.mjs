@@ -4,7 +4,7 @@ import annotate from "../src/index.ts";
 
 function fixture(t) {
   const handlers = new Map();
-  let command;
+  const commands = new Map();
   let draft = "My existing draft";
   let busy = false;
   let session = "session-1";
@@ -12,7 +12,7 @@ function fixture(t) {
   const notices = [];
   annotate({
     on: (event, callback) => handlers.set(event, callback),
-    registerCommand: (name, options) => { assert.equal(name, "annotate"); command = options.handler; },
+    registerCommand: (name, options) => commands.set(name, options),
   });
   t.after(() => handlers.get("session_shutdown")());
   const ctx = {
@@ -26,8 +26,8 @@ function fixture(t) {
     },
   };
   return {
-    handlers, notices, ctx,
-    run: (args = "link") => command(args, ctx),
+    handlers, notices, ctx, commands,
+    run: (args = "link", name = "annotate") => commands.get(name).handler(args, ctx),
     draft: () => draft,
     setDraft: (text) => { draft = text; },
     setBusy: (value) => { busy = value; },
@@ -43,6 +43,21 @@ async function submit(url) {
     body: JSON.stringify({ annotations: [{ start: 2, end: 9, quote: "reactor", comment: "Why?" }] }),
   });
 }
+
+test("/chat opens a live session directly and the old command still works", async (t) => {
+  const f = fixture(t);
+  assert.deepEqual(f.commands.get("chat").getArgumentCompletions("").map(({ value }) => value), ["link", "close"]);
+  assert.equal(f.commands.get("annotate").getArgumentCompletions("cha"), null);
+  f.setBranch([]);
+  for (const open of [() => f.run("link", "chat"), () => f.run("chat link")]) {
+    await open();
+    const url = f.url();
+    const res = await fetch(`${url.origin}/api/response`, { headers: { Authorization: `Bearer ${url.hash.slice(1)}` } });
+    assert.equal((await res.json()).mode, "chat");
+    await f.run("close", "chat");
+    await assert.rejects(() => fetch(url.origin));
+  }
+});
 
 test("extension appends to the draft at return time; never submits a model message", async (t) => {
   const f = fixture(t);

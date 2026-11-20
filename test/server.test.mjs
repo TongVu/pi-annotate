@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { request } from "node:http";
+import { setTimeout as delay } from "node:timers/promises";
 import { startAnnotationServer } from "../src/server.ts";
 
 async function fixture(t, options = {}) {
@@ -97,6 +98,133 @@ test("busy editor preserves annotations for a later retry", async (t) => {
   busy = false;
   assert.equal((await f.post()).status, 200);
   assert.equal(appended, 1);
+});
+
+test("chat protects the active transcript and validates quotes from each assistant message", async (t) => {
+  const entry = (id, role, content) => ({ id, type: "message", message: { role, content } });
+  const text = (value) => ({ type: "text", text: value });
+  const branch = [
+    entry("system", "system", "System prompt"),
+    entry("user", "user", [text("First question"), { type: "image", data: "image data" }]),
+    entry("a1", "assistant", [text("**One**"), { type: "thinking", thinking: "Private reasoning" }]),
+    entry("tool", "toolResult", [text("Tool output")]),
+    entry("a2", "assistant", [text("Two")]),
+  ];
+  let busy = false;
+  let accept;
+  const started = Promise.withResolvers();
+  const prompts = [];
+  const f = await fixture(t, { chat: {
+    getBranch: () => branch,
+    isIdle: () => !busy,
+    onSend: async (prompt) => {
+      prompts.push(prompt);
+      await new Promise((resolve) => { accept = resolve; started.resolve(); });
+    },
+  } });
+  const url = `${f.base}/api/response`;
+  const read = (after = "") => fetch(url + after, { headers: f.headers });
+  const post = (body, headers = f.headers) => fetch(`${f.base}/api/chat`, { method: "POST", headers, body: JSON.stringify(body) });
+  assert.equal((await fetch(url)).status, 401);
+  assert.equal((await read("?after=missing")).status, 410);
+  const state = await (await read()).json();
+  assert.equal(state.mode, "chat");
+  assert.equal(state.cursor, "a2");
+  assert.deepEqual(state.messages.map((message) => message.id), ["user", "a1", "a2"]);
+  assert.doesNotMatch(JSON.stringify(state), /System prompt|image data|Private reasoning|Tool output/);
+  assert.match(state.messages[1].html, /<strong>One<\/strong>/);
+  assert.equal((await f.post()).status, 404);
+
+  const annotation = (responseId, quote) => ({ responseId, start: 0, end: quote.length, quote, comment: `Explain ${quote}.` });
+  const batch = { requestId: "00000000-0000-4000-8000-000000000001", annotations: [annotation("a1", "One"), annotation("a2", "Two")] };
+  assert.equal((await post(batch, { ...f.headers, Origin: "https://other.example" })).status, 403);
+  assert.equal((await post(batch, { ...f.headers, Authorization: "Bearer wrong" })).status, 401);
+  for (const item of [annotation("a1", "Two"), annotation("user", "First"), annotation("missing", "One")]) {
+    assert.equal((await post({ ...batch, annotations: [item] })).status, 400);
+  }
+  busy = true;
+  assert.equal((await post(batch)).status, 409);
+  assert.deepEqual(prompts, []);
+  busy = false;
+
+  const first = post(batch);
+  await started.promise;
+  const retry = post(batch);
+  const plain = { requestId: "00000000-0000-4000-8000-000000000002", text: "Another question" };
+  assert.equal((await post(plain)).status, 409);
+  accept();
+  assert.equal((await first).status, 200);
+  assert.equal((await retry).status, 200);
+  assert.equal((await post({ ...plain, requestId: batch.requestId })).status, 409);
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0], /response a1:\n[\s\S]*> One[\s\S]*response a2:\n[\s\S]*> Two/);
+
+  branch.push(entry("a3", "assistant", [text("New reply")]));
+  const delta = await (await read("?after=a2")).json();
+  assert.deepEqual(delta.messages.map((message) => message.id), ["a3"]);
+  assert.equal(delta.busy, false);
+});
+
+test("authenticated polling keeps chat alive beyond its original deadline, then idle chat expires", async (t) => {
+  const ttlMs = 750;
+  const f = await fixture(t, { ttlMs, chat: { getBranch: () => [], isIdle: () => true } });
+  const draft = await fixture(t, { ttlMs });
+  const poll = async ({ base, headers }) => {
+    const res = await fetch(`${base}/api/response`, { headers });
+    await res.json();
+    return res.status;
+  };
+  assert.equal(await poll(draft), 200);
+  for (let i = 0; i < 3; i++) {
+    assert.equal(await poll(f), 200);
+    await delay(280);
+  }
+  await assert.rejects(() => poll(draft), "draft-only polling doesn't renew its original timeout");
+  assert.equal(await poll(f), 200, "chat survives more than the original TTL");
+  await delay(ttlMs + 25);
+  await assert.rejects(() => poll(f), "abandoned chat closes after the idle timeout");
+});
+
+test("a chat tab can disconnect its listener only with the same-origin token", async (t) => {
+  const f = await fixture(t, { chat: { getBranch: () => [], isIdle: () => true } });
+  const close = (headers) => fetch(`${f.base}/api/close`, { method: "POST", headers, body: "{}" });
+  assert.equal((await close({ ...f.headers, Authorization: "Bearer wrong" })).status, 401);
+  assert.equal((await close({ ...f.headers, Origin: "" })).status, 403);
+  assert.equal((await close(f.headers)).status, 200);
+  await assert.rejects(() => fetch(f.base));
+});
+
+test("chat validates mixed attachments and includes every file in duplicate detection", async (t) => {
+  const sent = [];
+  const f = await fixture(t, { chat: {
+    getBranch: () => [], isIdle: () => true, onSend: async (prompt) => sent.push(prompt),
+  } });
+  const post = (body) => fetch(`${f.base}/api/chat`, { method: "POST", headers: f.headers, body: JSON.stringify(body) });
+  const image = { name: "photo.png", mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgZGIGAAAOAAfXb+R4AAAAAElFTkSuQmCC" };
+  const file = { name: "Example.java", mimeType: "", data: Buffer.from("class Example {}\n").toString("base64") };
+  const requestId = "00000000-0000-4000-8000-000000000003";
+  for (const invalid of [
+    { ...image, mimeType: "image/svg+xml" },
+    { ...image, mimeType: "image/jpeg" },
+    { ...image, data: image.data + "!" },
+    { ...image, data: "A".repeat(Math.ceil(5 * 1024 * 1024 / 3) * 4 + 4) },
+    { ...file, name: "../../Example.java" },
+    { ...file, name: "binary.zip", data: Buffer.from([0x50, 0x4b, 0x03, 0x04]).toString("base64") },
+    { ...file, name: "doc.pdf", data: Buffer.from("%PDF-1.4").toString("base64") },
+    { ...file, data: Buffer.alloc(129 * 1024, 0x61).toString("base64") },
+  ]) {
+    assert.equal((await post({ requestId, text: "", attachments: [file, invalid] })).status, 400);
+  }
+  assert.equal((await post({ requestId, text: "", attachments: Array(11).fill(file) })).status, 400);
+  assert.equal((await post({ requestId, annotations: [], attachments: [image] })).status, 400);
+  assert.equal(sent.length, 0);
+  const message = { requestId, text: "", attachments: [file, image, { ...image, name: "another.png", mimeType: "" }] };
+  assert.equal((await post(message)).status, 200);
+  assert.equal((await post(message)).status, 200);
+  assert.equal((await post({ ...message, attachments: [file, image] })).status, 409);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0][0].text, /Attached file: "Example.java" ---\nclass Example/);
+  assert.deepEqual(sent[0].slice(1), Array(2).fill({ type: "image", mimeType: image.mimeType, data: image.data }));
 });
 
 test("invalid JSON and oversized bodies do not reach the draft", async (t) => {

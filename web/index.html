@@ -9,12 +9,32 @@
 </head>
 <body>
   <header>
-    <div><strong>Pi / Annotate</strong><p>Select a passage, then add a question. Nothing is sent to the model here.</p></div>
+    <div><strong id="page-title">Pi / Annotate</strong><p id="page-description">Select a passage, then add a question. Nothing is sent to the model here.</p></div>
+    <span id="chat-state" role="status" hidden></span>
     <button id="send" disabled>Add to Pi draft <span id="count">(0)</span></button>
   </header>
   <p id="status" role="status" aria-live="polite">Loading response…</p>
   <main>
-    <article aria-label="Assistant response"><div class="label">ASSISTANT RESPONSE <span>· Rendered Markdown</span></div><div id="response" tabindex="0"></div></article>
+    <nav id="turns" aria-label="Jump to a message you sent" hidden></nav>
+    <article id="conversation" aria-label="Assistant response">
+      <div class="label" id="conversation-label">ASSISTANT RESPONSE <span>· Rendered Markdown</span></div>
+      <div id="response" tabindex="0"></div>
+      <form id="chat-form" hidden>
+        <div class="chat-composer">
+          <textarea id="chat-input" aria-label="Message" rows="2" maxlength="32000" placeholder="Write a message or paste a screenshot…"></textarea>
+          <input id="chat-file" type="file" multiple hidden>
+          <ul id="chat-attachments" aria-label="Files in your draft" hidden></ul>
+          <div class="actions">
+            <button id="chat-attach" type="button" class="secondary" title="Attach text files or images">Attach files</button>
+            <button id="chat-send" type="submit" aria-label="Send message" title="Send message (Enter)" disabled>
+              <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M22 2 15 22 11 13 2 9 22 2ZM22 2 11 13"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </form>
+    </article>
     <aside aria-label="Annotations"><h2>Your annotations</h2><p id="empty">Highlight words in the response to ask about them.</p><ol id="annotations"></ol></aside>
   </main>
   <dialog id="comment-dialog" aria-labelledby="comment-title">
