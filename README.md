@@ -69,9 +69,9 @@ saved sessions use the first message when available. Click the refresh icon to
 pick up newer sessions. Long chat names are clamped to two lines; hover or focus
 a name to preview its full text.
 
-Green dots mark sessions with an open `/chat` tab under the same Pi agent setup.
-Yellow dots mark inactive, read-only sessions. Only the session attached to this
-tab can receive messages here; use the original tab to send to another green chat.
+Green dots mark sessions with an open `/chat` tab under the same Pi agent setup;
+inactive, read-only sessions have no status dot. Only the session attached to
+this tab can receive messages here; use the original tab to send to another green chat.
 On macOS, open a yellow session and click **Resume in browser**. If Pi is already
 running that session with the current extension loaded, it opens a browser tab
 from the existing process, so any in-progress turn keeps running. Otherwise it

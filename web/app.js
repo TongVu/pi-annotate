@@ -214,7 +214,6 @@ function setAnnotationFiles(files) {
   annotationFiles = files;
   renderAttachmentList($("comment-attachments"), annotationFiles, (index) => {
     setAnnotationFiles(annotationFiles.filter((_, i) => i !== index));
-    commentFileStatus("Image removed.");
   });
   updateButtons();
 }
@@ -231,7 +230,7 @@ async function attachAnnotationImages(files) {
     const images = await Promise.all(files.map(readAttachment));
     if (draft !== pending || !dialog.open) return;
     setAnnotationFiles([...annotationFiles, ...images]);
-    commentFileStatus(images.length === 1 ? "Image attached." : `${images.length} images attached.`);
+    commentFileStatus("");
   } catch (error) {
     if (draft === pending && dialog.open) commentFileStatus(error.message, true);
   } finally {
@@ -249,7 +248,8 @@ function setAnnotations(next) {
 }
 
 function renderAnnotations() {
-  $("count").textContent = `(${annotations.length})`;
+  $("count").textContent = chat ? String(annotations.length) : `(${annotations.length})`;
+  if (chat) send.setAttribute("aria-label", `Send ${annotations.length} question${annotations.length === 1 ? "" : "s"}`);
   updateButtons();
   $("empty").hidden = annotations.length > 0;
   $("annotations").replaceChildren();
@@ -399,14 +399,17 @@ async function sendChat(body) {
   }
 }
 
-const expandComposer = $("chat-expand");
-expandComposer.addEventListener("click", () => {
-  const expanded = expandComposer.getAttribute("aria-expanded") !== "true";
-  const label = expanded ? "Collapse message composer" : "Expand message composer";
-  expandComposer.setAttribute("aria-expanded", String(expanded));
-  expandComposer.setAttribute("aria-label", label);
-  expandComposer.title = label;
-});
+for (const [buttonId, label] of [["chat-expand", "message composer"], ["comment-expand", "annotation comment"]]) {
+  const button = $(buttonId);
+  button.addEventListener("click", () => {
+    const expanded = button.getAttribute("aria-expanded") !== "true";
+    const action = expanded ? "Collapse" : "Expand";
+    const text = `${action} ${label}`;
+    button.setAttribute("aria-expanded", String(expanded));
+    button.setAttribute("aria-label", text);
+    button.title = text;
+  });
+}
 
 chatInput.addEventListener("input", updateButtons);
 chatInput.addEventListener("keydown", (event) => {
@@ -783,16 +786,20 @@ function renderSessionList() {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "secondary session-open";
+    if (own) button.dataset.currentChat = "true";
     if (savedSessionId ? id === savedSessionId : own) button.setAttribute("aria-current", "true");
     const title = document.createElement("span");
     title.className = "session-name";
     title.textContent = name;
-    const indicator = document.createElement("span");
-    indicator.className = `session-indicator ${active ? "live" : "read-only"}`;
-    indicator.title = own ? (active ? "Live session" : "Disconnected session") : peer ? "Live in another tab" : "Read-only session";
-    indicator.setAttribute("role", "img");
-    indicator.setAttribute("aria-label", indicator.title);
-    button.append(title, indicator);
+    button.append(title);
+    if (active) {
+      const indicator = document.createElement("span");
+      indicator.className = "session-indicator live";
+      indicator.title = own ? "Live session" : "Live in another tab";
+      indicator.setAttribute("role", "img");
+      indicator.setAttribute("aria-label", indicator.title);
+      button.append(indicator);
+    }
     button.addEventListener("mouseenter", () => showMessagePreview(button, name));
     button.addEventListener("mouseleave", hideMessagePreview);
     button.addEventListener("focus", () => showMessagePreview(button, name));
@@ -876,6 +883,17 @@ async function loadSessions() {
   }
 }
 
+function revealCurrentChat() {
+  if (sessionFilter.value) {
+    sessionFilter.value = "";
+    renderSessionList();
+  }
+  const current = $("session-list").querySelector('[data-current-chat="true"]');
+  if (!current) return;
+  for (let group = current.closest("details"); group; group = group.parentElement.closest("details")) group.open = true;
+  current.scrollIntoView?.({ block: "nearest" });
+}
+
 function setExplorerOpen(open) {
   explorer.hidden = !open;
   explorerToggle.setAttribute("aria-expanded", String(open));
@@ -953,10 +971,15 @@ sessionFilter.addEventListener("input", () => {
 projectControls.addEventListener("click", (event) => {
   const mode = event.target.closest("button")?.dataset.mode;
   if (!mode) return;
+  if (mode === "normal" && sessionFilter.value) {
+    sessionFilter.value = "";
+    searchProjects = projectView();
+  }
   const view = currentProjectView();
   view.mode = mode;
   view.overrides.clear();
   renderSessionList();
+  if (mode === "normal") revealCurrentChat();
 });
 refreshSessions.addEventListener("click", () => {
   void loadSessions();
@@ -971,6 +994,7 @@ function startChat(data) {
   chat = true;
   annotationImagesSupported = data.annotationImages === true;
   $("comment-images").hidden = !annotationImagesSupported;
+  $("comment-attach").hidden = !annotationImagesSupported;
   document.body.classList.add("chat-page");
   sessionTitlePill.hidden = false;
   $("page-intro").hidden = true;
@@ -979,8 +1003,12 @@ function startChat(data) {
   $("conversation-label").hidden = true;
   for (const id of ["chat-rail", "turns", "chat-form", "chat-state", "explorer-toggle"]) $(id).hidden = false;
   $("empty").textContent = "Highlight text in a Pi reply to ask about it.";
-  send.firstChild.textContent = "Send questions ";
-  $("empty").before(send);
+  send.classList.add("chat-question-send");
+  send.title = "Send questions";
+  send.setAttribute("aria-label", "Send 0 questions");
+  send.replaceChildren();
+  send.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 15 22 11 13 2 9 22 2ZM22 2 11 13"/></svg><span id="count" class="send-count">0</span>';
+  $("annotation-heading").append(send);
   responseElement.addEventListener("scroll", updateCurrentTurn, { passive: true });
   window.addEventListener("resize", updateCurrentTurn);
   window.addEventListener("pagehide", () => {

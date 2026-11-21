@@ -20,8 +20,8 @@
         <button type="button" data-mode="collapse" aria-pressed="false" aria-label="Collapse all" title="Collapse all">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4l6 6m-5 0h5V5m10-1-6 6m0-5v5h5M4 20l6-6m-5 0h5v5m10 1-6-6m0 5v-5h5"/></svg>
         </button>
-        <button type="button" data-mode="normal" aria-pressed="true" aria-label="Normal" title="Normal">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M5 9h14M5 15h14"/></svg>
+        <button type="button" data-mode="normal" aria-pressed="true" aria-label="Show current chat in explorer" title="Show current chat in explorer">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 5.5-8 12-8 12S4 15.5 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg>
         </button>
         <button type="button" data-mode="expand" aria-pressed="false" aria-label="Expand all" title="Expand all">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4H4v5m0-5 6 6m5-6h5v5m0-5-6 6M4 15v5h5m-5 0 6-6m5 6h5v-5m0 5-6-6"/></svg>
@@ -101,7 +101,11 @@
       <p id="saved-status" role="status"></p>
       <div id="saved-response" tabindex="0" aria-label="Saved conversation"></div>
     </section>
-    <aside id="annotations-panel" aria-label="Annotations"><h2>Your annotations</h2><p id="empty">Highlight words in the response to ask about them.</p><ol id="annotations"></ol></aside>
+    <aside id="annotations-panel" aria-label="Annotations">
+      <div id="annotation-heading" class="annotation-heading"><h2>Your annotations</h2></div>
+      <p id="empty">Highlight words in the response to ask about them.</p>
+      <ol id="annotations"></ol>
+    </aside>
   </main>
   <dialog id="rename-session-dialog" aria-labelledby="rename-session-title">
     <form id="rename-session-form">
@@ -134,21 +138,29 @@
       <blockquote id="selected-quote"></blockquote>
       <label for="comment">Question or comment</label>
       <div class="comment-composer">
+        <button id="comment-expand" type="button" class="secondary composer-icon" aria-label="Expand annotation comment" aria-controls="comment" aria-expanded="false" title="Expand annotation comment">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path class="expand-icon" d="M15 3h6v6M21 3l-7 7M9 21H3v-6M3 21l7-7"/>
+            <path class="collapse-icon" d="M21 3l-7 7m0-6v6h6M3 21l7-7m-6 0h6v6"/>
+          </svg>
+        </button>
         <textarea id="comment" rows="4" maxlength="8000" required placeholder="What would you like to ask?"></textarea>
         <div class="comment-composer-actions">
           <div id="comment-images" hidden>
             <input id="comment-file" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
             <ul id="comment-attachments" class="attachment-list" aria-label="Images for this annotation" hidden></ul>
-            <button id="comment-attach" type="button" class="secondary composer-icon" aria-label="Attach images" title="Attach images or paste them into the comment">
+            <p id="comment-file-status" role="status"></p>
+          </div>
+          <div class="comment-action-buttons">
+            <button id="comment-attach" type="button" class="secondary composer-icon" aria-label="Attach images" title="Attach images or paste them into the comment" hidden>
               <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="m21.4 11-9.2 9.2a6 6 0 0 1-8.5-8.5L14.3 1.2A4 4 0 0 1 20 6.9L9.4 17.5a2 2 0 0 1-2.8-2.8l9.9-9.9"/>
               </svg>
             </button>
-            <p id="comment-file-status" role="status"></p>
+            <button id="save-annotation" type="submit" class="composer-icon" aria-label="Add annotation" title="Add annotation">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
+            </button>
           </div>
-          <button id="save-annotation" type="submit" class="composer-icon" aria-label="Add annotation" title="Add annotation">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
-          </button>
         </div>
       </div>
     </form>

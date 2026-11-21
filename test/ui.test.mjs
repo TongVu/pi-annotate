@@ -65,6 +65,13 @@ test("native selection opens comment dialog; content is text, not executable HTM
   assert.equal(f.$("save-annotation").textContent.trim(), "");
   assert.equal(f.$("save-annotation").closest(".comment-composer"), f.$("comment").parentElement);
   assert.equal(f.$("comment-close").title, "Close annotation");
+  const commentExpand = f.$("comment-expand");
+  assert.equal(commentExpand.getAttribute("aria-controls"), "comment");
+  commentExpand.click();
+  assert.equal(commentExpand.getAttribute("aria-expanded"), "true");
+  assert.equal(commentExpand.getAttribute("aria-label"), "Collapse annotation comment");
+  commentExpand.click();
+  assert.equal(commentExpand.getAttribute("aria-expanded"), "false");
   f.add("What does this mean?");
   assert.equal(f.$("annotations").children.length, 1);
   assert.equal(f.$("send").disabled, false);
@@ -142,6 +149,13 @@ test("chat dots jump to user turns; failed questions are kept, accepted question
     return json({ ok: true });
   } });
   assert.equal(f.$("turns").children.length, 1);
+  assert.equal(f.$("send").parentElement.id, "annotation-heading");
+  assert.equal(f.$("send").title, "Send questions");
+  assert.equal(f.$("send").getAttribute("aria-label"), "Send 0 questions");
+  assert.equal(f.$("send").textContent, "0");
+  assert.equal(f.$("send").classList.contains("chat-question-send"), true);
+  assert.equal(f.$("send").querySelector("svg").getAttribute("width"), f.$("chat-send").querySelector("svg").getAttribute("width"));
+  assert.equal(f.$("send").querySelector("svg path").getAttribute("d"), f.$("chat-send").querySelector("svg path").getAttribute("d"));
   const currentDot = () => f.$("turns").querySelector('[aria-current="location"]');
   assert.equal(currentDot(), f.$("turns").firstElementChild);
   const firstUser = f.$("response").querySelector(".user-turn");
@@ -178,7 +192,7 @@ test("chat dots jump to user turns; failed questions are kept, accepted question
   assert.deepEqual(posts[0], posts[1]);
   assert.deepEqual(posts[1].annotations, [{ responseId: "a1", start: 0, end: 3, quote: "Old", comment: "Why old?" }]);
   assert.equal(f.$("annotations").children.length, 0);
-  assert.equal(f.$("count").textContent, "(0)");
+  assert.equal(f.$("count").textContent, "0");
   await f.poll();
   assert.equal(f.$("turns").children.length, 2);
   assert.equal(currentDot(), f.$("turns").lastElementChild);
@@ -336,11 +350,16 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.equal(explorerToggle.textContent.trim(), "");
   assert.equal(explorerToggle.getAttribute("aria-label"), "Toggle chat explorer");
   assert.equal(explorerToggle.title, "Toggle chat explorer");
-  assert.ok(explorerToggle.querySelector('svg[aria-hidden="true"]'));
+  assert.ok(explorerToggle.querySelector('svg[aria-hidden="true"] rect'));
+  assert.ok(explorerToggle.querySelector('svg path'));
+  const scrolled = [];
+  f.window.Element.prototype.scrollIntoView = function (options) { if (this.dataset.currentChat) scrolled.push(options); };
   explorerToggle.click();
   assert.equal(explorerToggle.getAttribute("aria-expanded"), "true");
+  assert.equal(explorerToggle.getAttribute("aria-label"), "Toggle chat explorer");
   await tick();
   const list = f.$("session-list");
+  assert.equal(scrolled.length, 0, "opening the explorer does not change its view mode");
   assert.deepEqual([...list.querySelectorAll("summary")].map(({ textContent }) => textContent), ["alpha", "beta"]);
   assert.equal(list.querySelectorAll(".session-indicator.live").length, 2);
   const peer = list.querySelector('[aria-label="Live in another tab"]');
@@ -348,6 +367,7 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.equal(peer.closest(".session-row").querySelector(".session-copy"), null);
   const live = list.querySelector('[aria-current="true"]');
   assert.equal(live.textContent, "Live chat");
+  assert.equal(live.dataset.currentChat, "true");
   assert.ok(live.querySelector('.session-indicator.live[aria-label="Live session"]'));
   assert.equal(live.parentElement.querySelector(".session-copy"), null);
   const alphaGroup = list.querySelector('summary[title="/work/alpha"]').parentElement;
@@ -366,7 +386,9 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.ok(controls.parentElement.firstElementChild === controls, "view-mode pill replaces the old heading position");
   assert.equal(f.$("session-filter").getAttribute("aria-label"), "Search chats by name or directory");
   assert.ok(f.$("session-filter").closest(".session-search").querySelector('svg[aria-hidden="true"]'));
-  assert.deepEqual([...controls.querySelectorAll("button")].map((button) => button.getAttribute("aria-label")), ["Collapse all", "Normal", "Expand all"]);
+  assert.deepEqual([...controls.querySelectorAll("button")].map((button) => button.getAttribute("aria-label")), ["Collapse all", "Show current chat in explorer", "Expand all"]);
+  assert.ok(controls.querySelector('[data-mode="normal"] svg path'));
+  assert.ok(controls.querySelector('[data-mode="normal"] svg circle'));
   assert.equal(controls.querySelectorAll('svg[aria-hidden="true"]').length, 3);
   const setMode = (mode) => {
     const button = controls.querySelector(`[data-mode="${mode}"]`);
@@ -377,6 +399,8 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.deepEqual(setMode("collapse"), [false, false]);
   assert.deepEqual(setMode("expand"), [true, true]);
   assert.deepEqual(setMode("normal"), [true, false]);
+  assert.equal(scrolled.length, 1, "the pin control scrolls the current chat into view");
+  assert.equal(scrolled[0].block, "nearest");
   const filter = f.$("session-filter");
   const search = (value) => {
     filter.value = value;
@@ -390,7 +414,7 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.equal(list.querySelectorAll(".session-open").length, 1);
   const saved = list.querySelector(".session-open");
   assert.equal(saved.textContent, longTitle);
-  assert.ok(saved.querySelector('.session-indicator.read-only[aria-label="Read-only session"]'));
+  assert.equal(saved.querySelector(".session-indicator"), null, "inactive chats have no status dot");
   saved.dispatchEvent(new f.window.MouseEvent("mouseenter"));
   assert.equal(f.window.document.getElementById("message-preview").textContent, longTitle);
   saved.dispatchEvent(new f.window.MouseEvent("mouseleave"));
@@ -676,6 +700,7 @@ test("live annotations can paste and pick images, edit them, and retry without t
   assert.equal(f.$("comment-images").hidden, false);
   assert.ok(f.$("comment-attach").querySelector('svg[aria-hidden="true"] path'));
   assert.equal(f.$("comment-attach").querySelector("svg rect"), null, "annotation attachment control uses a paperclip");
+  assert.equal(f.$("comment-attach").parentElement, f.$("save-annotation").parentElement, "paperclip sits beside Add annotation");
   f.$("chat-input").value = "Leave this draft alone";
   f.select(9, 16, f.$("response").querySelector("[data-response-id]"));
   const pasted = waitForCount(1);
@@ -685,6 +710,7 @@ test("live annotations can paste and pick images, edit them, and retry without t
   assert.equal(event.defaultPrevented, true);
   await pasted;
   assert.match(list.querySelector("img").src, /^data:image\/png;base64,/);
+  assert.equal(f.$("comment-file-status").textContent, "", "successful attachment shows no status text");
   const picked = waitForCount(2);
   const input = f.$("comment-file");
   Object.defineProperty(input, "files", { value: [picture("picked.png")] });
