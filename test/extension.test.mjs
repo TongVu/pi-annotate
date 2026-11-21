@@ -18,7 +18,7 @@ function fixture(t) {
   const ctx = {
     mode: "tui",
     isIdle: () => !busy,
-    sessionManager: { getBranch: () => branch, getSessionId: () => session },
+    sessionManager: { getBranch: () => branch, getSessionId: () => session, getSessionName: () => undefined },
     ui: {
       notify: (message) => notices.push(message),
       getEditorText: () => draft,

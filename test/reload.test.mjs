@@ -1,10 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { access, cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { JSDOM } from "jsdom";
+import { AUTO_CHAT_SESSION } from "../src/resume-chat.ts";
+import { requestOwnedChat } from "../src/session-owner.ts";
 
 async function findLoader() {
   if (process.env.PI_EXTENSION_LOADER) return process.env.PI_EXTENSION_LOADER;
@@ -99,21 +102,44 @@ test("installed Pi accepts a browser prompt before the model finishes, then expo
   if (!fauxProvider) return t.skip("Requires Pi's faux provider");
   const cwd = await mkdtemp(join(tmpdir(), "pi-annotate-chat-test-"));
   t.after(() => rm(cwd, { recursive: true, force: true }));
+  const oldAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = join(cwd, "explorer-agent");
+  t.after(() => {
+    if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = oldAgentDir;
+  });
   const faux = fauxProvider({ provider: "annotate-test", models: [{ id: "vision", input: ["text", "image"] }] });
   const modelRuntime = await ModelRuntime.create({ authPath: join(cwd, "auth.json"), modelsPath: join(cwd, "models.json") });
   modelRuntime.registerNativeProvider(faux.provider);
   const model = faux.getModel();
   const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false } });
+  const extensionPath = fileURLToPath(new URL("../src/index.ts", import.meta.url));
+  const adapter = join(cwd, "test-chat-launch.ts");
+  const openLog = join(cwd, "browser-url");
+  await writeFile(adapter, `
+    import { writeFile } from "node:fs/promises";
+    import { registerAnnotationExtension } from ${JSON.stringify(extensionPath)};
+    export default function (pi) {
+      registerAnnotationExtension(pi, (url) => writeFile(${JSON.stringify(openLog)}, url));
+    }
+  `);
   const loader = new DefaultResourceLoader({
     cwd, agentDir: cwd, settingsManager,
-    additionalExtensionPaths: [fileURLToPath(new URL("../src/index.ts", import.meta.url))],
+    additionalExtensionPaths: [adapter],
     extensionFactories: [(pi) => pi.on("input", (event) => event.source === "extension"
       ? { action: "transform", text: `Transformed: ${event.text}` } : undefined)],
   });
   await loader.reload();
+  const sessionManager = SessionManager.inMemory(cwd);
   const { session } = await createAgentSession({
     cwd, agentDir: cwd, modelRuntime, model, settingsManager, resourceLoader: loader,
-    sessionManager: SessionManager.inMemory(cwd), noTools: true,
+    sessionManager, noTools: true,
+  });
+  const previousTarget = process.env[AUTO_CHAT_SESSION];
+  process.env[AUTO_CHAT_SESSION] = sessionManager.getSessionId();
+  t.after(() => {
+    if (previousTarget === undefined) delete process.env[AUTO_CHAT_SESSION];
+    else process.env[AUTO_CHAT_SESSION] = previousTarget;
   });
   let link;
   let finishReply;
@@ -136,39 +162,74 @@ test("installed Pi accepts a browser prompt before the model finishes, then expo
     notify(message) { if (message.includes("http://127.0.0.1:")) link = message.split(": ").at(-1); },
   } });
   try {
-    await session.prompt("/chat link");
+    session.setSessionName("Live browser chat feature");
     assert.ok(link, JSON.stringify(errors));
-    const url = new URL(link);
-    const headers = { Authorization: `Bearer ${url.hash.slice(1)}`, Origin: url.origin, "Content-Type": "application/json" };
+    let opened;
+    for (let attempt = 0; attempt < 30 && opened !== link; attempt++) {
+      opened = await readFile(openLog, "utf8").catch(() => undefined);
+      if (opened !== link) await delay(10);
+    }
+    assert.equal(opened, link);
+    assert.equal(process.env[AUTO_CHAT_SESSION], undefined);
+    assert.equal(faux.state.callCount, 0, "opening the browser never starts a model turn");
+    let url = new URL(link);
+    const makeHeaders = () => ({ Authorization: `Bearer ${url.hash.slice(1)}`, Origin: url.origin, "Content-Type": "application/json" });
+    let headers = makeHeaders();
     const state = async (suffix = "") => (await fetch(`${url.origin}/api/response${suffix}`, { headers })).json();
     const send = (body) => fetch(`${url.origin}/api/chat`, {
       method: "POST", headers, signal: AbortSignal.timeout(3000), body: JSON.stringify(body),
     });
+    const rename = (name) => fetch(`${url.origin}/api/session/name`, {
+      method: "POST", headers, body: JSON.stringify({ name }),
+    });
     assert.equal((await send({ requestId: "e126ac9d-7780-4853-8de2-5d6d0a869093", text: "/literal question" })).status, 200, JSON.stringify(errors));
     const working = await state();
     assert.equal(working.busy, true);
+    assert.equal(working.sessionName, "Live browser chat feature");
     assert.deepEqual(working.messages.map(({ role, text }) => [role, text]), [["user", "Transformed: /literal question"]]);
+    const renamed = await rename("Browser-renamed session");
+    assert.equal(renamed.status, 200);
+    assert.deepEqual(await renamed.json(), { sessionName: "Browser-renamed session" });
+    assert.equal((await state()).sessionName, "Browser-renamed session");
+    if (process.platform !== "win32") {
+      const registry = join(process.env.PI_CODING_AGENT_DIR, "pi-annotate-owners");
+      const request = () => requestOwnedChat(registry, sessionManager.getSessionId());
+      assert.equal(await request(), "already-open");
+      const oldUrl = url.href;
+      assert.equal((await fetch(`${url.origin}/api/close`, { method: "POST", headers, body: "{}" })).status, 200);
+      assert.equal(await request(), "attached", "the original working process must open a fresh browser tab");
+      url = new URL(link);
+      headers = makeHeaders();
+      assert.notEqual(url.href, oldUrl);
+      const reattached = await state();
+      assert.equal(reattached.busy, true);
+      assert.equal(reattached.sessionName, "Browser-renamed session");
+      assert.equal(faux.state.callCount, 1);
+    }
     finishReply();
     await session.waitForIdle();
+    session.setSessionName("Renamed browser chat");
     const finished = await state(`?after=${working.cursor}`);
     assert.equal(finished.busy, false);
+    assert.equal(finished.sessionName, "Renamed browser chat");
     const [reply] = finished.messages;
     assert.match(reply.html, /<strong>answer<\/strong>/);
     const start = reply.text.indexOf("answer");
+    const image = { name: "picture.png", mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgZGIGAAAOAAfXb+R4AAAAAElFTkSuQmCC" };
     const batch = {
       requestId: "c5562ee8-daca-4e02-bc16-66d5f1c53289",
-      annotations: [{ responseId: reply.id, start, end: start + 6, quote: "answer", comment: "Explain." }],
+      annotations: [{ responseId: reply.id, start, end: start + 6, quote: "answer", comment: "Explain.", images: [image] }],
     };
     assert.equal((await send(batch)).status, 200, JSON.stringify(errors));
     assert.equal((await send(batch)).status, 200, "retry acknowledges the original send");
     await session.waitForIdle();
     const followUp = await state(`?after=${finished.cursor}`);
     assert.deepEqual(followUp.messages.map(({ role }) => role), ["user", "assistant"]);
-    assert.match(followUp.messages[0].text, /> answer\n\nExplain\./);
+    assert.match(followUp.messages[0].text, /> answer\n\nExplain\.\n\nAttached: Image 1\./);
+    assert.equal(followUp.messages[0].imageCount, 1);
     assert.match(followUp.messages[1].text, /more detail/);
     assert.equal(faux.state.callCount, 2);
     const file = { name: "notes.md", mimeType: "text/markdown", data: Buffer.from("# Notes\nHello.").toString("base64") };
-    const image = { name: "picture.png", mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgZGIGAAAOAAfXb+R4AAAAAElFTkSuQmCC" };
     const picture = {
       requestId: "423835d4-c14d-4b80-8cd0-4bcf3eb61935", text: "Look at this picture",
       attachments: [image, file, { ...image, name: "second.png" }],
@@ -187,14 +248,54 @@ test("installed Pi accepts a browser prompt before the model finishes, then expo
     assert.match(imagePrompt.content[0].text, /Look at this picture[\s\S]*# Notes\nHello\./);
     assert.deepEqual(imagePrompt.content.slice(1).map(({ type, mimeType }) => [type, mimeType]), [["image", "image/png"], ["image", "image/png"]]);
     const afterImage = await state(`?after=${afterText.cursor}`);
-    assert.match(afterImage.messages[0].text, /\[Image attached\]/);
+    const imageMessage = afterImage.messages[0];
+    assert.equal(imageMessage.imageCount, 2);
+    assert.doesNotMatch(imageMessage.text, /\[Image attached\]/);
     assert.doesNotMatch(JSON.stringify(afterImage), /iVBORw0KGgo/);
+    const imageUrl = `${url.origin}/api/image?${new URLSearchParams({ id: imageMessage.id, index: "1" })}`;
+    assert.equal((await fetch(imageUrl)).status, 401);
+    const preview = await fetch(imageUrl, { headers });
+    assert.equal(preview.status, 200);
+    assert.equal(preview.headers.get("content-type"), "image/png");
+    assert.equal(Buffer.from(await preview.arrayBuffer()).toString("base64"), image.data);
+    const saved = ["project-one", "project-two"].map((project) => {
+      const manager = SessionManager.create(join(cwd, project));
+      const entryId = manager.appendMessage({ role: "user", content: [{ type: "image", mimeType: image.mimeType, data: image.data }], timestamp: Date.now() });
+      manager.appendMessage(fauxAssistantMessage(`Saved reply for **${project}**.`));
+      manager.appendSessionInfo(project === "project-one" ? "Renamed browser chat" : project);
+      return { manager, entryId };
+    });
+    const savedFile = saved[0].manager.getSessionFile();
+    const beforeBrowse = await readFile(savedFile);
+    const get = (path) => fetch(`${url.origin}${path}`, { headers });
+    const listing = await get("/api/sessions");
+    const catalog = await listing.json();
+    assert.equal(listing.status, 200, JSON.stringify(catalog));
+    assert.equal(catalog.current.name, "Renamed browser chat");
+    assert.deepEqual(catalog.sessions.map(({ cwd: directory }) => directory).sort(), saved.map(({ manager }) => manager.getCwd()).sort());
+    const id = saved[0].manager.getSessionId();
+    const savedState = await get(`/api/session?${new URLSearchParams({ id })}`);
+    const snapshot = await savedState.json();
+    assert.equal(savedState.status, 200, JSON.stringify(snapshot));
+    assert.match(snapshot.messages[1].html, /<strong>project-one<\/strong>/);
+    const savedImage = await get(`/api/image?${new URLSearchParams({ id: saved[0].entryId, index: "0", session: id })}`);
+    assert.equal(savedImage.status, 200);
+    assert.equal(Buffer.from(await savedImage.arrayBuffer()).toString("base64"), image.data);
+    assert.deepEqual(await readFile(savedFile), beforeBrowse);
+    assert.equal(catalog.sessions.find((session) => session.id === id).name, catalog.current.name);
+    await rm(savedFile);
+    const refreshed = await get("/api/sessions");
+    assert.equal(refreshed.status, 200);
+    const updated = await refreshed.json();
+    assert.equal(updated.current.name, catalog.current.name);
+    assert.deepEqual(updated.sessions.map(({ id }) => id), [saved[1].manager.getSessionId()]);
+    assert.equal((await get(`/api/session?${new URLSearchParams({ id })}`)).status, 404);
     assert.equal(faux.state.callCount, 4);
     assert.deepEqual(errors, []);
   } finally {
     finishReply();
     await session.waitForIdle();
-    await session.prompt("/chat close");
+    await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
     session.dispose();
   }
 });

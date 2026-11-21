@@ -26,22 +26,29 @@ sessions by working directory. Both regular and fullscreen terminal modes work.
 ### Live browser chat
 
 1. Run `/chat` in the Pi session you want to use. Use `/chat link` if you prefer to
-   open the link yourself. You can start from an empty session.
+   open the link yourself. You can start from an empty session. If the session
+   has a name, it appears in the browser tab.
 2. Type a message in the bottom composer, or select text in a Pi reply and add a
    question to the right panel. The dots stay centered on the left as you scroll;
    the current turn is blue. Hover to preview a message or click to jump to it.
 3. Press **Enter** or click the paper plane to send an ordinary message.
    **Shift+Enter** inserts a newline. Click **Send questions** to submit the
-   annotation batch. These are separate sends: each leaves the other draft
-   untouched and clears its own draft only after Pi accepts it. The terminal
-   draft is untouched.
-4. New messages appear in the same tab as Pi finishes them. Replies aren't streamed
+   annotation batch. You can paste a screenshot into an annotation's comment
+   field or attach images with its clipboard button. Each question keeps its own
+   images. These are separate sends: each leaves the other draft untouched and
+   clears its own draft only after Pi accepts it. The terminal draft is untouched.
+4. New messages appear in the same tab as Pi finishes them. The status shows an
+   animated 👾💭 while Pi is working and a pulsing green dot when it's ready. Replies aren't streamed
    token by token. If Pi needs an approval or other interactive input, use the terminal.
 
-Click **Attach files** to select multiple files, or paste a screenshot into the
-composer. Send up to 10 UTF-8 text/code files or PNG, JPEG, GIF, and WebP images,
-with or without a message. Limits are 5 MiB per file, 10 MiB combined, and 128 KiB
-combined for text files. PDFs, Office documents, and archives aren't supported.
+Click the **Attach files** clipboard icon to select multiple files, or paste a
+screenshot into the composer. Draft images show a thumbnail; click it or the
+filename to inspect a larger local preview before sending. Sent images can also
+be opened from the thumbnails in the conversation. Send up to 10 UTF-8
+text/code files or PNG, JPEG, GIF, and WebP images, with or without a message.
+Limits are 5 MiB per file, 10 MiB combined, and 128 KiB
+combined for text files. The same image limits apply across an annotation batch;
+`/annotate` remains text-only. PDFs, Office documents, and archives aren't supported.
 Images require an image-capable model and must not be blocked in Pi settings.
 
 Chat submissions start a normal Pi turn with the session's model and tools. They
@@ -49,6 +56,34 @@ aren't interpreted as slash commands. If a send can't be confirmed, the draft st
 in the browser; retrying the unchanged send checks the same request rather than
 starting another turn. If Pi never confirms it, check the terminal and reopen the
 chat before sending again. Live chat was verified with Pi 1.5.2.
+
+### Chat explorer
+
+Click the sidebar icon in `/chat` to open the left explorer. Sessions are grouped
+by project directory, with forked sessions nested under their Pi parent session
+when that parent is available. Click a project heading to collapse or expand its
+sessions. Type a session name or directory to filter the list; matches appear
+even in collapsed projects. Use **Collapse all** or **Expand all** to change
+every folder, and **Normal** to restore your individual folder choices. Unnamed
+saved sessions use the first message when available. Click the refresh icon to
+pick up newer sessions. Long chat names are clamped to two lines; hover or focus
+a name to preview its full text.
+
+Green dots mark sessions with an open `/chat` tab under the same Pi agent setup.
+Yellow dots mark inactive, read-only sessions. Only the session attached to this
+tab can receive messages here; use the original tab to send to another green chat.
+On macOS, open a yellow session and click **Resume in browser**. If Pi is already
+running that session with the current extension loaded, it opens a browser tab
+from the existing process, so any in-progress turn keeps running. Otherwise it
+starts the exact session in a new Terminal window from its original project
+directory. Neither path sends a message. If macOS asks for Terminal Automation
+permission or Pi asks for project approval, respond in Terminal. Chats already
+open in another browser tab are not launched again.
+
+Hover over a yellow session (or tab to its controls) to copy the manual resume
+command, including on other platforms. Click **Back to live chat** to pick up
+your draft where you left off. The filter searches session labels and directories,
+not message bodies.
 
 ### Draft-only annotations
 
@@ -130,13 +165,21 @@ not require clipboard access or access to Pi's private transcript selection.
   pages still expire 30 minutes after opening.
 - The extension keeps no separate transcript or drafts on disk. Closing/reloading
   the page loses unsent drafts and reloading discards the access token. Reopen from Pi.
-- Chat mode sends visible user and assistant text from the active branch to the
-  local browser, including older messages. It does not send system prompts, hidden
-  reasoning, tool calls/results, or image bytes. Visible text can contain sensitive
-  information.
+- Chat mode shows visible user and assistant text and supported user images from
+  the active branch, including older messages. It does not show system prompts,
+  hidden reasoning, or tool calls/results. The local page fetches each visible
+  thumbnail separately with the chat token. Text and images can be sensitive.
+- Opening **Chats** lists saved session labels and project directories from Pi's
+  local session store and the current session's custom store, if any. The chat
+  token also protects these reads. Selecting a saved session reads its last
+  persisted branch without modifying the session file or switching Pi's session.
+  **Resume in browser** is a separate, authenticated action that only launches
+  already-listed sessions. Open `/chat` tabs are detected through local presence
+  markers under the Pi agent directory. A private local Unix socket lets a running
+  Pi session open its own browser tab. Discovery does not share browser URLs or
+  access tokens with other sessions.
 - Selected files are sent to Pi only when you send the message. Pi receives text
-  files inline with their names and images as normal image inputs. The browser
-  transcript shows an attachment label for images, not the image bytes. Draft-only
+  files inline with their names and images as normal image inputs. Draft-only
   annotations enter the session only when **you submit** the terminal draft.
 - Opening a local annotation page does not modify Pi's MCP/browser allowlist or
   authorize browser automation at any additional origin.

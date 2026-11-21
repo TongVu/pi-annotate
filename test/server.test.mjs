@@ -2,6 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { request } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createChatPresence } from "../src/chat-presence.ts";
 import { startAnnotationServer } from "../src/server.ts";
 
 async function fixture(t, options = {}) {
@@ -26,8 +30,15 @@ test("loopback app requires token for response, serves safe static assets", asyn
   const page = await fetch(f.base);
   assert.equal(page.status, 200);
   assert.match(page.headers.get("content-security-policy"), /frame-ancestors 'none'/);
+  assert.match(page.headers.get("content-security-policy"), /img-src 'self';/);
   assert.equal(page.headers.get("cache-control"), "no-store");
-  assert.doesNotMatch(await page.text(), /A reactor module/);
+  const html = await page.text();
+  assert.doesNotMatch(html, /A reactor module/);
+  assert.match(html, /rel="icon" href="\/favicon\.ico"/);
+  const icon = await fetch(`${f.base}/favicon.ico`);
+  assert.equal(icon.status, 200);
+  assert.equal(icon.headers.get("content-type"), "image/x-icon");
+  assert.equal(Buffer.from(await icon.arrayBuffer()).readUInt32LE(0), 0x00010000);
   assert.equal((await fetch(`${f.base}/api/response`)).status, 401);
   const authorized = await fetch(`${f.base}/api/response`, { headers: f.headers });
   assert.equal((await authorized.json()).response.id, "message-1");
@@ -100,6 +111,30 @@ test("busy editor preserves annotations for a later retry", async (t) => {
   assert.equal(appended, 1);
 });
 
+test("chat session rename validates names and updates Pi through the authenticated route", async (t) => {
+  let sessionName = "Before rename";
+  const f = await fixture(t, { chat: {
+    getBranch: () => [],
+    getSessionName: () => sessionName,
+    setSessionName: (name) => { sessionName = name; },
+    isIdle: () => true,
+  } });
+  const rename = (body, headers = f.headers) => fetch(`${f.base}/api/session/name`, {
+    method: "POST", headers, body: JSON.stringify(body),
+  });
+  assert.equal((await rename({ name: "   " })).status, 400);
+  assert.equal((await rename({ name: "x".repeat(101) })).status, 400);
+  assert.equal((await rename({ name: "bad\nname" })).status, 400);
+  assert.equal((await rename({ name: "bad\\nname" })).status, 200, "literal backslash-n is valid name text");
+  assert.equal(sessionName, "bad\\nname");
+  const result = await rename({ name: "  New chat name  " });
+  assert.equal(result.status, 200);
+  assert.deepEqual(await result.json(), { sessionName: "New chat name" });
+  assert.equal(sessionName, "New chat name");
+  assert.equal((await rename({ name: "No token" }, {})).status, 401);
+  assert.equal((await rename({ name: "No cross origin" }, { ...f.headers, Origin: "https://other.example" })).status, 403);
+});
+
 test("chat protects the active transcript and validates quotes from each assistant message", async (t) => {
   const entry = (id, role, content) => ({ id, type: "message", message: { role, content } });
   const text = (value) => ({ type: "text", text: value });
@@ -133,6 +168,8 @@ test("chat protects the active transcript and validates quotes from each assista
   assert.deepEqual(state.messages.map((message) => message.id), ["user", "a1", "a2"]);
   assert.doesNotMatch(JSON.stringify(state), /System prompt|image data|Private reasoning|Tool output/);
   assert.match(state.messages[1].html, /<strong>One<\/strong>/);
+  assert.equal((await fetch(`${f.base}/api/image?id=missing&index=0`, { headers: f.headers })).status, 404);
+  assert.equal((await fetch(`${f.base}/api/image?id=a1&index=0`, { headers: f.headers })).status, 404);
   assert.equal((await f.post()).status, 404);
 
   const annotation = (responseId, quote) => ({ responseId, start: 0, end: quote.length, quote, comment: `Explain ${quote}.` });
@@ -165,6 +202,114 @@ test("chat protects the active transcript and validates quotes from each assista
   assert.equal(delta.busy, false);
 });
 
+test("chat explorer lists limited metadata and reads only catalogued sessions with the chat token", async (t) => {
+  let opened = 0;
+  let current = true;
+  const live = { id: "live", name: "Live project", cwd: "/projects/live", path: "/private/store/live.jsonl" };
+  const saved = { id: "saved", cwd: "/projects/other's repo", path: "/private/store/user's session.jsonl", parentSessionPath: live.path, firstMessage: "First question", allMessagesText: "Unlisted transcript" };
+  const f = await fixture(t, {
+    isCurrent: () => current,
+    chat: {
+      getBranch: () => [], isIdle: () => true,
+      explorer: {
+        current: () => live,
+        list: async () => [live, saved],
+        read: async (session) => {
+          assert.deepEqual(session, { id: saved.id, cwd: saved.cwd, path: saved.path, name: saved.firstMessage });
+          opened++;
+          return [
+            { type: "message", id: "system", message: { role: "system", content: "Hidden prompt" } },
+            { type: "message", id: "reply", message: { role: "assistant", content: [{ type: "text", text: "**Saved reply**" }] } },
+          ];
+        },
+      },
+    },
+  });
+  const read = (path, headers = f.headers) => fetch(f.base + path, { headers });
+  assert.equal((await read("/api/sessions", {})).status, 401);
+  assert.equal((await read("/api/session?id=saved")).status, 404, "the catalog has not been loaded");
+  const list = await (await read("/api/sessions")).json();
+  assert.deepEqual(list, {
+    current: { id: live.id, cwd: live.cwd, name: live.name },
+    sessions: [{ id: "saved", cwd: saved.cwd, name: "First question", parentId: "live" }],
+  });
+  assert.equal((await read("/api/session?id=saved", { ...f.headers, Origin: "https://other.example" })).status, 403);
+  assert.equal((await read(`/api/session?id=${encodeURIComponent(saved.path)}`)).status, 404);
+  assert.equal((await read("/api/session?id=live")).status, 404);
+  assert.equal((await read("/api/session/resume?id=saved", {})).status, 401);
+  assert.equal((await read("/api/session/resume?id=live")).status, 404);
+  assert.deepEqual(await (await read("/api/session/resume?id=saved")).json(), {
+    command: String.raw`cd -- '/projects/other'\''s repo' && pi --session '/private/store/user'\''s session.jsonl'`,
+  });
+  assert.equal(opened, 0);
+  const transcript = await (await read("/api/session?id=saved")).json();
+  assert.equal(opened, 1);
+  assert.deepEqual(transcript.messages.map(({ id }) => id), ["reply"]);
+  assert.match(transcript.messages[0].html, /<strong>Saved reply<\/strong>/);
+  assert.deepEqual((await (await read("/api/response")).json()).messages, []);
+  current = false;
+  assert.equal((await read("/api/session?id=saved")).status, 410);
+});
+
+test("opening a saved chat requires the catalogued ID and refuses an active or pending session", async (t) => {
+  const live = { id: "live", name: "Live chat", cwd: "/projects/live" };
+  const saved = { id: "saved", name: "Saved chat", cwd: "/projects/other", path: "/store/saved.jsonl" };
+  let peers = [{ id: saved.id }];
+  const childStarting = Promise.withResolvers();
+  const childAccepted = Promise.withResolvers();
+  const launches = [];
+  const f = await fixture(t, { chat: {
+    getBranch: () => [], isIdle: () => true,
+    presence: { list: async () => peers, close: () => {} },
+    explorer: {
+      current: () => live, list: async () => [saved],
+      launch: async (session) => { launches.push(session); childStarting.resolve(); await childAccepted.promise; return "attached"; },
+    },
+  } });
+  t.after(childAccepted.resolve);
+  const open = (body, headers = f.headers) => fetch(`${f.base}/api/session/open`, { method: "POST", headers, body: JSON.stringify(body) });
+  assert.equal((await open({ id: "saved" })).status, 404);
+  const catalog = await (await fetch(`${f.base}/api/sessions`, { headers: f.headers })).json();
+  assert.equal(catalog.canOpen, true);
+  assert.equal((await open({ id: "saved" }, { ...f.headers, Origin: "https://other.example" })).status, 403);
+  assert.equal((await open({ id: "saved" }, { ...f.headers, Authorization: "Bearer wrong" })).status, 401);
+  assert.equal((await open({ id: saved.path })).status, 404);
+  assert.equal((await open({ id: "saved" })).status, 409, "never launch a green session again");
+  assert.equal(launches.length, 0);
+  peers = [];
+  const starting = open({ id: "saved", path: "/browser-supplied/path" });
+  await childStarting.promise;
+  assert.equal((await open({ id: "saved" })).status, 409);
+  childAccepted.resolve();
+  const result = await starting;
+  assert.equal(result.status, 202);
+  assert.deepEqual(await result.json(), { ok: true, attached: true });
+  assert.deepEqual(launches, [saved]);
+});
+
+test("separate browser chat servers discover active peers and remove them on disconnect", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-annotate-presence-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const a = { id: "a", cwd: "/first", name: "First chat" };
+  const b = { id: "b", cwd: "/second", name: "Second chat" };
+  const open = (identity) => fixture(t, { chat: {
+    getBranch: () => [], isIdle: () => true, presence: createChatPresence(() => dir, () => identity),
+  } });
+  const [one, two] = await Promise.all([open(a), open(b)]);
+  const get = (f, path) => fetch(f.base + path, { headers: f.headers });
+  const peers = async (f) => (await (await get(f, "/api/activity")).json()).sessions;
+  assert.equal((await fetch(`${one.base}/api/activity`)).status, 401);
+  assert.deepEqual(await peers(one), [], "an unopened link is not announced");
+  assert.equal((await get(one, "/api/response")).status, 200);
+  assert.equal((await get(two, "/api/response")).status, 200);
+  assert.deepEqual(await peers(one), [b]);
+  assert.deepEqual(await peers(two), [a]);
+  const closed = await fetch(`${two.base}/api/close`, { method: "POST", headers: two.headers, body: "{}" });
+  assert.equal(closed.status, 200);
+  for (let retry = 0; retry < 20 && (await peers(one)).length; retry++) await delay(10);
+  assert.deepEqual(await peers(one), []);
+});
+
 test("authenticated polling keeps chat alive beyond its original deadline, then idle chat expires", async (t) => {
   const ttlMs = 750;
   const f = await fixture(t, { ttlMs, chat: { getBranch: () => [], isIdle: () => true } });
@@ -185,6 +330,12 @@ test("authenticated polling keeps chat alive beyond its original deadline, then 
   await assert.rejects(() => poll(f), "abandoned chat closes after the idle timeout");
 });
 
+test("chat allows the local favicon and embedded previews but not external image sources", async (t) => {
+  const f = await fixture(t, { chat: { getBranch: () => [], isIdle: () => true } });
+  const page = await fetch(f.base);
+  assert.match(page.headers.get("content-security-policy"), /img-src 'self' data: blob:;/);
+});
+
 test("a chat tab can disconnect its listener only with the same-origin token", async (t) => {
   const f = await fixture(t, { chat: { getBranch: () => [], isIdle: () => true } });
   const close = (headers) => fetch(`${f.base}/api/close`, { method: "POST", headers, body: "{}" });
@@ -192,6 +343,36 @@ test("a chat tab can disconnect its listener only with the same-origin token", a
   assert.equal((await close({ ...f.headers, Origin: "" })).status, 403);
   assert.equal((await close(f.headers)).status, 200);
   await assert.rejects(() => fetch(f.base));
+});
+
+test("chat annotation images stay associated with their questions and use separate attachment validation", async (t) => {
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgZGIGAAAOAAfXb+R4AAAAAElFTkSuQmCC";
+  const largePng = Buffer.concat([Buffer.from(png, "base64"), Buffer.alloc(512 * 1024)]).toString("base64");
+  const image = { name: "photo.png", mimeType: "image/png", data: png };
+  const received = [];
+  const f = await fixture(t, { chat: {
+    getBranch: () => [{ id: "reply", type: "message", message: { role: "assistant", content: "One Two" } }],
+    isIdle: () => true, onSend: async (prompt) => received.push(prompt),
+  } });
+  const post = (body) => fetch(`${f.base}/api/chat`, { method: "POST", headers: f.headers, body: JSON.stringify(body) });
+  const body = { requestId: "00000000-0000-4000-8000-000000000001", annotations: [
+    { responseId: "reply", start: 0, end: 3, quote: "One", comment: "First?", images: [image] },
+    { responseId: "reply", start: 4, end: 7, quote: "Two", comment: "Second?", images: [{ ...image, data: largePng }] },
+  ] };
+  const annotatedWith = (patch) => ({ ...body, annotations: [{ ...body.annotations[0], ...patch }, body.annotations[1]] });
+  assert.equal((await post(annotatedWith({ quote: "Bad" }))).status, 400);
+  assert.equal((await post(annotatedWith({ images: [{ name: "text.txt", mimeType: "text/plain", data: "QQ==" }] }))).status, 400);
+  assert.equal((await post(annotatedWith({ images: Array(10).fill(image) }))).status, 400);
+  assert.equal(received.length, 0);
+  assert.equal((await post(body)).status, 200);
+  assert.equal((await post(body)).status, 200, "unchanged retry is acknowledged without another send");
+  assert.equal((await post(annotatedWith({ images: [{ ...image, name: "different.png" }] }))).status, 409);
+  assert.equal(received.length, 1);
+  assert.match(received[0][0].text, /> One\n\nFirst\?\n\nAttached: Image 1\.[\s\S]*> Two\n\nSecond\?\n\nAttached: Image 2\./);
+  assert.deepEqual(received[0].slice(1).map(({ data }) => data), [png, largePng]);
+  const draft = await fixture(t);
+  assert.equal((await draft.post({ annotations: [{ ...draft.body.annotations[0], images: [image] }] })).status, 400);
+  assert.deepEqual(draft.submissions, []);
 });
 
 test("chat validates mixed attachments and includes every file in duplicate detection", async (t) => {

@@ -60,6 +60,11 @@ test("native selection opens comment dialog; content is text, not executable HTM
   f.select(2, 9);
   assert.equal(f.$("comment-dialog").open, true);
   assert.equal(f.$("selected-quote").textContent, "reactor");
+  assert.equal(f.$("comment-close").getAttribute("aria-label"), "Close annotation");
+  assert.equal(f.$("save-annotation").getAttribute("aria-label"), "Add annotation");
+  assert.equal(f.$("save-annotation").textContent.trim(), "");
+  assert.equal(f.$("save-annotation").closest(".comment-composer"), f.$("comment").parentElement);
+  assert.equal(f.$("comment-close").title, "Close annotation");
   f.add("What does this mean?");
   assert.equal(f.$("annotations").children.length, 1);
   assert.equal(f.$("send").disabled, false);
@@ -73,16 +78,19 @@ test("native selection opens comment dialog; content is text, not executable HTM
 test("multiple annotations support edit, remove, cancel and retry after failure", async (t) => {
   const f = await fixture(t, { failFirst: true });
   f.select(2, 9);
-  f.$("cancel").click();
+  f.$("comment-close").click();
   assert.equal(f.$("annotations").children.length, 0);
   f.select(2, 9);
   f.add("First question");
   f.select(10, 16);
   f.add("Second question");
-  f.$("annotations").querySelector("button").click();
+  const actions = f.$("annotations").firstElementChild.querySelectorAll("button");
+  assert.deepEqual([...actions].map((button) => button.getAttribute("aria-label")), ["Edit annotation", "Remove annotation"]);
+  assert.ok([...actions].every((button) => button.textContent.trim() === "" && button.querySelector('svg[aria-hidden="true"]')));
+  f.$("annotations").querySelector('[aria-label="Edit annotation"]').click();
   assert.equal(f.$("comment").value, "First question");
   f.add("Edited question");
-  f.$("annotations").lastElementChild.querySelectorAll("button")[1].click();
+  f.$("annotations").lastElementChild.querySelector('[aria-label="Remove annotation"]').click();
   assert.equal(f.$("annotations").children.length, 1);
   f.$("send").click();
   await tick();
@@ -147,7 +155,15 @@ test("chat dots jump to user turns; failed questions are kept, accepted question
   f.$("turns").firstElementChild.click();
   assert.equal(f.$("response").scrollTop, 270);
   assert.equal(f.$("turns").scrollTop, 10);
-  assert.match(f.$("turns").firstElementChild.title, /A question/);
+  const dot = f.$("turns").firstElementChild;
+  assert.equal(dot.title, "", "avoid the delayed native browser tooltip");
+  dot.dispatchEvent(new f.window.MouseEvent("mouseenter"));
+  const tooltip = f.window.document.getElementById("message-preview");
+  assert.equal(tooltip.getAttribute("role"), "tooltip");
+  assert.equal(tooltip.textContent, "A question <b>posted as text</b>");
+  assert.equal(dot.getAttribute("aria-describedby"), "message-preview");
+  dot.dispatchEvent(new f.window.MouseEvent("mouseleave"));
+  assert.equal(f.window.document.getElementById("message-preview"), null);
   const oldReply = f.$("response").querySelector('[data-response-id="a1"]');
   f.select(0, 3, oldReply);
   f.add("Why old?");
@@ -187,6 +203,287 @@ test("chat dots jump to user turns; failed questions are kept, accepted question
   assert.equal(posts[2].annotations[0].responseId, "a2");
 });
 
+test("sent images fetch a separate thumbnail and open a larger preview", async (t) => {
+  const calls = [];
+  const thumbnail = Promise.withResolvers();
+  const f = await fixture(t, { chatFetch: async (path) => {
+    calls.push(path);
+    if (path === "/api/response") return { ok: true, json: async () => ({
+      mode: "chat", protocol: 2, cursor: "u1", busy: false,
+      messages: [{ id: "u1", role: "user", text: "Look at this", imageCount: 1 }],
+    }) };
+    assert.equal(path, "/api/image?id=u1&index=0");
+    return { ok: true, blob: () => thumbnail.promise };
+  } });
+  f.window.URL.createObjectURL = () => "blob:mock-image";
+  const button = f.$("response").querySelector('[aria-label="Preview Image 1"]');
+  button.click();
+  thumbnail.resolve(new f.window.Blob());
+  await tick();
+  assert.deepEqual(calls, ["/api/response", "/api/image?id=u1&index=0"]);
+  assert.equal(button.querySelector("img").src, "blob:mock-image");
+  assert.equal(f.$("image-preview").open, true);
+  assert.equal(f.$("preview-image").src, "blob:mock-image");
+});
+
+test("status icon distinguishes ready, working, stopped and disconnected", async (t) => {
+  let busy = false;
+  let failed = false;
+  let offline = false;
+  const f = await fixture(t, { chatFetch: async () => {
+    if (offline) throw new Error("Offline");
+    return { ok: true, json: async () => ({ mode: "chat", protocol: 2, cursor: null, messages: [], busy, failed }) };
+  } });
+  const indicator = f.$("chat-state");
+  assert.equal(indicator.dataset.state, "ready");
+  assert.match(indicator.textContent, /ready for the next task/);
+  busy = true;
+  await f.poll();
+  assert.equal(indicator.dataset.state, "working");
+  assert.match(indicator.textContent, /working/);
+  busy = false;
+  failed = true;
+  await f.poll();
+  assert.equal(indicator.dataset.state, "stopped");
+  offline = true;
+  await f.poll();
+  assert.equal(indicator.dataset.state, "disconnected");
+});
+
+test("chat tab follows the Pi session name and moves chat controls out of the header", async (t) => {
+  let sessionName = "Live browser chat feature";
+  const f = await fixture(t, { chatFetch: async () => ({
+    ok: true, json: async () => ({ mode: "chat", protocol: 2, cursor: null, messages: [], busy: false, sessionName }),
+  }) });
+  assert.equal(f.window.document.title, sessionName);
+  assert.equal(f.$("page-intro").hidden, true);
+  assert.equal(f.$("chat-state").hidden, false);
+  assert.equal(f.$("chat-state").parentElement, f.$("chat-form").querySelector(".actions"));
+  assert.equal(f.$("chat-state").nextElementSibling, f.$("status"));
+  assert.equal(f.$("explorer-toggle").parentElement, f.$("chat-rail"));
+  assert.equal(f.$("turns").parentElement, f.$("chat-rail"));
+  assert.equal(f.$("status").textContent, "");
+
+  sessionName = "Renamed <em>chat</em>";
+  await f.poll();
+  assert.equal(f.window.document.title, sessionName);
+
+  sessionName = undefined;
+  await f.poll();
+  assert.equal(f.window.document.title, "Chat · Pi");
+});
+
+test("the sticky session pill renames the Pi session and updates the browser tab", async (t) => {
+  let sessionName = "Live browser chat feature";
+  let renamed;
+  let oldServer = true;
+  const f = await fixture(t, { chatFetch: async (path, body) => {
+    if (path === "/api/session/name") {
+      if (oldServer) {
+        oldServer = false;
+        return { ok: false, status: 404, json: async () => ({ error: "Not found." }) };
+      }
+      renamed = body.name;
+      sessionName = renamed;
+      return { ok: true, json: async () => ({ sessionName }) };
+    }
+    return { ok: true, json: async () => ({ mode: "chat", protocol: 2, sessionName, cursor: null, messages: [], busy: false }) };
+  } });
+  const pill = f.$("session-title-pill");
+  assert.equal(pill.hidden, false);
+  assert.equal(f.$("session-title-text").textContent, sessionName);
+  assert.equal(f.window.document.title, sessionName);
+  f.$("rename-session").click();
+  const input = f.$("rename-session-input");
+  input.value = "Personal repository cleanup";
+  const submitRename = () => f.$("rename-session-form").dispatchEvent(new f.window.Event("submit", { cancelable: true }));
+  submitRename();
+  await tick();
+  assert.match(f.$("rename-session-status").textContent, /run \/reload/i, "a stale server explains how to enable renaming inside the dialog");
+  submitRename();
+  await tick();
+  assert.equal(renamed, input.value);
+  assert.equal(f.$("session-title-text").textContent, renamed);
+  assert.equal(f.window.document.title, renamed);
+  assert.equal(f.$("status").textContent, "Chat renamed.");
+});
+
+test("explorer groups chat branches and filters chats, then opens a saved transcript without losing the live draft", async (t) => {
+  const calls = [];
+  const longTitle = "Renovate updates for the important project with an extremely descriptive title";
+  const f = await fixture(t, { chatFetch: async (path) => {
+    calls.push(path);
+    if (path === "/api/activity") return { ok: true, json: async () => ({ sessions: [{ id: "a", name: "Earlier live work", cwd: "/work/alpha" }] }) };
+    if (path === "/api/sessions") return { ok: true, json: async () => ({
+      current: { id: "current", name: "Live chat", cwd: "/work/alpha" },
+      sessions: [{ id: "a", name: "Earlier live work", cwd: "/work/alpha", parentId: "current" }, { id: "b", name: longTitle, cwd: "/work/beta" }],
+    }) };
+    if (path === "/api/session/resume?id=b") return { ok: true, json: async () => ({ command: "cd -- '/work/beta' && pi --session '/store/b.jsonl'" }) };
+    if (path === "/api/session?id=b") return { ok: true, json: async () => ({
+      messages: [{ id: "r1", role: "assistant", ...renderMarkdown("**Saved reply**") }],
+    }) };
+    assert.match(path, /^\/api\/response/);
+    return { ok: true, json: async () => ({
+      mode: "chat", protocol: 2, sessionName: "Live chat", cursor: path.includes("?") ? "u2" : "u1", busy: false,
+      messages: [{ id: path.includes("?") ? "u2" : "u1", role: "user", text: path.includes("?") ? "New live message" : "Live message" }],
+    }) };
+  } });
+  const input = f.$("chat-input");
+  input.value = "Unsent live draft";
+  input.dispatchEvent(new f.window.Event("input"));
+  assert.deepEqual(calls, ["/api/response"], "the catalog is not fetched until the explorer opens");
+  const explorerToggle = f.$("explorer-toggle");
+  assert.equal(explorerToggle.textContent.trim(), "");
+  assert.equal(explorerToggle.getAttribute("aria-label"), "Toggle chat explorer");
+  assert.equal(explorerToggle.title, "Toggle chat explorer");
+  assert.ok(explorerToggle.querySelector('svg[aria-hidden="true"]'));
+  explorerToggle.click();
+  assert.equal(explorerToggle.getAttribute("aria-expanded"), "true");
+  await tick();
+  const list = f.$("session-list");
+  assert.deepEqual([...list.querySelectorAll("summary")].map(({ textContent }) => textContent), ["alpha", "beta"]);
+  assert.equal(list.querySelectorAll(".session-indicator.live").length, 2);
+  const peer = list.querySelector('[aria-label="Live in another tab"]');
+  assert.ok(peer);
+  assert.equal(peer.closest(".session-row").querySelector(".session-copy"), null);
+  const live = list.querySelector('[aria-current="true"]');
+  assert.equal(live.textContent, "Live chat");
+  assert.ok(live.querySelector('.session-indicator.live[aria-label="Live session"]'));
+  assert.equal(live.parentElement.querySelector(".session-copy"), null);
+  const alphaGroup = list.querySelector('summary[title="/work/alpha"]').parentElement;
+  assert.equal(alphaGroup.querySelector(".session-tree-children .session-open").textContent, "Earlier live work");
+
+  const refresh = f.$("refresh-sessions");
+  assert.equal(refresh.textContent.trim(), "");
+  assert.equal(refresh.getAttribute("aria-label"), "Refresh chats");
+  assert.ok(refresh.querySelector("svg"));
+  const beta = list.querySelector('summary[title="/work/beta"]');
+  beta.click();
+  await tick();
+  assert.equal(beta.parentElement.open, false);
+  const controls = f.$("project-view-controls");
+  assert.equal(controls.parentElement.querySelector("label"), null);
+  assert.ok(controls.parentElement.firstElementChild === controls, "view-mode pill replaces the old heading position");
+  assert.equal(f.$("session-filter").getAttribute("aria-label"), "Search chats by name or directory");
+  assert.ok(f.$("session-filter").closest(".session-search").querySelector('svg[aria-hidden="true"]'));
+  assert.deepEqual([...controls.querySelectorAll("button")].map((button) => button.getAttribute("aria-label")), ["Collapse all", "Normal", "Expand all"]);
+  assert.equal(controls.querySelectorAll('svg[aria-hidden="true"]').length, 3);
+  const setMode = (mode) => {
+    const button = controls.querySelector(`[data-mode="${mode}"]`);
+    button.click();
+    assert.equal(button.getAttribute("aria-pressed"), "true");
+    return [...list.querySelectorAll("details")].map((group) => group.open);
+  };
+  assert.deepEqual(setMode("collapse"), [false, false]);
+  assert.deepEqual(setMode("expand"), [true, true]);
+  assert.deepEqual(setMode("normal"), [true, false]);
+  const filter = f.$("session-filter");
+  const search = (value) => {
+    filter.value = value;
+    filter.dispatchEvent(new f.window.Event("input"));
+  };
+  search("BETA renovate");
+  assert.equal(list.querySelector("details").open, true, "search reveals matches in a collapsed project");
+  search("");
+  assert.equal(list.querySelector('summary[title="/work/beta"]').parentElement.open, false);
+  search("beta renovate");
+  assert.equal(list.querySelectorAll(".session-open").length, 1);
+  const saved = list.querySelector(".session-open");
+  assert.equal(saved.textContent, longTitle);
+  assert.ok(saved.querySelector('.session-indicator.read-only[aria-label="Read-only session"]'));
+  saved.dispatchEvent(new f.window.MouseEvent("mouseenter"));
+  assert.equal(f.window.document.getElementById("message-preview").textContent, longTitle);
+  saved.dispatchEvent(new f.window.MouseEvent("mouseleave"));
+  const copied = [];
+  const clipboard = { writeText: async (text) => copied.push(text) };
+  Object.defineProperty(f.window.navigator, "clipboard", { value: clipboard });
+  const copy = list.querySelector(".session-copy");
+  assert.equal(copy.textContent, "⧉", "copy control keeps its previous copy glyph");
+  copy.click();
+  await tick();
+  assert.deepEqual(copied, ["cd -- '/work/beta' && pi --session '/store/b.jsonl'"]);
+  assert.equal(f.$("conversation").hidden, false, "copying does not open the saved session");
+  clipboard.writeText = async () => { throw new Error("Clipboard unavailable"); };
+  copy.click();
+  await tick();
+  assert.equal(f.$("resume-command-dialog").open, true);
+  assert.equal(f.$("resume-command").value, copied[0]);
+  f.$("close-resume-command").click();
+  saved.click();
+  await tick();
+  assert.equal(f.window.document.title, longTitle);
+  assert.match(f.$("saved-directory").textContent, /Read-only · \/work\/beta/);
+  assert.equal(f.$("saved-response").querySelector("strong").textContent, "Saved reply");
+  assert.equal(f.$("saved-response").querySelector("[data-response-id]"), null);
+  assert.equal(f.$("conversation").hidden, true);
+  assert.equal(f.$("chat-send").disabled, true);
+  await f.poll();
+  assert.equal(f.window.document.title, longTitle);
+  assert.match(f.$("response").textContent, /New live message/);
+
+  f.$("back-to-live").click();
+  assert.equal(f.window.document.title, "Live chat");
+  assert.equal(f.$("conversation").hidden, false);
+  assert.equal(f.$("saved-conversation").hidden, true);
+  assert.equal(input.value, "Unsent live draft");
+  assert.equal(f.$("chat-send").disabled, false);
+  assert.equal(calls.some((path) => path === "/api/chat"), false);
+});
+
+test("saved-chat launch leaves the live composer alone and refresh drops a deleted duplicate", async (t) => {
+  const cwd = "/work/pi-annotate";
+  const name = "Live browser chat feature";
+  const current = { id: "current", cwd, name };
+  const copy = { id: "copy", cwd, name };
+  const peer = { id: "peer", cwd, name: "Other live chat" };
+  let deleted = false;
+  let listFailures = 0;
+  const launches = [];
+  const f = await fixture(t, { chatFetch: async (path, body) => {
+    if (path === "/api/sessions") {
+      if (listFailures > 0) { listFailures--; throw new TypeError("Load failed"); }
+      return { ok: true, json: async () => ({ current, canOpen: true, sessions: deleted ? [peer] : [copy, peer] }) };
+    }
+    if (path === "/api/activity") return { ok: true, json: async () => ({ sessions: [peer] }) };
+    if (path.startsWith("/api/session?")) return { ok: true, json: async () => ({ messages: [] }) };
+    if (path === "/api/session/open") {
+      launches.push(body);
+      return { ok: true, status: 202, json: async () => ({ ok: true }) };
+    }
+    assert.equal(path, "/api/response");
+    return { ok: true, json: async () => ({ mode: "chat", protocol: 2, sessionName: name, cursor: null, busy: false, messages: [] }) };
+  } });
+  f.$("chat-input").value = "Keep this draft";
+  f.$("explorer-toggle").click();
+  await tick();
+  const sessionButtons = () => [...f.$("session-list").querySelectorAll(".session-open")];
+  sessionButtons().find((button) => button.textContent === peer.name).click();
+  await tick();
+  const resume = f.$("open-saved-chat");
+  assert.equal(resume.textContent, "Open in another tab");
+  assert.equal(resume.disabled, true);
+  sessionButtons().filter((button) => button.textContent === name)[1].click();
+  await tick();
+  assert.equal(resume.textContent, "Resume in browser");
+  assert.equal(resume.disabled, false);
+  resume.click();
+  assert.equal(resume.disabled, true);
+  await tick();
+  assert.deepEqual(launches, [{ id: "copy" }]);
+  assert.match(f.$("status").textContent, /opening the chat in a new tab/);
+
+  deleted = true;
+  listFailures = 1;
+  f.$("refresh-sessions").click();
+  await tick();
+  assert.equal(sessionButtons().filter((button) => button.textContent === name).length, 1);
+  assert.match(f.$("saved-status").textContent, /saved chat was removed/);
+  assert.equal(f.$("explorer-status").textContent, "");
+  assert.equal(resume.hidden, true);
+  f.$("back-to-live").click();
+  assert.equal(f.$("chat-input").value, "Keep this draft");
+});
+
 test("chat composer works from an empty session and clears only its own draft", async (t) => {
   const posts = [];
   const f = await fixture(t, { chatFetch: async (path, body) => {
@@ -196,6 +493,17 @@ test("chat composer works from an empty session and clears only its own draft", 
   assert.equal(f.$("chat-form").hidden, false);
   assert.equal(f.$("chat-form").querySelector('label[for="chat-input"]'), null);
   assert.equal(f.$("chat-input").getAttribute("aria-label"), "Message");
+  const attach = f.$("chat-attach");
+  assert.equal(attach.getAttribute("aria-label"), "Attach files");
+  assert.ok(attach.querySelector('svg[aria-hidden="true"] path'));
+  assert.equal(attach.querySelector("svg rect"), null, "attachment control uses a paperclip, not a clipboard");
+  let pickerOpens = 0;
+  f.$("chat-file").addEventListener("click", (event) => {
+    pickerOpens++;
+    event.preventDefault();
+  });
+  attach.click();
+  assert.equal(pickerOpens, 1);
   assert.ok(f.$("chat-send").closest(".chat-composer").contains(f.$("chat-input")));
   assert.equal(f.$("chat-send").getAttribute("aria-label"), "Send message");
   assert.ok(f.$("chat-send").querySelector("svg"));
@@ -203,6 +511,16 @@ test("chat composer works from an empty session and clears only its own draft", 
   const input = f.$("chat-input");
   input.value = "Hello from the browser";
   input.dispatchEvent(new f.window.Event("input"));
+  const expand = f.$("chat-expand");
+  assert.equal(expand.getAttribute("aria-controls"), input.id);
+  assert.equal(expand.getAttribute("aria-expanded"), "false");
+  expand.click();
+  assert.equal(expand.getAttribute("aria-expanded"), "true");
+  assert.equal(expand.getAttribute("aria-label"), "Collapse message composer");
+  expand.click();
+  assert.equal(expand.getAttribute("aria-expanded"), "false");
+  assert.equal(input.value, "Hello from the browser");
+  assert.equal(posts.length, 0);
   assert.equal(f.$("chat-send").disabled, false);
   for (const modifiers of [{ shiftKey: true }, { isComposing: true }]) {
     assert.equal(input.dispatchEvent(new f.window.KeyboardEvent("keydown", { key: "Enter", cancelable: true, ...modifiers })), true);
@@ -281,13 +599,23 @@ test("browser chat adds several picked or pasted files, removes them individuall
     });
   }
   assert.equal(file.multiple, true);
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgZGIGAAAOAAfXb+R4AAAAAElFTkSuQmCC";
   const pasted = waitForFileCount(1);
   const event = new w.Event("paste", { cancelable: true });
-  Object.defineProperty(event, "clipboardData", { value: { files: [new w.File(["pasted"], "clipboard.png", { type: "image/png" })] } });
+  Object.defineProperty(event, "clipboardData", { value: { files: [new w.File([Buffer.from(png, "base64")], "clipboard.png", { type: "image/png" })] } });
   input.dispatchEvent(event);
   assert.equal(event.defaultPrevented, true);
   await pasted;
   assert.deepEqual(filenames(), ["clipboard.png"]);
+  const preview = list.querySelector('[aria-label="Preview clipboard.png"]');
+  const src = `data:image/png;base64,${png}`;
+  assert.equal(preview.querySelector("img").src, src);
+  preview.click();
+  assert.equal(f.$("image-preview").open, true);
+  assert.equal(f.$("preview-image").src, src);
+  f.$("close-preview").click();
+  assert.equal(f.$("image-preview").open, false);
+  assert.equal(f.$("preview-image").hasAttribute("src"), false);
   const picked = waitForFileCount(3);
   Object.defineProperty(file, "files", { value: [
     new w.File(["picked"], "picked.png", { type: "image/png" }),
@@ -296,8 +624,13 @@ test("browser chat adds several picked or pasted files, removes them individuall
   file.dispatchEvent(new w.Event("change"));
   await picked;
   assert.deepEqual(filenames(), ["clipboard.png", "picked.png", "Example.java"]);
-  list.querySelector('[aria-label="Remove picked.png"]').click();
+  const removeImage = list.querySelector('[aria-label="Remove picked.png"]');
+  assert.equal(removeImage.textContent, "×");
+  assert.equal(list.querySelector('[aria-label="Remove Example.java"]').textContent, "Remove");
+  removeImage.click();
+  assert.equal(f.$("image-preview").open, false);
   assert.deepEqual(filenames(), ["clipboard.png", "Example.java"]);
+  assert.equal(list.querySelectorAll("img").length, 1);
   assert.equal(posts.length, 0);
   assert.equal(f.$("chat-send").disabled, false);
   f.$("chat-send").click();
@@ -308,11 +641,72 @@ test("browser chat adds several picked or pasted files, removes them individuall
   await tick();
   assert.equal(posts[0].text, "", "attachment-only sends are allowed");
   assert.deepEqual(posts[0].attachments, [
-    { name: "clipboard.png", mimeType: "image/png", data: "cGFzdGVk" },
+    { name: "clipboard.png", mimeType: "image/png", data: png },
     { name: "Example.java", mimeType: "", data: "Y29kZQ==" },
   ]);
   assert.deepEqual(posts[0], posts[1]);
   assert.equal(list.hidden, true);
+});
+
+test("live annotations can paste and pick images, edit them, and retry without touching the composer", async (t) => {
+  const posts = [];
+  const f = await fixture(t, { chatFetch: async (path, body) => {
+    if (path === "/api/response") return { ok: true, json: async () => ({
+      mode: "chat", protocol: 2, annotationImages: true, cursor: "a1", busy: false,
+      messages: [{ id: "a1", role: "assistant", ...renderMarkdown("Choose a **passage**.") }],
+    }) };
+    assert.equal(path, "/api/chat");
+    posts.push(body);
+    return { ok: posts.length > 1, json: async () => posts.length > 1 ? { ok: true } : { error: "Pi is busy" } };
+  } });
+  const w = f.window;
+  const list = f.$("comment-attachments");
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgZGIGAAAOAAfXb+R4AAAAAElFTkSuQmCC";
+  const picture = (name) => new w.File([Buffer.from(png, "base64")], name, { type: "image/png" });
+  const waitForCount = (count) => new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => { observer.disconnect(); reject(new Error(`Expected ${count} images`)); }, 1000);
+    const observer = new w.MutationObserver(() => {
+      if (list.children.length !== count) return;
+      clearTimeout(timeout);
+      observer.disconnect();
+      resolve();
+    });
+    observer.observe(list, { childList: true });
+  });
+  assert.equal(f.$("comment-images").hidden, false);
+  assert.ok(f.$("comment-attach").querySelector('svg[aria-hidden="true"] path'));
+  assert.equal(f.$("comment-attach").querySelector("svg rect"), null, "annotation attachment control uses a paperclip");
+  f.$("chat-input").value = "Leave this draft alone";
+  f.select(9, 16, f.$("response").querySelector("[data-response-id]"));
+  const pasted = waitForCount(1);
+  const event = new w.Event("paste", { cancelable: true });
+  Object.defineProperty(event, "clipboardData", { value: { files: [picture("pasted.png")] } });
+  f.$("comment").dispatchEvent(event);
+  assert.equal(event.defaultPrevented, true);
+  await pasted;
+  assert.match(list.querySelector("img").src, /^data:image\/png;base64,/);
+  const picked = waitForCount(2);
+  const input = f.$("comment-file");
+  Object.defineProperty(input, "files", { value: [picture("picked.png")] });
+  input.dispatchEvent(new w.Event("change"));
+  await picked;
+  f.add("What is this?");
+  assert.equal(f.$("annotations").querySelectorAll("img").length, 2);
+  f.$("annotations").querySelector('[aria-label="Edit annotation"]').click();
+  list.querySelector('[aria-label="Remove picked.png"]').click();
+  f.add("See the image.");
+  f.$("send").click();
+  await tick();
+  assert.equal(f.$("annotations").querySelectorAll("img").length, 1);
+  f.$("send").click();
+  await tick();
+  assert.deepEqual(posts[0], posts[1]);
+  assert.deepEqual(posts[0].annotations[0], {
+    start: 9, end: 16, quote: "passage", responseId: "a1", comment: "See the image.",
+    images: [{ name: "pasted.png", mimeType: "image/png", data: png }],
+  });
+  assert.equal(f.$("annotations").children.length, 0);
+  assert.equal(f.$("chat-input").value, "Leave this draft alone");
 });
 
 test("a chat server without multi-file support cannot receive messages from the new page", async (t) => {
@@ -325,7 +719,7 @@ test("an old server with new browser assets reports a reload/version error", asy
   const f = await fixture(t, { markdown: "**Bold** response", legacyServer: true });
   assert.match(f.$("status").textContent, /server is outdated/);
   assert.doesNotMatch(f.$("status").textContent, /did not match/);
-  assert.equal(f.$("response").textContent, "");
+  assert.equal(f.$("response").textContent.trim(), "");
   assert.equal(f.$("send").disabled, true);
   assert.equal(f.posts.length, 0);
 });

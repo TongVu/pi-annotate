@@ -1,0 +1,32 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { terminalResumeArgs } from "../src/resume-chat.ts";
+
+test("Terminal resume command quotes paths, opts in to browser startup, and sends no prompt", { skip: process.platform === "win32" }, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "pi-annotate-launch-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const cwd = join(root, "a project's workspace");
+  const path = join(root, "chat's $(not-a-command).jsonl");
+  const pi = join(root, "Pi with spaces");
+  const extension = join(root, "annotation's extension.ts");
+  const agentDir = join(root, "Pi settings");
+  await mkdir(cwd);
+  await writeFile(path, "saved session");
+  await writeFile(pi, `#!/bin/sh\nprintf '%s\n' "$PWD" "$PI_CODING_AGENT_DIR" "$PI_ANNOTATE_AUTO_CHAT_SESSION" "$@"\n`, { mode: 0o755 });
+  const args = terminalResumeArgs({ id: "saved-id", cwd, path }, pi, extension, agentDir);
+  assert.equal(args[0], "-e");
+  assert.match(args[1], /tell application "Terminal"/);
+  assert.ok(!args[1].includes(path), "the AppleScript source is fixed; the shell command is an argument");
+  const run = () => spawnSync("/bin/sh", ["-c", args[2]], { cwd: root, encoding: "utf8" });
+  const output = run();
+  assert.equal(output.status, 0, output.stderr);
+  assert.deepEqual(output.stdout.trimEnd().split("\n"), [cwd, agentDir, "saved-id", "--session", path, "--extension", extension]);
+  await rm(path);
+  const deleted = run();
+  assert.equal(deleted.status, 1);
+  assert.equal(deleted.stdout, "", "a deleted session never falls through to launching Pi");
+});

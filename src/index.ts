@@ -1,8 +1,19 @@
 import { spawn } from "node:child_process";
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { appendToDraft, latestAssistantResponse } from "./annotations.ts";
 import { startAnnotationServer } from "./server.ts";
+import { listPiSessions, readPiSession } from "./session-explorer.ts";
+import { createChatPresence } from "./chat-presence.ts";
+import { AUTO_CHAT_SESSION, resumeChatInTerminal } from "./resume-chat.ts";
+import { registerSessionOwner, requestOwnedChat } from "./session-owner.ts";
+
+async function ownerRegistry() {
+  const { getAgentDir } = await import("@earendil-works/pi-coding-agent");
+  return join(getAgentDir(), "pi-annotate-owners");
+}
 
 function openPage(url: string): Promise<void> {
   const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "rundll32" : "xdg-open";
@@ -15,7 +26,14 @@ function openPage(url: string): Promise<void> {
 }
 
 export default function annotate(pi: ExtensionAPI) {
+  registerAnnotationExtension(pi, openPage);
+}
+
+export function registerAnnotationExtension(pi: ExtensionAPI, launchPage: (url: string) => Promise<void>) {
   let active: Awaited<ReturnType<typeof startAnnotationServer>> | undefined;
+  let activeMode: "chat" | "annotate" | undefined;
+  let closeOwner: (() => Promise<void>) | undefined;
+  let ownerGeneration = 0;
   let generation = 0;
   const chatDispatch = new AsyncLocalStorage<() => void>();
   pi.on("message_end", (event) => {
@@ -27,14 +45,21 @@ export default function annotate(pi: ExtensionAPI) {
     generation++;
     active?.close();
     active = undefined;
+    activeMode = undefined;
   };
-  pi.on("session_shutdown", stop);
+  pi.on("session_shutdown", async () => {
+    stop();
+    ownerGeneration++;
+    const close = closeOwner;
+    closeOwner = undefined;
+    await close?.();
+  });
   pi.on("session_before_switch", stop);
   pi.on("session_before_fork", stop);
   pi.on("session_before_tree", stop);
 
   const runPage = (command: "annotate" | "chat") =>
-    async (args: string, ctx: ExtensionCommandContext) => {
+    async (args: string, ctx: ExtensionContext) => {
       const value = args.trim();
       const alias = command === "annotate" && (value === "chat" || value === "chat link");
       const chat = command === "chat" || alias;
@@ -66,6 +91,7 @@ export default function annotate(pi: ExtensionAPI) {
       stop();
       const currentGeneration = generation;
       const sessionId = ctx.sessionManager.getSessionId();
+      const chatIdentity = () => ({ id: sessionId, cwd: ctx.sessionManager.getCwd(), path: ctx.sessionManager.getSessionFile(), name: ctx.sessionManager.getSessionName() });
       const anchor = chat ? branch.at(-1)?.id : response?.id;
       const isCurrent = () => generation === currentGeneration &&
         ctx.sessionManager.getSessionId() === sessionId &&
@@ -78,9 +104,34 @@ export default function annotate(pi: ExtensionAPI) {
             if (generation === currentGeneration) {
               generation++;
               active = undefined;
+              activeMode = undefined;
             }
           },
           chat: chat ? {
+            getSessionName: () => ctx.sessionManager.getSessionName(),
+            setSessionName: (sessionName: string) => pi.setSessionName(sessionName),
+            presence: createChatPresence(async () => {
+              const { getAgentDir } = await import("@earendil-works/pi-coding-agent");
+              return join(getAgentDir(), "pi-annotate-live");
+            }, () => {
+              const { id, cwd, name } = chatIdentity();
+              return { id, cwd, name };
+            }),
+            explorer: {
+              current: chatIdentity,
+              list: () => listPiSessions(ctx.sessionManager.getSessionDir()),
+              read: readPiSession,
+              ...(process.platform === "darwin" ? {
+                launch: async (session) => {
+                  const outcome = await requestOwnedChat(await ownerRegistry(), session.id);
+                  if (outcome === "attached" || outcome === "already-open") return outcome;
+                  if (outcome === "unavailable") throw new Error("This session is open in Pi but could not open a browser tab. Run /chat in its Terminal; no second Pi was started.");
+                  const { getAgentDir } = await import("@earendil-works/pi-coding-agent");
+                  await resumeChatInTerminal(session, fileURLToPath(import.meta.url), getAgentDir());
+                  return "launched";
+                },
+              } : {}),
+            },
             getBranch: () => ctx.sessionManager.getBranch(),
             isIdle: () => ctx.isIdle(),
             onSend: (content: Parameters<ExtensionAPI["sendUserMessage"]>[0]) => new Promise<void>((resolve) => {
@@ -103,18 +154,47 @@ export default function annotate(pi: ExtensionAPI) {
           return;
         }
         active = opened;
+        activeMode = chat ? "chat" : "annotate";
         const description = chat ? "Local chat (stays open while the tab is connected)" : "Local annotations (expires in 30 minutes)";
         ctx.ui.notify(`${description}: ${active.url}`, "info");
         if (mode !== "link") {
-          // Only open a browser in response to the user's command, never on extension load.
-          void openPage(active.url).catch(() => {
+          // Both /chat and an explicit browser resume click opt in to opening the page.
+          try {
+            await launchPage(opened.url);
+          } catch {
             if (isCurrent()) ctx.ui.notify("Could not open a browser. Open the local link above manually.", "warning");
-          });
+            return false;
+          }
         }
+        return true;
       } catch (error) {
         ctx.ui.notify(`Could not open ${chat ? "chat" : "annotations"}: ${error instanceof Error ? error.message : String(error)}`, "error");
       }
     };
+
+  pi.on("session_start", async (event, ctx) => {
+    if (ctx.mode === "tui" && process.platform !== "win32") {
+      const owner = ++ownerGeneration;
+      const id = ctx.sessionManager.getSessionId();
+      const previousOwner = closeOwner;
+      closeOwner = undefined;
+      try {
+        await previousOwner?.();
+        if (owner !== ownerGeneration) return;
+        const close = await registerSessionOwner(await ownerRegistry(), id, async () => {
+          if (owner !== ownerGeneration || ctx.sessionManager.getSessionId() !== id) return "unavailable";
+          if (active) return activeMode === "chat" ? "already-open" : "unavailable";
+          return await runPage("chat")("", ctx) ? "attached" : "unavailable";
+        });
+        if (owner === ownerGeneration) closeOwner = close;
+        else await close();
+      } catch { /* /chat remains usable if local process discovery is unavailable. */ }
+    }
+    const target = process.env[AUTO_CHAT_SESSION];
+    if (!target || (event.reason !== "startup" && event.reason !== "resume")) return;
+    delete process.env[AUTO_CHAT_SESSION];
+    if (target === ctx.sessionManager.getSessionId() && ctx.mode === "tui") await runPage("chat")("", ctx);
+  });
 
   const complete = (prefix: string) => {
     const options = [
@@ -126,11 +206,11 @@ export default function annotate(pi: ExtensionAPI) {
   pi.registerCommand("chat", {
     description: "Open the current Pi session as a live browser chat",
     getArgumentCompletions: complete,
-    handler: runPage("chat"),
+    handler: async (args, ctx) => { await runPage("chat")(args, ctx); },
   });
   pi.registerCommand("annotate", {
     description: "Annotate the latest reply and return questions to the terminal draft",
     getArgumentCompletions: complete,
-    handler: runPage("annotate"),
+    handler: async (args, ctx) => { await runPage("annotate")(args, ctx); },
   });
 }

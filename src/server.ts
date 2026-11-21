@@ -1,13 +1,16 @@
 import { createServer } from "node:http";
 import { createHash, randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { validateAnnotations, formatAnnotations, formatChatAnnotations, visibleChatMessage } from "./annotations.ts";
+import { resolve } from "node:path";
+import { MAX_ANNOTATIONS, validateAnnotations, formatAnnotations, formatChatAnnotations, userImageBlocks, visibleChatMessage } from "./annotations.ts";
 import { renderMarkdown } from "./markdown.ts";
+import { shellQuote } from "./resume-chat.ts";
 
 const assets = {
   "/": ["index.html", "text/html; charset=utf-8"],
   "/app.js": ["app.js", "text/javascript; charset=utf-8"],
   "/style.css": ["style.css", "text/css; charset=utf-8"],
+  "/favicon.ico": ["favicon.ico", "image/x-icon"],
 };
 const BODY_LIMIT = 512 * 1024;
 const MAX_ATTACHMENTS = 10;
@@ -45,7 +48,7 @@ function imageMimeType(bytes) {
   return undefined;
 }
 
-function attachmentBlocks(files) {
+function attachmentBlocks(files, imagesOnly = false) {
   if (!Array.isArray(files) || !files.length || files.length > MAX_ATTACHMENTS) {
     throw new Error(`Attach between 1 and ${MAX_ATTACHMENTS} files.`);
   }
@@ -66,6 +69,7 @@ function attachmentBlocks(files) {
       throw new Error(`${name}: expected a valid PNG, JPEG, GIF, or WebP image.`);
     }
     if (imageType) return { type: "image", mimeType: imageType, data };
+    if (imagesOnly) throw new Error(`${name}: annotations accept only PNG, JPEG, GIF, or WebP images.`);
     textTotal += bytes.length;
     if (textTotal > TEXT_FILES_LIMIT) throw new Error("Text attachments must be 128 KiB or less in total.");
     let text;
@@ -77,15 +81,130 @@ function attachmentBlocks(files) {
   });
 }
 
-function chatRoutes({ getBranch, isIdle, onSend }) {
+const hasAnnotationImages = (annotations) => Array.isArray(annotations) && annotations.some((item) => item?.images !== undefined);
+
+function annotationImagesAt(annotations) {
+  if (!Array.isArray(annotations) || annotations.length > MAX_ANNOTATIONS) return;
+  const files = [];
+  const ranges = new Map();
+  for (const [index, item] of annotations.entries()) {
+    if (item?.images === undefined) continue;
+    if (!Array.isArray(item.images) || !item.images.length || files.length + item.images.length > MAX_ATTACHMENTS) {
+      throw new Error(`Attach between 1 and ${MAX_ATTACHMENTS} images across the annotation batch.`);
+    }
+    const start = files.length;
+    files.push(...item.images);
+    ranges.set(index, [start, files.length]);
+  }
+  if (!files.length) return;
+  const blocks = attachmentBlocks(files, true);
+  return (index) => ranges.has(index) ? blocks.slice(...ranges.get(index)) : [];
+}
+
+function renderChatEntry(entry) {
+  const message = visibleChatMessage(entry);
+  return message?.role === "assistant" ? { ...message, ...renderMarkdown(message.text) } : message;
+}
+
+function readChatImage(branch, id, index) {
+  if (!id || !/^\d+$/.test(index ?? "")) return;
+  const image = userImageBlocks(branch.find((entry) => entry.id === id))[Number(index)];
+  if (!image || typeof image.data !== "string") return;
+  const bytes = Buffer.from(image.data, "base64");
+  if (imageMimeType(bytes) === image.mimeType) return { bytes, mimeType: image.mimeType };
+}
+
+function explorerRoutes({ current, list, read, launch }, presence) {
+  let catalog = new Map();
+  let saved;
+  let listing;
+  const opening = new Map();
+  const savedBranch = (id) => {
+    const session = catalog.get(id);
+    if (!session) return;
+    if (saved?.id !== id) {
+      const branch = read({ id: session.id, cwd: session.cwd, path: session.path, name: session.name }).catch(() => {
+        if (saved?.branch === branch) saved = undefined;
+        throw new Error("Could not read this saved Pi session.");
+      });
+      saved = { id, branch };
+    }
+    return saved.branch;
+  };
+  return {
+    async list() {
+      listing ??= list().catch(() => { throw new Error("Could not list saved Pi sessions."); })
+        .finally(() => { listing = undefined; });
+      const sessions = await listing;
+      const live = current();
+      const byPath = new Map(sessions.map((session) => [resolve(session.path), session.id]));
+      const parentId = (session) => session?.parentSessionPath && byPath.get(resolve(session.parentSessionPath));
+      const liveRecord = sessions.find(({ id }) => id === live.id) ??
+        sessions.find(({ path }) => live.path && resolve(path) === resolve(live.path));
+      const liveParent = parentId(liveRecord);
+      catalog = new Map();
+      saved = undefined;
+      for (const session of sessions) {
+        const { id, cwd, path, name, firstMessage } = session;
+        if (id === live.id || catalog.has(id)) continue;
+        const title = name?.trim() || firstMessage?.replace(/\s+/g, " ").trim().slice(0, 100) || "Untitled session";
+        const parent = parentId(session);
+        catalog.set(id, { id, cwd, path, name: title, ...(parent ? { parentId: parent } : {}) });
+      }
+      return {
+        current: { id: live.id, cwd: live.cwd, name: live.name, ...(liveParent ? { parentId: liveParent } : {}) },
+        sessions: [...catalog.values()].map(({ id, cwd, name, parentId }) => ({ id, cwd, name, ...(parentId ? { parentId } : {}) })),
+        ...(launch ? { canOpen: true } : {}),
+      };
+    },
+    noteActive(sessions) {
+      for (const { id } of sessions) if (Number.isFinite(opening.get(id))) opening.delete(id);
+    },
+    async open(id, reply, checkCurrent) {
+      const session = typeof id === "string" && catalog.get(id);
+      if (!launch || !session?.cwd) return reply(404, { error: "This saved chat is not available to open. Refresh the explorer." });
+      if ((opening.get(id) ?? 0) > Date.now()) return reply(409, { error: "Pi is already opening this chat. Check Terminal or the new tab." });
+      opening.set(id, Infinity);
+      try {
+        const peers = await presence?.list() ?? [];
+        if (peers.some((peer) => peer.id === id)) {
+          return reply(409, { error: "This chat is already open in another browser tab." });
+        }
+        if (!checkCurrent()) return;
+        const outcome = await launch(session);
+        if (outcome === "already-open") return reply(409, { error: "This chat already has a browser tab. Use that tab or run /chat in its Terminal." });
+        opening.set(id, Date.now() + 60_000);
+        return reply(202, { ok: true, attached: outcome === "attached" });
+      } catch (error) {
+        if (error?.status !== 404) throw error;
+        catalog.delete(id);
+        return reply(404, { error: error.message });
+      } finally {
+        if (opening.get(id) === Infinity) opening.delete(id);
+      }
+    },
+    resumeCommand(id) {
+      const session = catalog.get(id);
+      if (!session?.cwd) return;
+      return `cd -- ${shellQuote(session.cwd)} && pi --session ${shellQuote(session.path)}`;
+    },
+    async transcript(id) {
+      const branch = await savedBranch(id);
+      return branch && { messages: branch.map(renderChatEntry).filter(Boolean) };
+    },
+    async image(session, id, index) {
+      const branch = await savedBranch(session);
+      return branch && readChatImage(branch, id, index);
+    },
+  };
+}
+
+function chatRoutes({ getSessionName, setSessionName, getBranch, isIdle, onSend }) {
   const rendered = new Map();
   const requests = new Map();
   let inFlight = false;
   const render = (entry) => {
-    if (!rendered.has(entry.id)) {
-      const message = visibleChatMessage(entry);
-      rendered.set(entry.id, message?.role === "assistant" ? { ...message, ...renderMarkdown(message.text) } : message);
-    }
+    if (!rendered.has(entry.id)) rendered.set(entry.id, renderChatEntry(entry));
     return rendered.get(entry.id);
   };
   return {
@@ -100,7 +219,22 @@ function chatRoutes({ getBranch, isIdle, onSend }) {
       const busy = inFlight || !isIdle();
       const last = branch.findLast((entry) => entry.type === "message" && ["user", "assistant"].includes(entry.message.role));
       const failed = !busy && ["error", "aborted"].includes(last?.message.stopReason);
-      reply(200, { mode: "chat", protocol: 2, cursor: branch.at(-1)?.id ?? null, messages, busy, failed });
+      reply(200, { mode: "chat", protocol: 2, annotationImages: true, sessionName: getSessionName?.(), cursor: branch.at(-1)?.id ?? null, messages, busy, failed });
+    },
+    image(id, index) {
+      return readChatImage(getBranch(), id, index);
+    },
+    rename(name, reply) {
+      if (typeof name !== "string" || !name.trim() || name.trim().length > 100 || /[\u0000-\u001f\u007f]/.test(name)) {
+        throw new Error("Choose a chat name between 1 and 100 characters without control characters.");
+      }
+      if (typeof setSessionName !== "function") {
+        reply(501, { error: "Renaming this session is unavailable." });
+        return;
+      }
+      const sessionName = name.trim();
+      setSessionName(sessionName);
+      reply(200, { sessionName: getSessionName?.() ?? sessionName });
     },
     async send(body, reply) {
       const { requestId, text, attachments, annotations } = body;
@@ -126,7 +260,7 @@ function chatRoutes({ getBranch, isIdle, onSend }) {
             const entry = entries.get(id);
             const message = entry && render(entry);
             return message?.role === "assistant" ? message.text : undefined;
-          });
+          }, annotationImagesAt(annotations));
         } else {
           if (typeof text !== "string" || (!text.trim() && attachments === undefined) || text.length > 32000) {
             throw new Error("Write a message (up to 32,000 characters) or attach files.");
@@ -164,6 +298,8 @@ function chatRoutes({ getBranch, isIdle, onSend }) {
 export async function startAnnotationServer({ response, onSubmit, chat, onClose, isCurrent = () => true, ttlMs = 30 * 60_000 }) {
   const renderedResponse = response && { id: response.id, ...renderMarkdown(response.text) };
   const live = chat && chatRoutes(chat);
+  const presence = chat?.presence;
+  const explorer = chat?.explorer && explorerRoutes(chat.explorer, presence);
   const reopenCommand = live ? "/chat" : "/annotate";
   const token = randomBytes(32).toString("hex");
   let origin;
@@ -173,7 +309,7 @@ export async function startAnnotationServer({ response, onSubmit, chat, onClose,
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Referrer-Policy", "no-referrer");
     res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
+    res.setHeader("Content-Security-Policy", `default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'${live ? " data: blob:" : ""}; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`);
     const reply = (status, body) => {
       res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
       res.end(JSON.stringify(body));
@@ -185,10 +321,12 @@ export async function startAnnotationServer({ response, onSubmit, chat, onClose,
         reply(403, { error: "Only this local annotation page may connect." });
         return;
       }
-      if (expired || !isCurrent()) {
+      const checkCurrent = () => {
+        if (!expired && isCurrent()) return true;
         reply(410, { error: `This browser page expired or its Pi session/branch changed. Run ${reopenCommand} again.` });
-        return;
-      }
+        return false;
+      };
+      if (!checkCurrent()) return;
       if (req.method === "GET" && assets[req.url]) {
         const [file, type] = assets[req.url];
         const data = await readFile(new URL(`../web/${file}`, import.meta.url));
@@ -201,15 +339,52 @@ export async function startAnnotationServer({ response, onSubmit, chat, onClose,
         return;
       }
       const url = new URL(req.url, origin);
+      if (live && req.method === "GET" && url.pathname === "/api/activity") {
+        const sessions = await presence?.list() ?? [];
+        explorer?.noteActive(sessions);
+        if (checkCurrent()) reply(200, { sessions });
+        return;
+      }
+      if (explorer && req.method === "GET" && url.pathname === "/api/sessions") {
+        const data = await explorer.list();
+        if (checkCurrent()) reply(200, data);
+        return;
+      }
+      if (explorer && req.method === "GET" && url.pathname === "/api/session/resume") {
+        const command = explorer.resumeCommand(url.searchParams.get("id"));
+        reply(command ? 200 : 404, command ? { command } : { error: "Resume command unavailable. Refresh the explorer." });
+        return;
+      }
+      if (explorer && req.method === "GET" && url.pathname === "/api/session") {
+        const data = await explorer.transcript(url.searchParams.get("id"));
+        if (checkCurrent()) reply(data ? 200 : 404, data ?? { error: "Saved session not found. Refresh the explorer." });
+        return;
+      }
+      if (live && req.method === "GET" && url.pathname === "/api/image") {
+        const id = url.searchParams.get("id");
+        const index = url.searchParams.get("index");
+        const session = url.searchParams.get("session");
+        const image = session === null ? live.image(id, index) : await explorer?.image(session, id, index);
+        if (!checkCurrent()) return;
+        if (!image) reply(404, { error: "Image unavailable." });
+        else {
+          res.writeHead(200, { "Content-Type": image.mimeType });
+          res.end(image.bytes);
+        }
+        return;
+      }
       if (req.method === "GET" && url.pathname === "/api/response") {
         if (live) {
           timer.refresh(); // An authenticated poll keeps a chat alive; draft windows still have a fixed lifetime.
-          live.read(url.searchParams.get("after"), reply);
+          await presence?.touch(ttlMs);
+          if (checkCurrent()) live.read(url.searchParams.get("after"), reply);
         } else reply(200, { response: renderedResponse, submitted: accepted !== undefined });
         return;
       }
       const disconnect = live && req.url === "/api/close";
-      if (req.method === "POST" && (disconnect || req.url === (live ? "/api/chat" : "/api/annotations"))) {
+      const renameSession = live && req.url === "/api/session/name";
+      const openSession = explorer && req.url === "/api/session/open";
+      if (req.method === "POST" && (disconnect || renameSession || openSession || req.url === (live ? "/api/chat" : "/api/annotations"))) {
         if (req.headers.origin !== origin || req.headers["content-type"] !== "application/json") {
           reply(403, { error: "Expected a same-origin JSON request." });
           return;
@@ -219,9 +394,18 @@ export async function startAnnotationServer({ response, onSubmit, chat, onClose,
           reply(200, { ok: true });
           return;
         }
-        const raw = await readBody(req, live ? CHAT_BODY_LIMIT : BODY_LIMIT);
+        const raw = await readBody(req, openSession || renameSession ? 4096 : live ? CHAT_BODY_LIMIT : BODY_LIMIT);
         const body = JSON.parse(raw.toString("utf8"));
-        if (raw.length > BODY_LIMIT && body?.attachments === undefined) throw new Error("Request is too large.");
+        if (renameSession) {
+          if (checkCurrent()) live.rename(body?.name, reply);
+          return;
+        }
+        if (openSession) {
+          if (checkCurrent()) await explorer.open(body?.id, reply, checkCurrent);
+          return;
+        }
+        const annotationImages = hasAnnotationImages(body?.annotations);
+        if (raw.length > BODY_LIMIT && body?.attachments === undefined && !(live && annotationImages)) throw new Error("Request is too large.");
         // Check again after awaiting the request body; Pi may have changed sessions.
         if (expired || !isCurrent()) {
           reply(410, { error: `Pi session/branch changed. Run ${reopenCommand} again.` });
@@ -231,6 +415,7 @@ export async function startAnnotationServer({ response, onSubmit, chat, onClose,
           await live.send(body, reply);
           return;
         }
+        if (annotationImages) throw new Error("Images are only supported in live /chat annotations.");
         const items = validateAnnotations(body.annotations, renderedResponse.text);
         const formatted = formatAnnotations(response.id, items);
         if (accepted !== undefined && accepted !== formatted) {
@@ -263,6 +448,7 @@ export async function startAnnotationServer({ response, onSubmit, chat, onClose,
     clearTimeout(timer);
     server.close();
     server.closeAllConnections();
+    void presence?.close();
     onClose?.();
   };
   const timer = setTimeout(close, ttlMs);
