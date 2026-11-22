@@ -30,8 +30,9 @@ sessions by working directory. Both regular and fullscreen terminal modes work.
    has a name, it appears in the browser tab.
 2. Type a message in the bottom composer, or select text in a Pi reply and add a
    question to the right panel. Keep reusable Markdown in the right-panel note;
-   it saves per chat in this browser and can be previewed or copied as Markdown.
-   The dots stay centered on the left as you scroll; the current turn is blue.
+   it saves locally per chat in Pi's data directory, survives closing and
+   reopening `/chat`, and can be previewed or copied as Markdown. The dots stay
+   centered on the left as you scroll; the current turn is blue.
    Hover to preview a message or click to jump to it.
 3. Press **Enter** or click the checkmark button to send an ordinary message.
    **Shift+Enter** inserts a newline. Click **Send questions** to submit the

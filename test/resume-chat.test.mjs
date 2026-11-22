@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { terminalResumeArgs } from "../src/resume-chat.ts";
+import { terminalForkArgs, terminalResumeArgs } from "../src/resume-chat.ts";
 
 test("Terminal resume command quotes paths, opts in to browser startup, and sends no prompt", { skip: process.platform === "win32" }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), "pi-annotate-launch-"));
@@ -18,6 +18,10 @@ test("Terminal resume command quotes paths, opts in to browser startup, and send
   await writeFile(path, "saved session");
   await writeFile(pi, `#!/bin/sh\nprintf '%s\n' "$PWD" "$PI_CODING_AGENT_DIR" "$PI_ANNOTATE_AUTO_CHAT_SESSION" "$@"\n`, { mode: 0o755 });
   const args = terminalResumeArgs({ id: "saved-id", cwd, path }, pi, extension, agentDir);
+  const fork = terminalForkArgs({ cwd, path }, pi, extension, agentDir);
+  assert.match(fork[2], /PI_ANNOTATE_AUTO_CHAT_SESSION=fork/);
+  assert.match(fork[2], /--fork/);
+  assert.match(fork[2], /--extension/);
   assert.equal(args[0], "-e");
   assert.match(args[1], /tell application "Terminal"/);
   assert.ok(!args[1].includes(path), "the AppleScript source is fixed; the shell command is an argument");

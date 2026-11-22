@@ -5,13 +5,12 @@ import { JSDOM } from "jsdom";
 import { renderMarkdown } from "../src/markdown.ts";
 import { validateAnnotations } from "../src/annotations.ts";
 
-async function fixture(t, { failFirst = false, markdown = "A reactor module.\n<script>alert('bad')</script>", corruptText = false, legacyServer = false, chatFetch, storedNotes = {} } = {}) {
+async function fixture(t, { failFirst = false, markdown = "A reactor module.\n<script>alert('bad')</script>", corruptText = false, legacyServer = false, chatFetch } = {}) {
   const html = await readFile(new URL("../web/index.html", import.meta.url), "utf8");
   const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
   const dom = new JSDOM(html, { url: "http://127.0.0.1:12345/#test-token", runScripts: "outside-only" });
   t.after(() => dom.window.close());
   const { window } = dom;
-  for (const [sessionId, note] of Object.entries(storedNotes)) window.localStorage.setItem(`pi-annotate:markdown-note:v1:${sessionId}`, note);
   const $ = (id) => window.document.getElementById(id);
   const posts = [];
   const rendered = renderMarkdown(markdown);
@@ -249,10 +248,14 @@ test("status icon distinguishes ready, working, stopped and disconnected", async
   const indicator = f.$("chat-state");
   assert.equal(indicator.dataset.state, "ready");
   assert.match(indicator.textContent, /ready for the next task/);
+  const favicon = () => decodeURIComponent(f.$("app-favicon").href);
+  assert.match(favicon(), /fill="#2f9b69"/);
   busy = true;
   await f.poll();
   assert.equal(indicator.dataset.state, "working");
   assert.match(indicator.textContent, /working/);
+  assert.match(favicon(), /fill="#dc4141"/);
+  assert.match(f.window.document.title, /^🔴 /);
   busy = false;
   failed = true;
   await f.poll();
@@ -267,7 +270,7 @@ test("chat tab follows the Pi session name and moves chat controls out of the he
   const f = await fixture(t, { chatFetch: async () => ({
     ok: true, json: async () => ({ mode: "chat", protocol: 2, cursor: null, messages: [], busy: false, sessionName }),
   }) });
-  assert.equal(f.window.document.title, sessionName);
+  assert.equal(f.window.document.title, `🟢 ${sessionName}`);
   assert.equal(f.$("page-intro").hidden, true);
   assert.equal(f.$("chat-state").hidden, false);
   assert.equal(f.$("chat-state").parentElement, f.$("chat-form").querySelector(".actions"));
@@ -278,11 +281,11 @@ test("chat tab follows the Pi session name and moves chat controls out of the he
 
   sessionName = "Renamed <em>chat</em>";
   await f.poll();
-  assert.equal(f.window.document.title, sessionName);
+  assert.equal(f.window.document.title, `🟢 ${sessionName}`);
 
   sessionName = undefined;
   await f.poll();
-  assert.equal(f.window.document.title, "Chat · Pi");
+  assert.equal(f.window.document.title, "🟢 Chat · Pi");
 });
 
 test("the sticky session pill renames the Pi session and updates the browser tab", async (t) => {
@@ -304,7 +307,7 @@ test("the sticky session pill renames the Pi session and updates the browser tab
   const pill = f.$("session-title-pill");
   assert.equal(pill.hidden, false);
   assert.equal(f.$("session-title-text").textContent, sessionName);
-  assert.equal(f.window.document.title, sessionName);
+  assert.equal(f.window.document.title, `🟢 ${sessionName}`);
   f.$("rename-session").click();
   const input = f.$("rename-session-input");
   input.value = "Personal repository cleanup";
@@ -316,7 +319,7 @@ test("the sticky session pill renames the Pi session and updates the browser tab
   await tick();
   assert.equal(renamed, input.value);
   assert.equal(f.$("session-title-text").textContent, renamed);
-  assert.equal(f.window.document.title, renamed);
+  assert.equal(f.window.document.title, `🟢 ${renamed}`);
   assert.equal(f.$("status").textContent, "Chat renamed.");
 });
 
@@ -327,10 +330,11 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
     calls.push(path);
     if (path === "/api/activity") return { ok: true, json: async () => ({ sessions: [{ id: "a", name: "Earlier live work", cwd: "/work/alpha" }] }) };
     if (path === "/api/sessions") return { ok: true, json: async () => ({
-      current: { id: "current", name: "Live chat", cwd: "/work/alpha" },
-      sessions: [{ id: "a", name: "Earlier live work", cwd: "/work/alpha", parentId: "current" }, { id: "b", name: longTitle, cwd: "/work/beta" }],
+      current: { id: "current", name: "Live chat", cwd: "/work/alpha", canClone: true },
+      sessions: [{ id: "a", name: "Earlier live work", cwd: "/work/alpha", parentId: "current", canClone: true }, { id: "b", name: longTitle, cwd: "/work/beta" }],
     }) };
     if (path === "/api/session/resume?id=b") return { ok: true, json: async () => ({ command: "cd -- '/work/beta' && pi --session '/store/b.jsonl'" }) };
+    if (path === "/api/session/clone") return { ok: true, json: async () => ({ ok: true }) };
     if (path === "/api/session?id=b") return { ok: true, json: async () => ({
       messages: [{ id: "r1", role: "assistant", ...renderMarkdown("**Saved reply**") }],
     }) };
@@ -350,7 +354,8 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   const explorerToggle = f.$("explorer-toggle");
   assert.equal(explorerToggle.textContent.trim(), "");
   assert.equal(explorerToggle.getAttribute("aria-label"), "Toggle chat explorer");
-  assert.equal(explorerToggle.title, "Toggle chat explorer");
+  assert.equal(explorerToggle.title, "");
+  assert.equal(explorerToggle.dataset.tooltip, "Toggle chat explorer");
   assert.ok(explorerToggle.querySelector('svg[aria-hidden="true"] rect'));
   assert.ok(explorerToggle.querySelector('svg path'));
   const scrolled = [];
@@ -369,16 +374,25 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   const live = list.querySelector('[aria-current="true"]');
   assert.equal(live.textContent, "Live chat");
   assert.equal(live.dataset.currentChat, "true");
-  assert.ok(live.querySelector('.session-indicator.live[aria-label="Live session"]'));
+  assert.ok(live.parentElement.querySelector('.session-indicator.live[aria-label="Live session"]'));
+  const clone = live.parentElement.querySelector(".session-clone");
+  assert.equal(clone.textContent, "🧬");
+  assert.equal(clone.getAttribute("aria-label"), "Clone chat session Live chat");
+  clone.dispatchEvent(new f.window.MouseEvent("mouseenter"));
+  assert.equal(f.window.document.getElementById("message-preview").textContent, "Clone chat session Live chat");
+  clone.dispatchEvent(new f.window.MouseEvent("mouseleave"));
+  clone.click();
+  await tick();
+  assert.ok(calls.includes("/api/session/clone"));
   assert.equal(live.parentElement.querySelector(".session-copy"), null);
-  const alphaGroup = list.querySelector('summary[title="/work/alpha"]').parentElement;
+  const alphaGroup = list.querySelector('summary[data-tooltip="/work/alpha"]').parentElement;
   assert.equal(alphaGroup.querySelector(".session-tree-children .session-open").textContent, "Earlier live work");
 
   const refresh = f.$("refresh-sessions");
   assert.equal(refresh.textContent.trim(), "");
   assert.equal(refresh.getAttribute("aria-label"), "Refresh chats");
   assert.ok(refresh.querySelector("svg"));
-  const beta = list.querySelector('summary[title="/work/beta"]');
+  const beta = list.querySelector('summary[data-tooltip="/work/beta"]');
   beta.click();
   await tick();
   assert.equal(beta.parentElement.open, false);
@@ -412,7 +426,7 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   search("BETA renovate");
   assert.equal(list.querySelector("details").open, true, "search reveals matches in a collapsed project");
   search("");
-  assert.equal(list.querySelector('summary[title="/work/beta"]').parentElement.open, false);
+  assert.equal(list.querySelector('summary[data-tooltip="/work/beta"]').parentElement.open, false);
   search("beta renovate");
   assert.equal(list.querySelectorAll(".session-open").length, 1);
   const saved = list.querySelector(".session-open");
@@ -425,7 +439,8 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   const clipboard = { writeText: async (text) => copied.push(text) };
   Object.defineProperty(f.window.navigator, "clipboard", { value: clipboard });
   const copy = list.querySelector(".session-copy");
-  assert.equal(copy.textContent, "⧉", "copy control keeps its previous copy glyph");
+  assert.ok(copy.querySelector('svg[viewBox="0 0 24 24"] rect[x="8"][y="8"][width="13"][height="13"]'));
+  assert.equal(copy.querySelector("svg path").getAttribute("d"), "M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3");
   copy.click();
   await tick();
   assert.deepEqual(copied, ["cd -- '/work/beta' && pi --session '/store/b.jsonl'"]);
@@ -450,7 +465,7 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.match(f.$("response").textContent, /New live message/);
 
   f.$("back-to-live").click();
-  assert.equal(f.window.document.title, "Live chat");
+  assert.equal(f.window.document.title, "🟢 Live chat");
   assert.equal(f.$("conversation").hidden, false);
   assert.equal(f.$("right-panel").hidden, false);
   assert.equal(f.$("saved-conversation").hidden, true);
@@ -515,14 +530,20 @@ test("saved-chat launch leaves the live composer alone and refresh drops a delet
 
 test("Markdown notes persist per chat, preview safely, and copy their source", async (t) => {
   const sessionId = "note-session";
-  const fetchChat = async (path, body) => {
-    if (path === "/api/response") return { ok: true, json: async () => ({ mode: "chat", protocol: 2, sessionId, cursor: null, messages: [], busy: false }) };
+  const notes = new Map([[sessionId, "# Saved snippet"]]);
+  const fetchForSession = (id) => async (path, body) => {
+    if (path === "/api/response") return { ok: true, json: async () => ({ mode: "chat", protocol: 2, sessionId: id, cursor: null, messages: [], busy: false }) };
+    if (path === "/api/note") {
+      if (body !== undefined) { notes.set(id, body.markdown); return { ok: true, json: async () => ({ ok: true }) }; }
+      return { ok: true, json: async () => ({ markdown: notes.get(id) ?? "" }) };
+    }
     if (path === "/api/markdown") return { ok: true, json: async () => renderMarkdown(body.markdown) };
     throw new Error(`Unexpected chat request: ${path}`);
   };
-  const f = await fixture(t, { chatFetch: fetchChat, storedNotes: { [sessionId]: "# Saved snippet" } });
+  const fetchChat = fetchForSession(sessionId);
+  const f = await fixture(t, { chatFetch: fetchChat });
+  await tick();
   const note = f.$("chat-note-input");
-  const key = `pi-annotate:markdown-note:v1:${sessionId}`;
   assert.equal(f.$("chat-note").hidden, false);
   assert.equal(f.$("chat-note").parentElement, f.$("annotations-panel").parentElement);
   assert.notEqual(f.$("chat-note").parentElement, f.$("annotations-panel"));
@@ -545,7 +566,9 @@ test("Markdown notes persist per chat, preview safely, and copy their source", a
   assert.equal(note.value, "# Saved snippet");
   note.value = "# Reusable\n\n**Prompt text** <script>bad()</script>";
   note.dispatchEvent(new f.window.Event("input"));
-  assert.equal(f.window.localStorage.getItem(key), note.value);
+  note.dispatchEvent(new f.window.Event("blur"));
+  await tick();
+  assert.equal(notes.get(sessionId), note.value);
   f.$("chat-note-preview-toggle").click();
   await tick();
   assert.equal(note.hidden, true);
@@ -565,13 +588,12 @@ test("Markdown notes persist per chat, preview safely, and copy their source", a
   await tick();
   assert.deepEqual(copied, [note.value]);
 
-  const reopened = await fixture(t, { chatFetch: fetchChat, storedNotes: { [sessionId]: note.value } });
+  const reopened = await fixture(t, { chatFetch: fetchChat });
+  await tick();
   assert.equal(reopened.$("chat-note-input").value, note.value);
   assert.equal(reopened.$("chat-input").value, "", "the note is separate from the message draft");
-  const otherChat = async (path) => path === "/api/response"
-    ? { ok: true, json: async () => ({ mode: "chat", protocol: 2, sessionId: "another-session", cursor: null, messages: [], busy: false }) }
-    : { ok: true, json: async () => ({}) };
-  const isolated = await fixture(t, { chatFetch: otherChat, storedNotes: { [sessionId]: note.value } });
+  const isolated = await fixture(t, { chatFetch: fetchForSession("another-session") });
+  await tick();
   assert.equal(isolated.$("chat-note-input").value, "", "notes are scoped to their Pi session ID");
 });
 

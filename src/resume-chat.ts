@@ -19,10 +19,18 @@ const terminalScript = `on run argv
 end run`;
 
 export function terminalResumeArgs({ id, cwd, path }: { id: string; cwd: string; path: string }, pi: string, extension: string, agentDir: string) {
+  return terminalLaunchArgs({ id, cwd, path }, pi, extension, agentDir, "--session");
+}
+
+export function terminalForkArgs({ cwd, path }: { cwd: string; path: string }, pi: string, extension: string, agentDir: string) {
+  return terminalLaunchArgs({ id: "fork", cwd, path }, pi, extension, agentDir, "--fork");
+}
+
+function terminalLaunchArgs({ id, cwd, path }: { id: string; cwd: string; path: string }, pi: string, extension: string, agentDir: string, operation: "--session" | "--fork") {
   const command = [
     "cd --", shellQuote(cwd), "&& /bin/test -s", shellQuote(path), "&& /usr/bin/env",
     shellQuote(`PI_CODING_AGENT_DIR=${agentDir}`), shellQuote(`${AUTO_CHAT_SESSION}=${id}`),
-    shellQuote(pi), "--session", shellQuote(path), "--extension", shellQuote(extension),
+    shellQuote(pi), operation, shellQuote(path), "--extension", shellQuote(extension),
   ].join(" ");
   return ["-e", terminalScript, command];
 }
@@ -37,7 +45,7 @@ async function findPi() {
   throw new Error("Could not find the Pi executable. Use Copy resume command instead.");
 }
 
-export async function resumeChatInTerminal(session: { id: string; cwd: string; path: string }, extension: string, agentDir: string) {
+async function launchChatInTerminal(session: { id?: string; cwd: string; path: string }, extension: string, agentDir: string, operation: "resume" | "fork") {
   if (!isAbsolute(session.cwd) || !await stat(session.cwd).then((entry) => entry.isDirectory(), () => false)) {
     throw new Error("The chat’s original project directory is unavailable.");
   }
@@ -46,8 +54,19 @@ export async function resumeChatInTerminal(session: { id: string; cwd: string; p
   }
   const pi = await findPi();
   try {
-    await promisify(execFile)("/usr/bin/osascript", terminalResumeArgs(session, pi, extension, agentDir), { timeout: 30_000 });
+    const args = operation === "resume"
+      ? terminalResumeArgs({ ...session, id: session.id ?? "" }, pi, extension, agentDir)
+      : terminalForkArgs(session, pi, extension, agentDir);
+    await promisify(execFile)("/usr/bin/osascript", args, { timeout: 30_000 });
   } catch {
-    throw new Error("Could not open Terminal. Check macOS Automation permissions, or use Copy resume command.");
+    throw new Error("Could not open Terminal. Check macOS Automation permissions.");
   }
+}
+
+export async function resumeChatInTerminal(session: { id: string; cwd: string; path: string }, extension: string, agentDir: string) {
+  return launchChatInTerminal(session, extension, agentDir, "resume");
+}
+
+export async function forkChatInTerminal(session: { cwd: string; path: string }, extension: string, agentDir: string) {
+  return launchChatInTerminal(session, extension, agentDir, "fork");
 }

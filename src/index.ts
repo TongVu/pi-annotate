@@ -5,9 +5,10 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { appendToDraft, latestAssistantResponse } from "./annotations.ts";
 import { startAnnotationServer } from "./server.ts";
+import { createChatNoteStore } from "./chat-notes.ts";
 import { listPiSessions, readPiSession } from "./session-explorer.ts";
 import { createChatPresence } from "./chat-presence.ts";
-import { AUTO_CHAT_SESSION, resumeChatInTerminal } from "./resume-chat.ts";
+import { AUTO_CHAT_SESSION, forkChatInTerminal, resumeChatInTerminal } from "./resume-chat.ts";
 import { registerSessionOwner, requestOwnedChat } from "./session-owner.ts";
 
 async function ownerRegistry() {
@@ -97,6 +98,7 @@ export function registerAnnotationExtension(pi: ExtensionAPI, launchPage: (url: 
         ctx.sessionManager.getSessionId() === sessionId &&
         (anchor === undefined || ctx.sessionManager.getBranch().some((entry) => entry.id === anchor));
       try {
+        const noteStore = chat ? createChatNoteStore(join(ctx.sessionManager.getSessionDir(), ".pi-annotate-notes")) : undefined;
         const opened = await startAnnotationServer({
           response,
           isCurrent,
@@ -108,6 +110,7 @@ export function registerAnnotationExtension(pi: ExtensionAPI, launchPage: (url: 
             }
           },
           chat: chat ? {
+            noteStore,
             getSessionId: () => ctx.sessionManager.getSessionId(),
             getSessionName: () => ctx.sessionManager.getSessionName(),
             setSessionName: (sessionName: string) => pi.setSessionName(sessionName),
@@ -130,6 +133,10 @@ export function registerAnnotationExtension(pi: ExtensionAPI, launchPage: (url: 
                   const { getAgentDir } = await import("@earendil-works/pi-coding-agent");
                   await resumeChatInTerminal(session, fileURLToPath(import.meta.url), getAgentDir());
                   return "launched";
+                },
+                clone: async (session) => {
+                  const { getAgentDir } = await import("@earendil-works/pi-coding-agent");
+                  await forkChatInTerminal(session, fileURLToPath(import.meta.url), getAgentDir());
                 },
               } : {}),
             },
@@ -192,9 +199,9 @@ export function registerAnnotationExtension(pi: ExtensionAPI, launchPage: (url: 
       } catch { /* /chat remains usable if local process discovery is unavailable. */ }
     }
     const target = process.env[AUTO_CHAT_SESSION];
-    if (!target || (event.reason !== "startup" && event.reason !== "resume")) return;
+    if (!target || !["startup", "resume", "fork"].includes(event.reason)) return;
     delete process.env[AUTO_CHAT_SESSION];
-    if (target === ctx.sessionManager.getSessionId() && ctx.mode === "tui") await runPage("chat")("", ctx);
+    if ((target === ctx.sessionManager.getSessionId() || target === "fork") && ctx.mode === "tui") await runPage("chat")("", ctx);
   });
 
   const complete = (prefix: string) => {

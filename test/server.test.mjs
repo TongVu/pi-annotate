@@ -6,6 +6,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createChatPresence } from "../src/chat-presence.ts";
+import { createChatNoteStore } from "../src/chat-notes.ts";
 import { startAnnotationServer } from "../src/server.ts";
 
 async function fixture(t, options = {}) {
@@ -109,6 +110,36 @@ test("busy editor preserves annotations for a later retry", async (t) => {
   busy = false;
   assert.equal((await f.post()).status, 200);
   assert.equal(appended, 1);
+});
+
+test("chat note API persists per session across servers and flushes on disconnect", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "pi-annotate-notes-api-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const noteStore = createChatNoteStore(directory);
+  const chat = () => ({
+    noteStore,
+    getSessionId: () => "persisted-session",
+    getBranch: () => [],
+    isIdle: () => true,
+    onSend: async () => {},
+  });
+  const first = await fixture(t, { chat: chat() });
+  const getNote = (server) => fetch(`${server.base}/api/note`, { headers: server.headers });
+  const saveNote = (server, markdown) => fetch(`${server.base}/api/note`, {
+    method: "POST", headers: server.headers, body: JSON.stringify({ markdown }),
+  });
+  assert.equal((await fetch(`${first.base}/api/note`)).status, 401);
+  assert.deepEqual(await (await getNote(first)).json(), { markdown: "" });
+  assert.equal((await saveNote(first, "# Saved across chat sessions")).status, 200);
+  assert.deepEqual(await (await getNote(first)).json(), { markdown: "# Saved across chat sessions" });
+  const closed = await fetch(`${first.base}/api/close`, {
+    method: "POST", headers: first.headers, body: JSON.stringify({ markdown: "Final note on close" }),
+  });
+  assert.equal(closed.status, 200);
+
+  const second = await fixture(t, { chat: chat() });
+  assert.deepEqual(await (await getNote(second)).json(), { markdown: "Final note on close" });
+  assert.equal((await saveNote(second, "x".repeat(32_001))).status, 400);
 });
 
 test("chat session rename validates names and updates Pi through the authenticated route", async (t) => {
@@ -266,19 +297,26 @@ test("opening a saved chat requires the catalogued ID and refuses an active or p
   const childStarting = Promise.withResolvers();
   const childAccepted = Promise.withResolvers();
   const launches = [];
+  const clones = [];
   const f = await fixture(t, { chat: {
     getBranch: () => [], isIdle: () => true,
     presence: { list: async () => peers, close: () => {} },
     explorer: {
       current: () => live, list: async () => [saved],
       launch: async (session) => { launches.push(session); childStarting.resolve(); await childAccepted.promise; return "attached"; },
+      clone: async (session) => clones.push(session),
     },
   } });
   t.after(childAccepted.resolve);
   const open = (body, headers = f.headers) => fetch(`${f.base}/api/session/open`, { method: "POST", headers, body: JSON.stringify(body) });
+  const clone = (body) => fetch(`${f.base}/api/session/clone`, { method: "POST", headers: f.headers, body: JSON.stringify(body) });
   assert.equal((await open({ id: "saved" })).status, 404);
   const catalog = await (await fetch(`${f.base}/api/sessions`, { headers: f.headers })).json();
   assert.equal(catalog.canOpen, true);
+  assert.equal(catalog.sessions[0].canClone, true);
+  assert.equal((await clone({ id: "saved" })).status, 202);
+  assert.deepEqual(clones, [saved]);
+  assert.equal((await clone({ id: saved.path })).status, 404);
   assert.equal((await open({ id: "saved" }, { ...f.headers, Origin: "https://other.example" })).status, 403);
   assert.equal((await open({ id: "saved" }, { ...f.headers, Authorization: "Bearer wrong" })).status, 401);
   assert.equal((await open({ id: saved.path })).status, 404);

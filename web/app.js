@@ -23,6 +23,9 @@ const chatNotePreviewToggle = $("chat-note-preview-toggle");
 const chatNoteCopy = $("chat-note-copy");
 const chatNoteExpand = $("chat-note-expand");
 let chatSessionId;
+let chatNoteReady = false;
+let chatNoteSaveTimer;
+let chatNoteSaveQueue = Promise.resolve();
 let chatNotePreviewing = false;
 let chatNoteHome;
 const imagePreview = $("image-preview");
@@ -41,6 +44,7 @@ let readingFiles = false;
 let chat = false;
 let cursor = null;
 let liveTitle = "Chat · Pi";
+let chatStatusEmoji = "⚪";
 let liveSessionName;
 let catalog;
 let catalogProblem = "";
@@ -72,11 +76,12 @@ function chatNoteStatus(message, error = false) {
 }
 
 function updateChatNoteControls() {
-  chatNoteCopy.disabled = !chatNoteInput.value.trim();
+  chatNoteCopy.disabled = !chatNoteReady || !chatNoteInput.value.trim();
 }
 
 function loadChatNote(sessionId) {
   chatSessionId = typeof sessionId === "string" && sessionId ? sessionId : undefined;
+  chatNoteReady = false;
   chatNoteInput.value = "";
   chatNotePreview.replaceChildren();
   chatNoteInput.hidden = false;
@@ -91,21 +96,54 @@ function loadChatNote(sessionId) {
   chatNotePreviewToggle.title = "Preview Markdown note";
   chatNotePreviewToggle.setAttribute("aria-pressed", "false");
   chatNoteStatus("");
-  if (chatSessionId) {
-    try { chatNoteInput.value = localStorage.getItem(`pi-annotate:markdown-note:v1:${chatSessionId}`) ?? ""; }
-    catch { chatNoteStatus("Could not load this chat’s note from browser storage.", true); }
-  } else {
+  if (!chatSessionId) {
+    chatNoteReady = true;
     chatNoteStatus("Session ID unavailable. Run /reload in Pi, then reopen /chat to save this note.", true);
+    updateChatNoteControls();
+    return;
   }
-  updateChatNoteControls();
+  chatNoteInput.disabled = true;
+  chatNoteExpand.disabled = true;
+  chatNotePreviewToggle.disabled = true;
+  chatNoteStatus("Loading this chat’s saved note…");
+  let legacyNote = null;
+  const legacyKey = `pi-annotate:markdown-note:v1:${chatSessionId}`;
+  try { legacyNote = localStorage.getItem(legacyKey); } catch { /* The server store remains authoritative. */ }
+  void (async () => {
+    try {
+      const saved = await api("/api/note");
+      if (typeof saved.markdown !== "string") throw new Error("Invalid saved note response.");
+      let markdown = saved.markdown;
+      if (!markdown && legacyNote) {
+        await api("/api/note", { markdown: legacyNote });
+        markdown = legacyNote;
+      }
+      chatNoteInput.value = markdown;
+      try { localStorage.removeItem(legacyKey); } catch { /* Migration can be retried next time. */ }
+      chatNoteStatus("");
+    } catch (error) {
+      chatNoteInput.value = legacyNote ?? "";
+      chatNoteStatus(error.message || "Could not load this chat’s saved note.", true);
+    } finally {
+      chatNoteReady = true;
+      chatNoteInput.disabled = false;
+      chatNoteExpand.disabled = false;
+      chatNotePreviewToggle.disabled = false;
+      updateChatNoteControls();
+    }
+  })();
+}
+
+function updateLiveDocumentTitle() {
+  document.title = `${chatStatusEmoji} ${liveTitle}`;
 }
 
 function updateSessionTitle(name) {
   liveSessionName = typeof name === "string" && name.trim() ? name.trim() : undefined;
   liveTitle = liveSessionName || "Chat · Pi";
   sessionTitleText.textContent = liveSessionName || "Untitled chat";
-  $("rename-session").title = liveSessionName ? `Rename ${liveSessionName}` : "Name this chat";
-  if (!savedSessionId) document.title = liveTitle;
+  $("rename-session").setAttribute("aria-label", liveSessionName ? `Rename ${liveSessionName}` : "Name this chat");
+  if (!savedSessionId) updateLiveDocumentTitle();
   if (catalog && catalog.current.name !== liveSessionName) {
     catalog.current.name = liveSessionName;
     renderSessionList();
@@ -487,6 +525,19 @@ chatNoteDialog.addEventListener("click", (event) => {
   if (event.target === chatNoteDialog) chatNoteDialog.close();
 });
 
+function saveChatNote(keepalive = false) {
+  clearTimeout(chatNoteSaveTimer);
+  if (!chatSessionId || !chatNoteReady) return Promise.resolve();
+  const markdown = chatNoteInput.value;
+  const save = chatNoteSaveQueue.catch(() => {}).then(() => api("/api/note", { markdown }, { keepalive }));
+  chatNoteSaveQueue = save;
+  return save.then(() => {
+    if (!keepalive && markdown === chatNoteInput.value) chatNoteStatus("Saved for this chat.");
+  }, (error) => {
+    if (markdown === chatNoteInput.value) chatNoteStatus(error.message || "Could not save this chat’s note.", true);
+  });
+}
+
 chatNoteInput.addEventListener("input", () => {
   updateChatNoteControls();
   chatNoteStatus("");
@@ -494,9 +545,11 @@ chatNoteInput.addEventListener("input", () => {
     chatNoteStatus("Session ID unavailable. Run /reload in Pi, then reopen /chat to save this note.", true);
     return;
   }
-  try { localStorage.setItem(`pi-annotate:markdown-note:v1:${chatSessionId}`, chatNoteInput.value); }
-  catch { chatNoteStatus("Could not save this note in browser storage.", true); }
+  if (!chatNoteReady) return;
+  clearTimeout(chatNoteSaveTimer);
+  chatNoteSaveTimer = setTimeout(() => { void saveChatNote(); }, 350);
 });
+chatNoteInput.addEventListener("blur", () => { void saveChatNote(); });
 chatNotePreviewToggle.addEventListener("click", async () => {
   if (chatNotePreviewing) {
     chatNoteInput.hidden = false;
@@ -660,12 +713,24 @@ const chatStates = {
   disconnected: "Disconnected. If it persists, run /chat again in Pi.",
 };
 
+function updateFaviconStatus(state) {
+  const colors = { ready: "#2f9b69", working: "#dc4141", stopped: "#d99b25", disconnected: "#858b91" };
+  const statusColor = colors[state] ?? colors.disconnected;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="#4169f5"/><stop offset="1" stop-color="#16c3b4"/></linearGradient></defs><rect width="32" height="32" rx="7" fill="url(#g)"/><g fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round"><path d="m8 11 8-5 8 5v10l-8 5-8-5zM8 11l8 5 8-5M16 16v10m-8-5 8-5 8 5"/></g><g fill="white"><circle cx="8" cy="11" r="3"/><circle cx="16" cy="6" r="3"/><circle cx="24" cy="11" r="3"/><circle cx="8" cy="21" r="3"/><circle cx="16" cy="16" r="3"/><circle cx="24" cy="21" r="3"/><circle cx="16" cy="26" r="3"/></g><circle cx="26" cy="26" r="5" fill="${statusColor}" stroke="white" stroke-width="2"/></svg>`;
+  const favicon = $("app-favicon");
+  favicon.type = "image/svg+xml";
+  favicon.href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
 function setChatState(state) {
   const indicator = $("chat-state");
   if (indicator.dataset.state === state) return;
   indicator.dataset.state = state;
   indicator.title = chatStates[state];
   indicator.querySelector(".chat-state-label").textContent = chatStates[state];
+  chatStatusEmoji = ({ ready: "🟢", working: "🔴", stopped: "🟠", disconnected: "⚪" })[state] ?? "⚪";
+  updateFaviconStatus(state);
+  if (!savedSessionId) updateLiveDocumentTitle();
 }
 
 function renderTurn(message, session) {
@@ -699,6 +764,17 @@ function hideMessagePreview() {
   messagePreview?.remove();
   messagePreview = undefined;
 }
+function bindMessageTooltip(target, text) {
+  target.removeAttribute("title");
+  target.dataset.tooltip = text;
+  target.addEventListener("mouseenter", () => showMessagePreview(target, text));
+  target.addEventListener("mouseleave", hideMessagePreview);
+  target.addEventListener("focus", () => showMessagePreview(target, text));
+  target.addEventListener("blur", hideMessagePreview);
+}
+
+document.querySelectorAll('#chat-explorer [title], #explorer-toggle[title]').forEach((target) => bindMessageTooltip(target, target.title));
+
 function showMessagePreview(dot, text) {
   hideMessagePreview();
   messagePreview = document.createElement("div");
@@ -843,6 +919,19 @@ function updateSavedLaunchButton() {
   openSavedButton.textContent = alreadyOpen ? "Open in another tab" : opening ? "Starting Pi…" : "Resume in browser";
 }
 
+async function cloneChatSession(id, button) {
+  if (button.disabled) return;
+  button.disabled = true;
+  try {
+    await api("/api/session/clone", { id });
+    status("Cloned chat in a new Pi session.");
+  } catch (error) {
+    status(error.message || "Could not clone this chat session.", true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function openSavedInBrowser() {
   const id = savedSessionId;
   if (!id || openSavedButton.hidden || openSavedButton.disabled) return;
@@ -899,7 +988,7 @@ function renderSessionList() {
       });
       const heading = document.createElement("summary");
       heading.textContent = cwd.split(/[\\/]/).filter(Boolean).at(-1) || cwd || "Unknown directory";
-      heading.title = cwd;
+      bindMessageTooltip(heading, cwd);
       element.append(heading);
       list.append(element);
       group = { element, roots: [] };
@@ -917,14 +1006,6 @@ function renderSessionList() {
     title.className = "session-name";
     title.textContent = name;
     button.append(title);
-    if (active) {
-      const indicator = document.createElement("span");
-      indicator.className = "session-indicator live";
-      indicator.title = own ? "Live session" : "Live in another tab";
-      indicator.setAttribute("role", "img");
-      indicator.setAttribute("aria-label", indicator.title);
-      button.append(indicator);
-    }
     button.addEventListener("mouseenter", () => showMessagePreview(button, name));
     button.addEventListener("mouseleave", hideMessagePreview);
     button.addEventListener("focus", () => showMessagePreview(button, name));
@@ -935,13 +1016,53 @@ function renderSessionList() {
       else status("This chat is live in another tab and has no saved transcript yet.");
     });
     row.append(button);
+    if (active) {
+      const actions = document.createElement("span");
+      actions.className = "session-live-actions";
+      const indicator = document.createElement("span");
+      indicator.className = "session-indicator live";
+      indicator.setAttribute("role", "img");
+      indicator.setAttribute("aria-label", own ? "Live session" : "Live in another tab");
+      bindMessageTooltip(indicator, indicator.getAttribute("aria-label"));
+      actions.append(indicator);
+      if (session.canClone) {
+        const clone = document.createElement("button");
+        clone.type = "button";
+        clone.className = "secondary session-clone";
+        clone.textContent = "🧬";
+        clone.setAttribute("aria-label", `Clone chat session ${name}`);
+        bindMessageTooltip(clone, `Clone chat session ${name}`);
+        clone.addEventListener("click", () => void cloneChatSession(id, clone));
+        actions.append(clone);
+      }
+      row.append(actions);
+    }
     if (!own && !active && cwd) {
       const copy = document.createElement("button");
       copy.type = "button";
       copy.className = "secondary session-copy";
-      copy.title = "Copy resume command";
       copy.setAttribute("aria-label", `Copy resume command for ${name}`);
-      copy.textContent = "⧉";
+      bindMessageTooltip(copy, "Copy resume command");
+      const copyIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      copyIcon.setAttribute("viewBox", "0 0 24 24");
+      copyIcon.setAttribute("width", "16");
+      copyIcon.setAttribute("height", "16");
+      copyIcon.setAttribute("fill", "none");
+      copyIcon.setAttribute("stroke", "currentColor");
+      copyIcon.setAttribute("stroke-width", "1.8");
+      copyIcon.setAttribute("stroke-linecap", "round");
+      copyIcon.setAttribute("stroke-linejoin", "round");
+      copyIcon.setAttribute("aria-hidden", "true");
+      const copyShape = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      copyShape.setAttribute("x", "8");
+      copyShape.setAttribute("y", "8");
+      copyShape.setAttribute("width", "13");
+      copyShape.setAttribute("height", "13");
+      copyShape.setAttribute("rx", "2");
+      const copyOutline = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      copyOutline.setAttribute("d", "M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3");
+      copyIcon.append(copyShape, copyOutline);
+      copy.append(copyIcon);
       copy.addEventListener("click", () => void copyResumeCommand(id));
       row.append(copy);
     }
@@ -1055,7 +1176,7 @@ function showLiveChat() {
   savedSelection++;
   savedSessionId = undefined;
   clearSavedTranscript();
-  document.title = liveTitle;
+  updateLiveDocumentTitle();
   setSavedView(false);
   if (liveScroll) {
     responseElement.scrollTop = liveScroll.follow ? responseElement.scrollHeight : liveScroll.top;
@@ -1147,7 +1268,8 @@ function startChat(data) {
   window.addEventListener("resize", updateCurrentTurn);
   window.addEventListener("pagehide", () => {
     // A closing tab can't wait for a reply. If the request is dropped, the idle timer reaps it.
-    void api("/api/close", {}, { keepalive: true }).catch(() => {});
+    const body = chatSessionId && chatNoteReady ? { markdown: chatNoteInput.value } : {};
+    void api("/api/close", body, { keepalive: true }).catch(() => {});
   }, { once: true });
   updateChat(data);
   status("");

@@ -18,7 +18,7 @@ function fixture(t) {
   const ctx = {
     mode: "tui",
     isIdle: () => !busy,
-    sessionManager: { getBranch: () => branch, getSessionId: () => session, getSessionName: () => undefined },
+    sessionManager: { getBranch: () => branch, getSessionDir: () => "/tmp/pi-annotate-extension-tests", getSessionId: () => session, getSessionName: () => undefined },
     ui: {
       notify: (message) => notices.push(message),
       getEditorText: () => draft,

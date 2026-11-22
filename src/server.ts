@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { MAX_ANNOTATIONS, validateAnnotations, formatAnnotations, formatChatAnnotations, userImageBlocks, visibleChatMessage } from "./annotations.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { shellQuote } from "./resume-chat.ts";
+import { CHAT_NOTE_LIMIT } from "./chat-notes.ts";
 
 const assets = {
   "/": ["index.html", "text/html; charset=utf-8"],
@@ -19,6 +20,7 @@ const ATTACHMENTS_LIMIT = 10 * 1024 * 1024;
 const TEXT_FILES_LIMIT = 128 * 1024;
 const FILE_BASE64_LIMIT = Math.ceil(FILE_LIMIT / 3) * 4;
 const CHAT_BODY_LIMIT = BODY_LIMIT + Math.ceil(ATTACHMENTS_LIMIT / 3) * 4 + MAX_ATTACHMENTS * 4;
+const NOTE_BODY_LIMIT = 256 * 1024;
 const utf8 = new TextDecoder("utf-8", { fatal: true });
 
 function readBody(req, limit) {
@@ -114,11 +116,13 @@ function readChatImage(branch, id, index) {
   if (imageMimeType(bytes) === image.mimeType) return { bytes, mimeType: image.mimeType };
 }
 
-function explorerRoutes({ current, list, read, launch }, presence) {
+function explorerRoutes({ current, list, read, launch, clone }, presence) {
   let catalog = new Map();
+  let liveCloneSession;
   let saved;
   let listing;
   const opening = new Map();
+  const cloning = new Map();
   const savedBranch = (id) => {
     const session = catalog.get(id);
     if (!session) return;
@@ -142,6 +146,7 @@ function explorerRoutes({ current, list, read, launch }, presence) {
       const liveRecord = sessions.find(({ id }) => id === live.id) ??
         sessions.find(({ path }) => live.path && resolve(path) === resolve(live.path));
       const liveParent = parentId(liveRecord);
+      liveCloneSession = liveRecord;
       catalog = new Map();
       saved = undefined;
       for (const session of sessions) {
@@ -152,8 +157,8 @@ function explorerRoutes({ current, list, read, launch }, presence) {
         catalog.set(id, { id, cwd, path, name: title, ...(parent ? { parentId: parent } : {}) });
       }
       return {
-        current: { id: live.id, cwd: live.cwd, name: live.name, ...(liveParent ? { parentId: liveParent } : {}) },
-        sessions: [...catalog.values()].map(({ id, cwd, name, parentId }) => ({ id, cwd, name, ...(parentId ? { parentId } : {}) })),
+        current: { id: live.id, cwd: live.cwd, name: live.name, ...(liveParent ? { parentId: liveParent } : {}), ...(liveRecord && clone ? { canClone: true } : {}) },
+        sessions: [...catalog.values()].filter(({ id }) => id !== live.id).map(({ id, cwd, name, parentId }) => ({ id, cwd, name, ...(parentId ? { parentId } : {}), ...(clone ? { canClone: true } : {}) })),
         ...(launch ? { canOpen: true } : {}),
       };
     },
@@ -183,6 +188,25 @@ function explorerRoutes({ current, list, read, launch }, presence) {
         if (opening.get(id) === Infinity) opening.delete(id);
       }
     },
+    async cloneSession(id, reply, checkCurrent) {
+      const session = typeof id === "string" && (id === current().id ? liveCloneSession : catalog.get(id));
+      if (!clone || !session?.cwd) return reply(404, { error: "This chat cannot be cloned. Refresh the explorer." });
+      if ((cloning.get(id) ?? 0) > Date.now()) return reply(409, { error: "Pi is already cloning this chat. Check Terminal." });
+      cloning.set(id, Infinity);
+      try {
+        if (!checkCurrent()) return;
+        await clone(session);
+        cloning.set(id, Date.now() + 60_000);
+        return reply(202, { ok: true });
+      } catch (error) {
+        if (error?.status !== 404) throw error;
+        if (current().id === id) liveCloneSession = undefined;
+        else catalog.delete(id);
+        return reply(404, { error: error.message });
+      } finally {
+        if (cloning.get(id) === Infinity) cloning.delete(id);
+      }
+    },
     resumeCommand(id) {
       const session = catalog.get(id);
       if (!session?.cwd) return;
@@ -199,7 +223,7 @@ function explorerRoutes({ current, list, read, launch }, presence) {
   };
 }
 
-function chatRoutes({ getSessionId, getSessionName, setSessionName, getBranch, isIdle, onSend }) {
+function chatRoutes({ noteStore, getSessionId, getSessionName, setSessionName, getBranch, isIdle, onSend }) {
   const rendered = new Map();
   const requests = new Map();
   let inFlight = false;
@@ -223,6 +247,16 @@ function chatRoutes({ getSessionId, getSessionName, setSessionName, getBranch, i
     },
     image(id, index) {
       return readChatImage(getBranch(), id, index);
+    },
+    async readNote() {
+      const sessionId = getSessionId?.();
+      if (!noteStore || typeof sessionId !== "string" || !sessionId) throw new Error("Persistent note storage is unavailable.");
+      return noteStore.read(sessionId);
+    },
+    async saveNote(markdown) {
+      const sessionId = getSessionId?.();
+      if (!noteStore || typeof sessionId !== "string" || !sessionId) throw new Error("Persistent note storage is unavailable.");
+      await noteStore.write(sessionId, markdown);
     },
     rename(name, reply) {
       if (typeof name !== "string" || !name.trim() || name.trim().length > 100 || /[\u0000-\u001f\u007f]/.test(name)) {
@@ -339,6 +373,11 @@ export async function startAnnotationServer({ response, onSubmit, chat, onClose,
         return;
       }
       const url = new URL(req.url, origin);
+      if (live && req.method === "GET" && url.pathname === "/api/note") {
+        const markdown = await live.readNote();
+        if (checkCurrent()) reply(200, { markdown });
+        return;
+      }
       if (live && req.method === "GET" && url.pathname === "/api/activity") {
         const sessions = await presence?.list() ?? [];
         explorer?.noteActive(sessions);
@@ -384,21 +423,36 @@ export async function startAnnotationServer({ response, onSubmit, chat, onClose,
       const disconnect = live && req.url === "/api/close";
       const renameSession = live && req.url === "/api/session/name";
       const renderNote = live && req.url === "/api/markdown";
+      const saveNote = live && req.url === "/api/note";
       const openSession = explorer && req.url === "/api/session/open";
-      if (req.method === "POST" && (disconnect || renameSession || renderNote || openSession || req.url === (live ? "/api/chat" : "/api/annotations"))) {
+      const cloneSession = explorer && req.url === "/api/session/clone";
+      if (req.method === "POST" && (disconnect || renameSession || renderNote || saveNote || openSession || cloneSession || req.url === (live ? "/api/chat" : "/api/annotations"))) {
         if (req.headers.origin !== origin || req.headers["content-type"] !== "application/json") {
           reply(403, { error: "Expected a same-origin JSON request." });
           return;
         }
         if (disconnect) {
+          const raw = await readBody(req, NOTE_BODY_LIMIT);
+          const body = raw.length ? JSON.parse(raw.toString("utf8")) : {};
+          if (body?.markdown !== undefined) {
+            if (!checkCurrent()) return;
+            await live.saveNote(body.markdown);
+            if (!checkCurrent()) return;
+          }
           res.once("finish", close);
           reply(200, { ok: true });
           return;
         }
-        const raw = await readBody(req, renderNote ? 128 * 1024 : openSession || renameSession ? 4096 : live ? CHAT_BODY_LIMIT : BODY_LIMIT);
+        const raw = await readBody(req, renderNote || saveNote ? NOTE_BODY_LIMIT : openSession || renameSession ? 4096 : live ? CHAT_BODY_LIMIT : BODY_LIMIT);
         const body = JSON.parse(raw.toString("utf8"));
+        if (saveNote) {
+          if (!checkCurrent()) return;
+          await live.saveNote(body?.markdown);
+          if (checkCurrent()) reply(200, { ok: true });
+          return;
+        }
         if (renderNote) {
-          if (typeof body?.markdown !== "string" || body.markdown.length > 32000) throw new Error("Markdown notes must be 32,000 characters or less.");
+          if (typeof body?.markdown !== "string" || body.markdown.length > CHAT_NOTE_LIMIT) throw new Error(`Markdown notes must be ${CHAT_NOTE_LIMIT.toLocaleString()} characters or less.`);
           if (checkCurrent()) reply(200, renderMarkdown(body.markdown));
           return;
         }
@@ -408,6 +462,10 @@ export async function startAnnotationServer({ response, onSubmit, chat, onClose,
         }
         if (openSession) {
           if (checkCurrent()) await explorer.open(body?.id, reply, checkCurrent);
+          return;
+        }
+        if (cloneSession) {
+          if (checkCurrent()) await explorer.cloneSession(body?.id, reply, checkCurrent);
           return;
         }
         const annotationImages = hasAnnotationImages(body?.annotations);
