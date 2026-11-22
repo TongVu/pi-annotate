@@ -255,14 +255,16 @@ test("status icon distinguishes ready, working, stopped and disconnected", async
   assert.equal(indicator.dataset.state, "working");
   assert.match(indicator.textContent, /working/);
   assert.match(favicon(), /fill="#dc4141"/);
-  assert.match(f.window.document.title, /^🔴 /);
+  assert.match(f.window.document.title, /^🏗️ /);
   busy = false;
   failed = true;
   await f.poll();
   assert.equal(indicator.dataset.state, "stopped");
+  assert.match(f.window.document.title, /^🚫 /);
   offline = true;
   await f.poll();
   assert.equal(indicator.dataset.state, "disconnected");
+  assert.match(f.window.document.title, /^🔌 /);
 });
 
 test("chat tab follows the Pi session name and moves chat controls out of the header", async (t) => {
@@ -270,7 +272,7 @@ test("chat tab follows the Pi session name and moves chat controls out of the he
   const f = await fixture(t, { chatFetch: async () => ({
     ok: true, json: async () => ({ mode: "chat", protocol: 2, cursor: null, messages: [], busy: false, sessionName }),
   }) });
-  assert.equal(f.window.document.title, `🟢 ${sessionName}`);
+  assert.equal(f.window.document.title, `👾 ${sessionName}`);
   assert.equal(f.$("page-intro").hidden, true);
   assert.equal(f.$("chat-state").hidden, false);
   assert.equal(f.$("chat-state").parentElement, f.$("chat-form").querySelector(".actions"));
@@ -281,11 +283,11 @@ test("chat tab follows the Pi session name and moves chat controls out of the he
 
   sessionName = "Renamed <em>chat</em>";
   await f.poll();
-  assert.equal(f.window.document.title, `🟢 ${sessionName}`);
+  assert.equal(f.window.document.title, `👾 ${sessionName}`);
 
   sessionName = undefined;
   await f.poll();
-  assert.equal(f.window.document.title, "🟢 Chat · Pi");
+  assert.equal(f.window.document.title, "👾 Chat · Pi");
 });
 
 test("the sticky session pill renames the Pi session and updates the browser tab", async (t) => {
@@ -307,7 +309,7 @@ test("the sticky session pill renames the Pi session and updates the browser tab
   const pill = f.$("session-title-pill");
   assert.equal(pill.hidden, false);
   assert.equal(f.$("session-title-text").textContent, sessionName);
-  assert.equal(f.window.document.title, `🟢 ${sessionName}`);
+  assert.equal(f.window.document.title, `👾 ${sessionName}`);
   f.$("rename-session").click();
   const input = f.$("rename-session-input");
   input.value = "Personal repository cleanup";
@@ -319,7 +321,7 @@ test("the sticky session pill renames the Pi session and updates the browser tab
   await tick();
   assert.equal(renamed, input.value);
   assert.equal(f.$("session-title-text").textContent, renamed);
-  assert.equal(f.window.document.title, `🟢 ${renamed}`);
+  assert.equal(f.window.document.title, `👾 ${renamed}`);
   assert.equal(f.$("status").textContent, "Chat renamed.");
 });
 
@@ -392,6 +394,7 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.equal(refresh.textContent.trim(), "");
   assert.equal(refresh.getAttribute("aria-label"), "Refresh chats");
   assert.ok(refresh.querySelector("svg"));
+  assert.equal(refresh.parentElement, f.$("project-view-controls"));
   const beta = list.querySelector('summary[data-tooltip="/work/beta"]');
   beta.click();
   await tick();
@@ -401,10 +404,10 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.ok(controls.parentElement.firstElementChild === controls, "view-mode pill replaces the old heading position");
   assert.equal(f.$("session-filter").getAttribute("aria-label"), "Search chats by name or directory");
   assert.ok(f.$("session-filter").closest(".session-search").querySelector('svg[aria-hidden="true"]'));
-  assert.deepEqual([...controls.querySelectorAll("button")].map((button) => button.getAttribute("aria-label")), ["Collapse all", "Show current chat in explorer", "Expand all"]);
+  assert.deepEqual([...controls.querySelectorAll("button")].map((button) => button.getAttribute("aria-label")), ["Collapse all", "Show current chat in explorer", "Expand all", "Refresh chats"]);
   assert.ok(controls.querySelector('[data-action="show-current"] svg path'));
   assert.ok(controls.querySelector('[data-action="show-current"] svg circle'));
-  assert.equal(controls.querySelectorAll('svg[aria-hidden="true"]').length, 3);
+  assert.equal(controls.querySelectorAll('svg[aria-hidden="true"]').length, 4);
   const setMode = (mode) => {
     const button = controls.querySelector(`[data-mode="${mode}"]`);
     button.click();
@@ -465,7 +468,7 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.match(f.$("response").textContent, /New live message/);
 
   f.$("back-to-live").click();
-  assert.equal(f.window.document.title, "🟢 Live chat");
+  assert.equal(f.window.document.title, "👾 Live chat");
   assert.equal(f.$("conversation").hidden, false);
   assert.equal(f.$("right-panel").hidden, false);
   assert.equal(f.$("saved-conversation").hidden, true);

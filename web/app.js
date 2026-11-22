@@ -728,7 +728,7 @@ function setChatState(state) {
   indicator.dataset.state = state;
   indicator.title = chatStates[state];
   indicator.querySelector(".chat-state-label").textContent = chatStates[state];
-  chatStatusEmoji = ({ ready: "🟢", working: "🔴", stopped: "🟠", disconnected: "⚪" })[state] ?? "⚪";
+  chatStatusEmoji = ({ ready: "👾", working: "🏗️", stopped: "🚫", disconnected: "🔌" })[state] ?? "🔌";
   updateFaviconStatus(state);
   if (!savedSessionId) updateLiveDocumentTitle();
 }
