@@ -29,9 +29,11 @@ sessions by working directory. Both regular and fullscreen terminal modes work.
    open the link yourself. You can start from an empty session. If the session
    has a name, it appears in the browser tab.
 2. Type a message in the bottom composer, or select text in a Pi reply and add a
-   question to the right panel. The dots stay centered on the left as you scroll;
-   the current turn is blue. Hover to preview a message or click to jump to it.
-3. Press **Enter** or click the paper plane to send an ordinary message.
+   question to the right panel. Keep reusable Markdown in the right-panel note;
+   it saves per chat in this browser and can be previewed or copied as Markdown.
+   The dots stay centered on the left as you scroll; the current turn is blue.
+   Hover to preview a message or click to jump to it.
+3. Press **Enter** or click the checkmark button to send an ordinary message.
    **Shift+Enter** inserts a newline. Click **Send questions** to submit the
    annotation batch. You can paste a screenshot into an annotation's comment
    field or attach images with its clipboard button. Each question keeps its own
@@ -64,15 +66,16 @@ by project directory, with forked sessions nested under their Pi parent session
 when that parent is available. Click a project heading to collapse or expand its
 sessions. Type a session name or directory to filter the list; matches appear
 even in collapsed projects. Use **Collapse all** or **Expand all** to change
-every folder, and **Normal** to restore your individual folder choices. Unnamed
-saved sessions use the first message when available. Click the refresh icon to
+every folder. The pin button clears the filter if needed, opens only the current
+chat's project folder, and scrolls that chat into view. Unnamed saved sessions
+use the first message when available. Click the refresh icon to
 pick up newer sessions. Long chat names are clamped to two lines; hover or focus
 a name to preview its full text.
 
 Green dots mark sessions with an open `/chat` tab under the same Pi agent setup;
 inactive, read-only sessions have no status dot. Only the session attached to
 this tab can receive messages here; use the original tab to send to another green chat.
-On macOS, open a yellow session and click **Resume in browser**. If Pi is already
+On macOS, open an inactive session and click **Resume in browser**. If Pi is already
 running that session with the current extension loaded, it opens a browser tab
 from the existing process, so any in-progress turn keeps running. Otherwise it
 starts the exact session in a new Terminal window from its original project

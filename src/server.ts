@@ -199,7 +199,7 @@ function explorerRoutes({ current, list, read, launch }, presence) {
   };
 }
 
-function chatRoutes({ getSessionName, setSessionName, getBranch, isIdle, onSend }) {
+function chatRoutes({ getSessionId, getSessionName, setSessionName, getBranch, isIdle, onSend }) {
   const rendered = new Map();
   const requests = new Map();
   let inFlight = false;
@@ -219,7 +219,7 @@ function chatRoutes({ getSessionName, setSessionName, getBranch, isIdle, onSend 
       const busy = inFlight || !isIdle();
       const last = branch.findLast((entry) => entry.type === "message" && ["user", "assistant"].includes(entry.message.role));
       const failed = !busy && ["error", "aborted"].includes(last?.message.stopReason);
-      reply(200, { mode: "chat", protocol: 2, annotationImages: true, sessionName: getSessionName?.(), cursor: branch.at(-1)?.id ?? null, messages, busy, failed });
+      reply(200, { mode: "chat", protocol: 2, annotationImages: true, sessionId: getSessionId?.(), sessionName: getSessionName?.(), cursor: branch.at(-1)?.id ?? null, messages, busy, failed });
     },
     image(id, index) {
       return readChatImage(getBranch(), id, index);
@@ -383,8 +383,9 @@ export async function startAnnotationServer({ response, onSubmit, chat, onClose,
       }
       const disconnect = live && req.url === "/api/close";
       const renameSession = live && req.url === "/api/session/name";
+      const renderNote = live && req.url === "/api/markdown";
       const openSession = explorer && req.url === "/api/session/open";
-      if (req.method === "POST" && (disconnect || renameSession || openSession || req.url === (live ? "/api/chat" : "/api/annotations"))) {
+      if (req.method === "POST" && (disconnect || renameSession || renderNote || openSession || req.url === (live ? "/api/chat" : "/api/annotations"))) {
         if (req.headers.origin !== origin || req.headers["content-type"] !== "application/json") {
           reply(403, { error: "Expected a same-origin JSON request." });
           return;
@@ -394,8 +395,13 @@ export async function startAnnotationServer({ response, onSubmit, chat, onClose,
           reply(200, { ok: true });
           return;
         }
-        const raw = await readBody(req, openSession || renameSession ? 4096 : live ? CHAT_BODY_LIMIT : BODY_LIMIT);
+        const raw = await readBody(req, renderNote ? 128 * 1024 : openSession || renameSession ? 4096 : live ? CHAT_BODY_LIMIT : BODY_LIMIT);
         const body = JSON.parse(raw.toString("utf8"));
+        if (renderNote) {
+          if (typeof body?.markdown !== "string" || body.markdown.length > 32000) throw new Error("Markdown notes must be 32,000 characters or less.");
+          if (checkCurrent()) reply(200, renderMarkdown(body.markdown));
+          return;
+        }
         if (renameSession) {
           if (checkCurrent()) live.rename(body?.name, reply);
           return;

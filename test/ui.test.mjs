@@ -5,12 +5,13 @@ import { JSDOM } from "jsdom";
 import { renderMarkdown } from "../src/markdown.ts";
 import { validateAnnotations } from "../src/annotations.ts";
 
-async function fixture(t, { failFirst = false, markdown = "A reactor module.\n<script>alert('bad')</script>", corruptText = false, legacyServer = false, chatFetch } = {}) {
+async function fixture(t, { failFirst = false, markdown = "A reactor module.\n<script>alert('bad')</script>", corruptText = false, legacyServer = false, chatFetch, storedNotes = {} } = {}) {
   const html = await readFile(new URL("../web/index.html", import.meta.url), "utf8");
   const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
   const dom = new JSDOM(html, { url: "http://127.0.0.1:12345/#test-token", runScripts: "outside-only" });
   t.after(() => dom.window.close());
   const { window } = dom;
+  for (const [sessionId, note] of Object.entries(storedNotes)) window.localStorage.setItem(`pi-annotate:markdown-note:v1:${sessionId}`, note);
   const $ = (id) => window.document.getElementById(id);
   const posts = [];
   const rendered = renderMarkdown(markdown);
@@ -154,8 +155,7 @@ test("chat dots jump to user turns; failed questions are kept, accepted question
   assert.equal(f.$("send").getAttribute("aria-label"), "Send 0 questions");
   assert.equal(f.$("send").textContent, "0");
   assert.equal(f.$("send").classList.contains("chat-question-send"), true);
-  assert.equal(f.$("send").querySelector("svg").getAttribute("width"), f.$("chat-send").querySelector("svg").getAttribute("width"));
-  assert.equal(f.$("send").querySelector("svg path").getAttribute("d"), f.$("chat-send").querySelector("svg path").getAttribute("d"));
+  assert.ok(f.$("send").querySelector("svg"));
   const currentDot = () => f.$("turns").querySelector('[aria-current="location"]');
   assert.equal(currentDot(), f.$("turns").firstElementChild);
   const firstUser = f.$("response").querySelector(".user-turn");
@@ -342,6 +342,9 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
       messages: [{ id: path.includes("?") ? "u2" : "u1", role: "user", text: path.includes("?") ? "New live message" : "Live message" }],
     }) };
   } });
+  assert.equal(f.$("right-panel").hidden, false);
+  const css = await readFile(new URL("../web/style.css", import.meta.url), "utf8");
+  assert.match(css, /\.chat-page #right-panel\[hidden\]\s*\{\s*display:\s*none;\s*\}/);
   const input = f.$("chat-input");
   input.value = "Unsent live draft";
   input.dispatchEvent(new f.window.Event("input"));
@@ -387,8 +390,8 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.equal(f.$("session-filter").getAttribute("aria-label"), "Search chats by name or directory");
   assert.ok(f.$("session-filter").closest(".session-search").querySelector('svg[aria-hidden="true"]'));
   assert.deepEqual([...controls.querySelectorAll("button")].map((button) => button.getAttribute("aria-label")), ["Collapse all", "Show current chat in explorer", "Expand all"]);
-  assert.ok(controls.querySelector('[data-mode="normal"] svg path'));
-  assert.ok(controls.querySelector('[data-mode="normal"] svg circle'));
+  assert.ok(controls.querySelector('[data-action="show-current"] svg path'));
+  assert.ok(controls.querySelector('[data-action="show-current"] svg circle'));
   assert.equal(controls.querySelectorAll('svg[aria-hidden="true"]').length, 3);
   const setMode = (mode) => {
     const button = controls.querySelector(`[data-mode="${mode}"]`);
@@ -398,7 +401,9 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   };
   assert.deepEqual(setMode("collapse"), [false, false]);
   assert.deepEqual(setMode("expand"), [true, true]);
-  assert.deepEqual(setMode("normal"), [true, false]);
+  assert.deepEqual(setMode("collapse"), [false, false]);
+  controls.querySelector('[data-action="show-current"]').click();
+  assert.deepEqual([...list.querySelectorAll("details")].map((group) => group.open), [true, false]);
   assert.equal(scrolled.length, 1, "the pin control scrolls the current chat into view");
   assert.equal(scrolled[0].block, "nearest");
   const filter = f.$("session-filter");
@@ -440,6 +445,7 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.equal(f.$("saved-response").querySelector("strong").textContent, "Saved reply");
   assert.equal(f.$("saved-response").querySelector("[data-response-id]"), null);
   assert.equal(f.$("conversation").hidden, true);
+  assert.equal(f.$("right-panel").hidden, true);
   assert.equal(f.$("chat-send").disabled, true);
   await f.poll();
   assert.equal(f.window.document.title, longTitle);
@@ -448,6 +454,7 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   f.$("back-to-live").click();
   assert.equal(f.window.document.title, "Live chat");
   assert.equal(f.$("conversation").hidden, false);
+  assert.equal(f.$("right-panel").hidden, false);
   assert.equal(f.$("saved-conversation").hidden, true);
   assert.equal(input.value, "Unsent live draft");
   assert.equal(f.$("chat-send").disabled, false);
@@ -508,6 +515,55 @@ test("saved-chat launch leaves the live composer alone and refresh drops a delet
   assert.equal(f.$("chat-input").value, "Keep this draft");
 });
 
+test("Markdown notes persist per chat, preview safely, and copy their source", async (t) => {
+  const sessionId = "note-session";
+  const fetchChat = async (path, body) => {
+    if (path === "/api/response") return { ok: true, json: async () => ({ mode: "chat", protocol: 2, sessionId, cursor: null, messages: [], busy: false }) };
+    if (path === "/api/markdown") return { ok: true, json: async () => renderMarkdown(body.markdown) };
+    throw new Error(`Unexpected chat request: ${path}`);
+  };
+  const f = await fixture(t, { chatFetch: fetchChat, storedNotes: { [sessionId]: "# Saved snippet" } });
+  const note = f.$("chat-note-input");
+  const key = `pi-annotate:markdown-note:v1:${sessionId}`;
+  assert.equal(f.$("chat-note").hidden, false);
+  assert.equal(f.$("chat-note").parentElement, f.$("annotations-panel").parentElement);
+  assert.notEqual(f.$("chat-note").parentElement, f.$("annotations-panel"));
+  assert.equal(f.$("chat-note-preview-toggle").textContent.trim(), "");
+  assert.equal(f.$("chat-note-copy").textContent.trim(), "");
+  const expandNote = f.$("chat-note-expand");
+  assert.equal(expandNote.getAttribute("aria-controls"), "chat-note-input");
+  expandNote.click();
+  assert.equal(expandNote.getAttribute("aria-expanded"), "true");
+  assert.equal(expandNote.getAttribute("aria-label"), "Collapse Markdown note");
+  expandNote.click();
+  assert.equal(expandNote.getAttribute("aria-expanded"), "false");
+  assert.equal(note.value, "# Saved snippet");
+  note.value = "# Reusable\n\n**Prompt text** <script>bad()</script>";
+  note.dispatchEvent(new f.window.Event("input"));
+  assert.equal(f.window.localStorage.getItem(key), note.value);
+  f.$("chat-note-preview-toggle").click();
+  await tick();
+  assert.equal(note.hidden, true);
+  assert.ok(f.$("chat-note-preview").querySelector("h1 strong") || f.$("chat-note-preview").querySelector("h1"));
+  assert.equal(f.$("chat-note-preview").querySelector("script"), null);
+  f.$("chat-note-preview-toggle").click();
+  assert.equal(note.hidden, false);
+  const copied = [];
+  Object.defineProperty(f.window.navigator, "clipboard", { value: { writeText: async (text) => copied.push(text) } });
+  f.$("chat-note-copy").click();
+  await tick();
+  assert.deepEqual(copied, [note.value]);
+
+  const reopened = await fixture(t, { chatFetch: fetchChat, storedNotes: { [sessionId]: note.value } });
+  assert.equal(reopened.$("chat-note-input").value, note.value);
+  assert.equal(reopened.$("chat-input").value, "", "the note is separate from the message draft");
+  const otherChat = async (path) => path === "/api/response"
+    ? { ok: true, json: async () => ({ mode: "chat", protocol: 2, sessionId: "another-session", cursor: null, messages: [], busy: false }) }
+    : { ok: true, json: async () => ({}) };
+  const isolated = await fixture(t, { chatFetch: otherChat, storedNotes: { [sessionId]: note.value } });
+  assert.equal(isolated.$("chat-note-input").value, "", "notes are scoped to their Pi session ID");
+});
+
 test("chat composer works from an empty session and clears only its own draft", async (t) => {
   const posts = [];
   const f = await fixture(t, { chatFetch: async (path, body) => {
@@ -531,6 +587,10 @@ test("chat composer works from an empty session and clears only its own draft", 
   assert.ok(f.$("chat-send").closest(".chat-composer").contains(f.$("chat-input")));
   assert.equal(f.$("chat-send").getAttribute("aria-label"), "Send message");
   assert.ok(f.$("chat-send").querySelector("svg"));
+  assert.equal(f.$("chat-send").querySelector("svg").getAttribute("width"), "18");
+  assert.equal(f.$("chat-send").querySelector("svg").getAttribute("stroke-width"), "2");
+  assert.equal(f.$("chat-send").querySelector("svg path").getAttribute("d"), "m5 12 4 4L19 6");
+  assert.equal(f.$("chat-send").querySelector("svg path").getAttribute("d"), f.$("save-annotation").querySelector("svg path").getAttribute("d"));
   assert.equal(f.$("chat-send").disabled, true);
   const input = f.$("chat-input");
   input.value = "Hello from the browser";

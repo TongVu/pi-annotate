@@ -20,7 +20,7 @@
         <button type="button" data-mode="collapse" aria-pressed="false" aria-label="Collapse all" title="Collapse all">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4l6 6m-5 0h5V5m10-1-6 6m0-5v5h5M4 20l6-6m-5 0h5v5m10 1-6-6m0 5v-5h5"/></svg>
         </button>
-        <button type="button" data-mode="normal" aria-pressed="true" aria-label="Show current chat in explorer" title="Show current chat in explorer">
+        <button type="button" data-action="show-current" aria-label="Show current chat in explorer" title="Show current chat in explorer">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 5.5-8 12-8 12S4 15.5 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg>
         </button>
         <button type="button" data-mode="expand" aria-pressed="false" aria-label="Expand all" title="Expand all">
@@ -82,8 +82,8 @@
               </svg>
             </button>
             <button id="chat-send" type="submit" class="composer-icon" aria-label="Send message" title="Send message (Enter)" disabled>
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M22 2 15 22 11 13 2 9 22 2ZM22 2 11 13"/>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="m5 12 4 4L19 6"/>
               </svg>
             </button>
           </div>
@@ -101,10 +101,39 @@
       <p id="saved-status" role="status"></p>
       <div id="saved-response" tabindex="0" aria-label="Saved conversation"></div>
     </section>
-    <aside id="annotations-panel" aria-label="Annotations">
-      <div id="annotation-heading" class="annotation-heading"><h2>Your annotations</h2></div>
-      <p id="empty">Highlight words in the response to ask about them.</p>
-      <ol id="annotations"></ol>
+    <aside id="right-panel" aria-label="Chat tools">
+      <section id="chat-note" aria-labelledby="chat-note-title" hidden>
+        <div class="chat-note-heading">
+          <h2 id="chat-note-title">Markdown note</h2>
+          <div class="chat-note-actions">
+            <button id="chat-note-preview-toggle" type="button" class="secondary composer-icon" aria-label="Preview note" title="Preview Markdown note" aria-pressed="false">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path class="note-preview-icon" d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle class="note-preview-icon" cx="12" cy="12" r="3"/>
+                <path class="note-edit-icon" d="m15 5 4 4M4 20l4.5-1 10-10a2.1 2.1 0 0 0-3-3l-10 10L4 20Z"/>
+              </svg>
+            </button>
+            <button id="chat-note-copy" type="button" class="secondary composer-icon" aria-label="Copy note Markdown" title="Copy note Markdown" disabled>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="chat-note-box">
+          <button id="chat-note-expand" type="button" class="secondary composer-icon" aria-label="Expand Markdown note" aria-controls="chat-note-input" aria-expanded="false" title="Expand Markdown note">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path class="expand-icon" d="M15 3h6v6M21 3l-7 7M9 21H3v-6M3 21l7-7"/>
+              <path class="collapse-icon" d="M21 3l-7 7m0-6v6h6M3 21l7-7m-6 0h6v6"/>
+            </svg>
+          </button>
+          <textarea id="chat-note-input" rows="4" maxlength="32000" aria-label="Reusable Markdown note" placeholder="Keep reusable text here…"></textarea>
+          <div id="chat-note-preview" class="chat-note-preview" hidden></div>
+        </div>
+        <p id="chat-note-status" role="status" aria-live="polite"></p>
+      </section>
+      <section id="annotations-panel" aria-label="Annotations">
+        <div id="annotation-heading" class="annotation-heading"><h2>Your annotations</h2></div>
+        <p id="empty">Highlight words in the response to ask about them.</p>
+        <ol id="annotations"></ol>
+      </section>
     </aside>
   </main>
   <dialog id="rename-session-dialog" aria-labelledby="rename-session-title">

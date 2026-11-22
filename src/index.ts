@@ -108,6 +108,7 @@ export function registerAnnotationExtension(pi: ExtensionAPI, launchPage: (url: 
             }
           },
           chat: chat ? {
+            getSessionId: () => ctx.sessionManager.getSessionId(),
             getSessionName: () => ctx.sessionManager.getSessionName(),
             setSessionName: (sessionName: string) => pi.setSessionName(sessionName),
             presence: createChatPresence(async () => {

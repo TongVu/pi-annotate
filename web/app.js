@@ -15,6 +15,14 @@ let annotationFiles = [];
 let readingAnnotationFiles = false;
 const chatInput = $("chat-input");
 const chatFile = $("chat-file");
+const chatNote = $("chat-note");
+const chatNoteInput = $("chat-note-input");
+const chatNotePreview = $("chat-note-preview");
+const chatNotePreviewToggle = $("chat-note-preview-toggle");
+const chatNoteCopy = $("chat-note-copy");
+const chatNoteExpand = $("chat-note-expand");
+let chatSessionId;
+let chatNotePreviewing = false;
 const imagePreview = $("image-preview");
 const previewImage = $("preview-image");
 const sessionTitlePill = $("session-title-pill");
@@ -53,6 +61,40 @@ let editing = -1;
 function status(message, error = false) {
   $("status").textContent = message;
   $("status").classList.toggle("error", error);
+}
+
+function chatNoteStatus(message, error = false) {
+  const element = $("chat-note-status");
+  element.textContent = message;
+  element.classList.toggle("error", error);
+}
+
+function updateChatNoteControls() {
+  chatNoteCopy.disabled = !chatNoteInput.value.trim();
+}
+
+function loadChatNote(sessionId) {
+  chatSessionId = typeof sessionId === "string" && sessionId ? sessionId : undefined;
+  chatNoteInput.value = "";
+  chatNotePreview.replaceChildren();
+  chatNoteInput.hidden = false;
+  chatNotePreview.hidden = true;
+  chatNotePreviewing = false;
+  chatNoteExpand.hidden = false;
+  chatNoteExpand.setAttribute("aria-expanded", "false");
+  chatNoteExpand.setAttribute("aria-label", "Expand Markdown note");
+  chatNoteExpand.title = "Expand Markdown note";
+  chatNotePreviewToggle.setAttribute("aria-label", "Preview note");
+  chatNotePreviewToggle.title = "Preview Markdown note";
+  chatNotePreviewToggle.setAttribute("aria-pressed", "false");
+  chatNoteStatus("");
+  if (chatSessionId) {
+    try { chatNoteInput.value = localStorage.getItem(`pi-annotate:markdown-note:v1:${chatSessionId}`) ?? ""; }
+    catch { chatNoteStatus("Could not load this chat’s note from browser storage.", true); }
+  } else {
+    chatNoteStatus("Session ID unavailable. Run /reload in Pi, then reopen /chat to save this note.", true);
+  }
+  updateChatNoteControls();
 }
 
 function updateSessionTitle(name) {
@@ -399,7 +441,7 @@ async function sendChat(body) {
   }
 }
 
-for (const [buttonId, label] of [["chat-expand", "message composer"], ["comment-expand", "annotation comment"]]) {
+for (const [buttonId, label] of [["chat-expand", "message composer"], ["comment-expand", "annotation comment"], ["chat-note-expand", "Markdown note"]]) {
   const button = $(buttonId);
   button.addEventListener("click", () => {
     const expanded = button.getAttribute("aria-expanded") !== "true";
@@ -410,6 +452,55 @@ for (const [buttonId, label] of [["chat-expand", "message composer"], ["comment-
     button.title = text;
   });
 }
+
+chatNoteInput.addEventListener("input", () => {
+  updateChatNoteControls();
+  chatNoteStatus("");
+  if (!chatSessionId) {
+    chatNoteStatus("Session ID unavailable. Run /reload in Pi, then reopen /chat to save this note.", true);
+    return;
+  }
+  try { localStorage.setItem(`pi-annotate:markdown-note:v1:${chatSessionId}`, chatNoteInput.value); }
+  catch { chatNoteStatus("Could not save this note in browser storage.", true); }
+});
+chatNotePreviewToggle.addEventListener("click", async () => {
+  if (chatNotePreviewing) {
+    chatNoteInput.hidden = false;
+    chatNotePreview.hidden = true;
+    chatNoteExpand.hidden = false;
+    chatNotePreviewing = false;
+    chatNotePreviewToggle.setAttribute("aria-label", "Preview note");
+    chatNotePreviewToggle.title = "Preview Markdown note";
+    chatNotePreviewToggle.setAttribute("aria-pressed", "false");
+    chatNoteInput.focus();
+    return;
+  }
+  chatNotePreviewToggle.disabled = true;
+  chatNoteStatus("");
+  try {
+    const { html } = await api("/api/markdown", { markdown: chatNoteInput.value });
+    chatNotePreview.innerHTML = html || "<p>Nothing to preview yet.</p>";
+    chatNoteInput.hidden = true;
+    chatNotePreview.hidden = false;
+    chatNoteExpand.hidden = true;
+    chatNotePreviewing = true;
+    chatNotePreviewToggle.setAttribute("aria-label", "Edit note");
+    chatNotePreviewToggle.title = "Edit Markdown note";
+    chatNotePreviewToggle.setAttribute("aria-pressed", "true");
+  } catch (error) {
+    chatNoteStatus(error.message || "Could not preview this note.", true);
+  } finally {
+    chatNotePreviewToggle.disabled = false;
+  }
+});
+chatNoteCopy.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(chatNoteInput.value);
+    chatNoteStatus("Copied Markdown to clipboard.");
+  } catch {
+    chatNoteStatus("Clipboard access failed. Select and copy the note text instead.", true);
+  }
+});
 
 chatInput.addEventListener("input", updateButtons);
 chatInput.addEventListener("keydown", (event) => {
@@ -741,7 +832,7 @@ function renderSessionList() {
   const list = $("session-list");
   list.replaceChildren();
   const { mode, collapsed, overrides } = currentProjectView();
-  for (const button of projectControls.querySelectorAll("button")) {
+  for (const button of projectControls.querySelectorAll("button[data-mode]")) {
     button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
   }
   updateSavedLaunchButton();
@@ -884,14 +975,21 @@ async function loadSessions() {
 }
 
 function revealCurrentChat() {
-  if (sessionFilter.value) {
-    sessionFilter.value = "";
-    renderSessionList();
-  }
   const current = $("session-list").querySelector('[data-current-chat="true"]');
   if (!current) return;
   for (let group = current.closest("details"); group; group = group.parentElement.closest("details")) group.open = true;
   current.scrollIntoView?.({ block: "nearest" });
+}
+
+function showCurrentChatInExplorer() {
+  sessionFilter.value = "";
+  searchProjects = projectView();
+  browseProjects.mode = "collapse";
+  browseProjects.collapsed.clear();
+  browseProjects.overrides.clear();
+  if (catalog?.current.cwd !== undefined) browseProjects.overrides.add(catalog.current.cwd);
+  renderSessionList();
+  revealCurrentChat();
 }
 
 function setExplorerOpen(open) {
@@ -913,7 +1011,7 @@ function clearSavedTranscript() {
 
 function setSavedView(saved) {
   $("saved-conversation").hidden = !saved;
-  for (const id of ["conversation", "turns", "annotations-panel"]) $(id).hidden = saved;
+  for (const id of ["conversation", "turns", "right-panel"]) $(id).hidden = saved;
   if (window.matchMedia?.("(max-width: 760px)").matches) setExplorerOpen(false);
   renderSessionList();
   updateButtons();
@@ -969,17 +1067,17 @@ sessionFilter.addEventListener("input", () => {
   renderSessionList();
 });
 projectControls.addEventListener("click", (event) => {
-  const mode = event.target.closest("button")?.dataset.mode;
-  if (!mode) return;
-  if (mode === "normal" && sessionFilter.value) {
-    sessionFilter.value = "";
-    searchProjects = projectView();
+  const button = event.target.closest("button");
+  if (button?.dataset.action === "show-current") {
+    showCurrentChatInExplorer();
+    return;
   }
+  const mode = button?.dataset.mode;
+  if (!mode) return;
   const view = currentProjectView();
   view.mode = mode;
   view.overrides.clear();
   renderSessionList();
-  if (mode === "normal") revealCurrentChat();
 });
 refreshSessions.addEventListener("click", () => {
   void loadSessions();
@@ -997,6 +1095,8 @@ function startChat(data) {
   $("comment-attach").hidden = !annotationImagesSupported;
   document.body.classList.add("chat-page");
   sessionTitlePill.hidden = false;
+  chatNote.hidden = false;
+  loadChatNote(data.sessionId);
   $("page-intro").hidden = true;
   document.querySelector(".chat-composer .actions").prepend($("chat-state"), $("status"));
   $("conversation").setAttribute("aria-label", "Conversation");

@@ -150,6 +150,7 @@ test("chat protects the active transcript and validates quotes from each assista
   const started = Promise.withResolvers();
   const prompts = [];
   const f = await fixture(t, { chat: {
+    getSessionId: () => "session-current",
     getBranch: () => branch,
     isIdle: () => !busy,
     onSend: async (prompt) => {
@@ -164,12 +165,19 @@ test("chat protects the active transcript and validates quotes from each assista
   assert.equal((await read("?after=missing")).status, 410);
   const state = await (await read()).json();
   assert.equal(state.mode, "chat");
+  assert.equal(state.sessionId, "session-current");
   assert.equal(state.cursor, "a2");
   assert.deepEqual(state.messages.map((message) => message.id), ["user", "a1", "a2"]);
   assert.doesNotMatch(JSON.stringify(state), /System prompt|image data|Private reasoning|Tool output/);
   assert.match(state.messages[1].html, /<strong>One<\/strong>/);
   assert.equal((await fetch(`${f.base}/api/image?id=missing&index=0`, { headers: f.headers })).status, 404);
   assert.equal((await fetch(`${f.base}/api/image?id=a1&index=0`, { headers: f.headers })).status, 404);
+  assert.equal((await fetch(`${f.base}/api/markdown`, { method: "POST", headers: { Origin: f.base, "Content-Type": "application/json" }, body: JSON.stringify({ markdown: "**note**" }) })).status, 401);
+  const preview = await fetch(`${f.base}/api/markdown`, { method: "POST", headers: f.headers, body: JSON.stringify({ markdown: "# Reuse\n\n**note**\n\n<script>bad()</script>" }) });
+  assert.equal(preview.status, 200);
+  const renderedNote = await preview.json();
+  assert.match(renderedNote.html, /<strong>note<\/strong>/);
+  assert.doesNotMatch(renderedNote.html, /<script/);
   assert.equal((await f.post()).status, 404);
 
   const annotation = (responseId, quote) => ({ responseId, start: 0, end: quote.length, quote, comment: `Explain ${quote}.` });
