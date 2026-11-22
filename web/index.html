@@ -136,6 +136,7 @@
       </section>
     </aside>
   </main>
+  <dialog id="chat-note-dialog" aria-labelledby="chat-note-title"></dialog>
   <dialog id="rename-session-dialog" aria-labelledby="rename-session-title">
     <form id="rename-session-form">
       <h2 id="rename-session-title">Rename chat</h2>
@@ -167,12 +168,6 @@
       <blockquote id="selected-quote"></blockquote>
       <label for="comment">Question or comment</label>
       <div class="comment-composer">
-        <button id="comment-expand" type="button" class="secondary composer-icon" aria-label="Expand annotation comment" aria-controls="comment" aria-expanded="false" title="Expand annotation comment">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path class="expand-icon" d="M15 3h6v6M21 3l-7 7M9 21H3v-6M3 21l7-7"/>
-            <path class="collapse-icon" d="M21 3l-7 7m0-6v6h6M3 21l7-7m-6 0h6v6"/>
-          </svg>
-        </button>
         <textarea id="comment" rows="4" maxlength="8000" required placeholder="What would you like to ask?"></textarea>
         <div class="comment-composer-actions">
           <div id="comment-images" hidden>

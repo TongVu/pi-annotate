@@ -16,6 +16,7 @@ let readingAnnotationFiles = false;
 const chatInput = $("chat-input");
 const chatFile = $("chat-file");
 const chatNote = $("chat-note");
+const chatNoteDialog = $("chat-note-dialog");
 const chatNoteInput = $("chat-note-input");
 const chatNotePreview = $("chat-note-preview");
 const chatNotePreviewToggle = $("chat-note-preview-toggle");
@@ -23,6 +24,7 @@ const chatNoteCopy = $("chat-note-copy");
 const chatNoteExpand = $("chat-note-expand");
 let chatSessionId;
 let chatNotePreviewing = false;
+let chatNoteHome;
 const imagePreview = $("image-preview");
 const previewImage = $("preview-image");
 const sessionTitlePill = $("session-title-pill");
@@ -80,6 +82,7 @@ function loadChatNote(sessionId) {
   chatNoteInput.hidden = false;
   chatNotePreview.hidden = true;
   chatNotePreviewing = false;
+  chatNote.dataset.previewing = "false";
   chatNoteExpand.hidden = false;
   chatNoteExpand.setAttribute("aria-expanded", "false");
   chatNoteExpand.setAttribute("aria-label", "Expand Markdown note");
@@ -441,7 +444,7 @@ async function sendChat(body) {
   }
 }
 
-for (const [buttonId, label] of [["chat-expand", "message composer"], ["comment-expand", "annotation comment"], ["chat-note-expand", "Markdown note"]]) {
+for (const [buttonId, label] of [["chat-expand", "message composer"]]) {
   const button = $(buttonId);
   button.addEventListener("click", () => {
     const expanded = button.getAttribute("aria-expanded") !== "true";
@@ -452,6 +455,37 @@ for (const [buttonId, label] of [["chat-expand", "message composer"], ["comment-
     button.title = text;
   });
 }
+
+function restoreChatNoteFromDialog() {
+  if (!chatNoteHome) return;
+  const { parent, nextSibling } = chatNoteHome;
+  parent.insertBefore(chatNote, nextSibling?.parentNode === parent ? nextSibling : null);
+  chatNoteHome = undefined;
+  chatNoteExpand.setAttribute("aria-expanded", "false");
+  chatNoteExpand.setAttribute("aria-label", "Expand Markdown note");
+  chatNoteExpand.title = "Expand Markdown note";
+}
+
+chatNoteExpand.addEventListener("click", () => {
+  if (chatNoteDialog.open) {
+    chatNoteDialog.close();
+    return;
+  }
+  chatNoteHome = { parent: chatNote.parentNode, nextSibling: chatNote.nextSibling };
+  chatNoteDialog.append(chatNote);
+  chatNoteExpand.setAttribute("aria-expanded", "true");
+  chatNoteExpand.setAttribute("aria-label", "Collapse Markdown note");
+  chatNoteExpand.title = "Collapse Markdown note";
+  try { chatNoteDialog.showModal(); }
+  catch {
+    restoreChatNoteFromDialog();
+    chatNoteStatus("Could not expand the Markdown note.", true);
+  }
+});
+chatNoteDialog.addEventListener("close", restoreChatNoteFromDialog);
+chatNoteDialog.addEventListener("click", (event) => {
+  if (event.target === chatNoteDialog) chatNoteDialog.close();
+});
 
 chatNoteInput.addEventListener("input", () => {
   updateChatNoteControls();
@@ -467,7 +501,7 @@ chatNotePreviewToggle.addEventListener("click", async () => {
   if (chatNotePreviewing) {
     chatNoteInput.hidden = false;
     chatNotePreview.hidden = true;
-    chatNoteExpand.hidden = false;
+    chatNote.dataset.previewing = "false";
     chatNotePreviewing = false;
     chatNotePreviewToggle.setAttribute("aria-label", "Preview note");
     chatNotePreviewToggle.title = "Preview Markdown note";
@@ -482,7 +516,7 @@ chatNotePreviewToggle.addEventListener("click", async () => {
     chatNotePreview.innerHTML = html || "<p>Nothing to preview yet.</p>";
     chatNoteInput.hidden = true;
     chatNotePreview.hidden = false;
-    chatNoteExpand.hidden = true;
+    chatNote.dataset.previewing = "true";
     chatNotePreviewing = true;
     chatNotePreviewToggle.setAttribute("aria-label", "Edit note");
     chatNotePreviewToggle.title = "Edit Markdown note";
