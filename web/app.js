@@ -42,7 +42,8 @@ const ATTACHMENTS_LIMIT = 10 * 1024 * 1024;
 let attachments = [];
 let readingFiles = false;
 let cursor = null;
-let liveTitle = "Chat · Pi";
+const appTitle = "Pi Chat";
+let liveTitle = appTitle;
 let chatStatusEmoji = "⚪";
 let liveSessionName;
 let catalog;
@@ -137,7 +138,7 @@ function updateLiveDocumentTitle() {
 
 function updateSessionTitle(name) {
   liveSessionName = typeof name === "string" && name.trim() ? name.trim() : undefined;
-  liveTitle = liveSessionName || "Chat · Pi";
+  liveTitle = liveSessionName || appTitle;
   sessionTitleText.textContent = liveSessionName || "Untitled chat";
   $("rename-session").setAttribute("aria-label", liveSessionName ? `Rename ${liveSessionName}` : "Name this chat");
   if (!savedSessionId) updateLiveDocumentTitle();

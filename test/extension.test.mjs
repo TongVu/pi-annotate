@@ -19,7 +19,7 @@ function fixture(t) {
     isIdle: () => true,
     sessionManager: {
       getBranch: () => [],
-      getSessionDir: () => "/tmp/pi-annotate-extension-tests",
+      getSessionDir: () => "/tmp/pi-chat-extension-tests",
       getSessionId: () => "session-1",
       getSessionName: () => undefined,
       getCwd: () => process.cwd(),

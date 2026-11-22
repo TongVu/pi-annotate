@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { createChatNoteStore, CHAT_NOTE_LIMIT } from "../src/chat-notes.ts";
 
 test("chat notes survive store recreation and remain scoped to session IDs", async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), "pi-annotate-notes-"));
+  const directory = await mkdtemp(join(tmpdir(), "pi-chat-notes-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const first = createChatNoteStore(directory);
   assert.equal(await first.read("session-a"), "");

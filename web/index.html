@@ -3,17 +3,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Annotate · Pi</title>
+  <title>Pi Chat</title>
   <link id="app-favicon" rel="icon" href="/favicon.ico" type="image/x-icon">
   <link rel="stylesheet" href="/style.css">
   <script type="module" src="/app.js"></script>
 </head>
 <body>
   <header>
-    <div id="page-intro"><strong>Pi / Annotate</strong><p>Select a passage, then add a question. Nothing is sent to the model here.</p></div>
+    <div id="page-intro"><strong>Pi Chat</strong><p>Chat with Pi or select a passage in a reply to ask a question.</p></div>
     <button id="send" disabled>Send questions <span id="count">(0)</span></button>
   </header>
-  <p id="status" role="status" aria-live="polite">Loading response…</p>
+  <p id="status" role="status" aria-live="polite">Loading chat…</p>
   <nav id="chat-explorer" aria-label="Chat explorer" hidden>
     <div class="explorer-tools">
       <div id="project-view-controls" role="group" aria-label="Chat explorer controls">

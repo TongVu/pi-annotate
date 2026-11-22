@@ -202,7 +202,7 @@ test("chat tab follows the Pi session name and moves chat controls out of the he
 
   sessionName = undefined;
   await f.poll();
-  assert.equal(f.window.document.title, "👾 Chat · Pi");
+  assert.equal(f.window.document.title, "👾 Pi Chat");
 });
 
 test("the sticky session pill renames the Pi session and updates the browser tab", async (t) => {
@@ -393,7 +393,7 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
 });
 
 test("saved-chat launch leaves the live composer alone and refresh drops a deleted duplicate", async (t) => {
-  const cwd = "/work/pi-annotate";
+  const cwd = "/work/pi-chat";
   const name = "Live browser chat feature";
   const current = { id: "current", cwd, name };
   const copy = { id: "copy", cwd, name };

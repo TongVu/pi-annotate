@@ -94,7 +94,7 @@ test("installed Pi accepts a browser prompt before the model finishes, then expo
   if (!ModelRuntime) return t.skip("Requires Pi's ModelRuntime and faux provider");
   const { fauxProvider, fauxAssistantMessage } = await import(new URL("../../../../pi-ai/dist/index.js", pathToFileURL(loaderPath)));
   if (!fauxProvider) return t.skip("Requires Pi's faux provider");
-  const cwd = await mkdtemp(join(tmpdir(), "pi-annotate-chat-test-"));
+  const cwd = await mkdtemp(join(tmpdir(), "pi-chat-reload-"));
   t.after(() => rm(cwd, { recursive: true, force: true }));
   const oldAgentDir = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = join(cwd, "explorer-agent");
@@ -102,7 +102,7 @@ test("installed Pi accepts a browser prompt before the model finishes, then expo
     if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = oldAgentDir;
   });
-  const faux = fauxProvider({ provider: "annotate-test", models: [{ id: "vision", input: ["text", "image"] }] });
+  const faux = fauxProvider({ provider: "chat-test", models: [{ id: "vision", input: ["text", "image"] }] });
   const modelRuntime = await ModelRuntime.create({ authPath: join(cwd, "auth.json"), modelsPath: join(cwd, "models.json") });
   modelRuntime.registerNativeProvider(faux.provider);
   const model = faux.getModel();
@@ -112,9 +112,9 @@ test("installed Pi accepts a browser prompt before the model finishes, then expo
   const openLog = join(cwd, "browser-url");
   await writeFile(adapter, `
     import { writeFile } from "node:fs/promises";
-    import { registerAnnotationExtension } from ${JSON.stringify(extensionPath)};
+    import { registerChatExtension } from ${JSON.stringify(extensionPath)};
     export default function (pi) {
-      registerAnnotationExtension(pi, (url) => writeFile(${JSON.stringify(openLog)}, url));
+      registerChatExtension(pi, (url) => writeFile(${JSON.stringify(openLog)}, url));
     }
   `);
   const loader = new DefaultResourceLoader({

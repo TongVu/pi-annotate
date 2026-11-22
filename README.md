@@ -1,4 +1,4 @@
-# Pi Annotate
+# Pi Chat
 
 A local Pi extension for chatting and asking questions about passages in assistant
 replies. Use `/chat` to talk directly to the current Pi session and annotate replies.
@@ -15,11 +15,11 @@ npm ci --omit=dev --ignore-scripts --legacy-peer-deps
 Then exit Pi and run this **from the project whose chat you want to continue**:
 
 ```sh
-pi --continue --extension /Users/tongvu/Projects/pi-annotate/src/index.ts
+pi --continue --extension /path/to/pi-chat/src/index.ts
 ```
 
-Use your checkout's absolute path on other machines. Do not change into the
-`pi-annotate` directory just to resume a different project's chat; Pi groups
+Replace `/path/to/pi-chat` with your checkout's absolute path. Run Pi from the
+project whose chat you want to resume, not from the extension checkout; Pi groups
 sessions by working directory. Both regular and fullscreen terminal modes work.
 
 ### Live browser chat
@@ -95,12 +95,16 @@ old pages; finish unsent drafts first, then open a new page.
 To load it in future chats, optionally install this local package yourself:
 
 ```sh
-pi install /Users/tongvu/Projects/pi-annotate
+pi install /path/to/pi-chat
 ```
 
 Then use `/reload` in an existing session. Installation adds the local package to
 Pi settings; it does not publish anything. Remove it with
-`pi remove /Users/tongvu/Projects/pi-annotate`.
+`pi remove /path/to/pi-chat`.
+
+If you cloned the repository under its former name, you can keep the existing
+checkout and Pi installation path. To point Git at the new repository URL, run
+`git remote set-url origin https://github.com/TongVu/pi-chat.git` from the checkout.
 
 ## What is implemented
 

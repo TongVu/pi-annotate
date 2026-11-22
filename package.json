@@ -1,9 +1,13 @@
 {
-  "name": "pi-annotate",
+  "name": "pi-chat",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Annotate assistant responses locally and return questions to Pi's draft editor.",
+  "description": "Chat with Pi in a local browser and ask questions about passages in its replies.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TongVu/pi-chat.git"
+  },
   "keywords": [
     "pi-package"
   ],

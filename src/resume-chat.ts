@@ -4,6 +4,7 @@ import { access, stat } from "node:fs/promises";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 
+// Keep the existing launch handoff compatible with already-running Pi processes.
 export const AUTO_CHAT_SESSION = "PI_ANNOTATE_AUTO_CHAT_SESSION";
 
 export function shellQuote(value: string) {

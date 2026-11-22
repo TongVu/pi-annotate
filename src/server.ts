@@ -348,7 +348,7 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
       if (req.headers.host !== new URL(origin).host ||
           (req.headers.origin && req.headers.origin !== origin) ||
           req.headers["sec-fetch-site"] === "cross-site") {
-        reply(403, { error: "Only this local annotation page may connect." });
+        reply(403, { error: "Only this local chat page may connect." });
         return;
       }
       const checkCurrent = () => {
@@ -365,7 +365,7 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
         return;
       }
       if (req.headers.authorization !== `Bearer ${token}`) {
-        reply(401, { error: "Missing or invalid annotation token. Reopen from Pi." });
+        reply(401, { error: "Missing or invalid chat token. Reopen from Pi." });
         return;
       }
       const url = new URL(req.url, origin);

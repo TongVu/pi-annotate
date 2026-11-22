@@ -114,7 +114,7 @@ test("busy Pi refuses annotation sends without consuming them", async (t) => {
 });
 
 test("chat note API persists per session across servers and flushes on disconnect", async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), "pi-annotate-notes-api-"));
+  const directory = await mkdtemp(join(tmpdir(), "pi-chat-notes-api-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const noteStore = createChatNoteStore(directory);
   const chat = () => ({
@@ -335,7 +335,7 @@ test("opening a saved chat requires the catalogued ID and refuses an active or p
 });
 
 test("separate browser chat servers discover active peers and remove them on disconnect", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "pi-annotate-presence-"));
+  const dir = await mkdtemp(join(tmpdir(), "pi-chat-presence-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const a = { id: "a", cwd: "/first", name: "First chat" };
   const b = { id: "b", cwd: "/second", name: "Second chat" };

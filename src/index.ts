@@ -10,6 +10,7 @@ import { createChatPresence } from "./chat-presence.ts";
 import { AUTO_CHAT_SESSION, forkChatInTerminal, resumeChatInTerminal } from "./resume-chat.ts";
 import { registerSessionOwner, requestOwnedChat } from "./session-owner.ts";
 
+// Keep the existing registry names so running Pi processes can still discover each other.
 async function ownerRegistry() {
   const { getAgentDir } = await import("@earendil-works/pi-coding-agent");
   return join(getAgentDir(), "pi-annotate-owners");
@@ -26,10 +27,10 @@ function openPage(url: string): Promise<void> {
 }
 
 export default function piChat(pi: ExtensionAPI) {
-  registerAnnotationExtension(pi, openPage);
+  registerChatExtension(pi, openPage);
 }
 
-export function registerAnnotationExtension(pi: ExtensionAPI, launchPage: (url: string) => Promise<void>) {
+export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string) => Promise<void>) {
   let active: Awaited<ReturnType<typeof startChatServer>> | undefined;
   let closeOwner: (() => Promise<void>) | undefined;
   let ownerGeneration = 0;
@@ -81,6 +82,7 @@ export function registerAnnotationExtension(pi: ExtensionAPI, launchPage: (url: 
       ctx.sessionManager.getSessionId() === sessionId &&
       (anchor === undefined || ctx.sessionManager.getBranch().some((entry) => entry.id === anchor));
     try {
+      // Keep the existing path so the repository rename doesn't strand saved notes.
       const noteStore = createChatNoteStore(join(ctx.sessionManager.getSessionDir(), ".pi-annotate-notes"));
       const opened = await startChatServer({
         isCurrent,

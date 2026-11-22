@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { terminalForkArgs, terminalResumeArgs } from "../src/resume-chat.ts";
 
 test("Terminal resume command quotes paths, opts in to browser startup, and sends no prompt", { skip: process.platform === "win32" }, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "pi-annotate-launch-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-chat-launch-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const cwd = join(root, "a project's workspace");
   const path = join(root, "chat's $(not-a-command).jsonl");
