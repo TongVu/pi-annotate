@@ -24,7 +24,7 @@ async function findLoader() {
 }
 
 const loaderPath = await findLoader();
-test("Pi reload picks up changed local helper modules in the same process", {
+test("Pi reload picks up changed local helper modules in the same process for /chat", {
   skip: loaderPath ? false : "Set PI_EXTENSION_LOADER to the installed Pi dist/core/extensions/loader.js",
 }, async (t) => {
   const { loadExtensions, clearExtensionCache } = await import(pathToFileURL(loaderPath).href);
@@ -47,30 +47,31 @@ test("Pi reload picks up changed local helper modules in the same process", {
     assert.deepEqual(loaded.errors, []);
     extension = loaded.extensions[0];
     let link;
-    let draft = "Existing draft";
-    await extension.commands.get("annotate").handler("link", {
+    await extension.commands.get("chat").handler("link", {
       mode: "tui", isIdle: () => true,
       sessionManager: {
         getSessionId: () => "reload-session",
+        getSessionName: () => undefined,
+        getSessionDir: () => join(directory, "sessions"),
+        getCwd: () => directory,
+        getSessionFile: () => undefined,
         getBranch: () => [{ id: "reload-response", type: "message", message: {
           role: "assistant", content: [{ type: "text", text: "**Bold** response" }],
         } }],
       },
-      ui: {
-        notify: (message) => { if (message.includes("http://127.0.0.1:")) link = message.split(": ").at(-1); },
-        getEditorText: () => draft,
-        setEditorText: (text) => { draft = text; },
-      },
+      ui: { notify: (message) => { if (message.includes("http://127.0.0.1:")) link = message.split(": ").at(-1); } },
     });
     const url = new URL(link);
     const headers = { Authorization: `Bearer ${url.hash.slice(1)}`, Origin: url.origin, "Content-Type": "application/json" };
-    const { response } = await (await fetch(`${url.origin}/api/response`, { headers })).json();
-    assert.equal(JSDOM.fragment(response.html).textContent, response.text);
-    return { response, url, headers, draft: () => draft };
+    const response = await (await fetch(`${url.origin}/api/response`, { headers })).json();
+    assert.equal(response.mode, "chat");
+    assert.match(response.messages[0].text, /^Bold response\n/);
+    assert.equal(JSDOM.fragment(response.messages[0].html).textContent, response.messages[0].text);
+    return { response, url, headers };
   };
 
   const before = await run();
-  assert.equal(before.response.text, "Bold response\n");
+  assert.equal(before.response.messages[0].text, "Bold response\n");
   await shutdown();
   const helper = join(directory, "src/markdown.ts");
   const source = await readFile(helper, "utf8");
@@ -80,16 +81,9 @@ test("Pi reload picks up changed local helper modules in the same process", {
   clearExtensionCache();
 
   const after = await run();
-  assert.match(after.response.text, /Reload marker/);
-  const quote = "Reload marker.";
-  const start = after.response.text.indexOf(quote);
-  const transferred = await fetch(`${after.url.origin}/api/annotations`, {
-    method: "POST", headers: after.headers,
-    body: JSON.stringify({ annotations: [{ start, end: start + quote.length, quote, comment: "Explain." }] }),
-  });
-  assert.equal(transferred.status, 200);
-  assert.match(after.draft(), /^Existing draft\n\nQuestions about assistant response reload-response:/);
-  assert.match(after.draft(), /> Reload marker\./);
+  assert.match(after.response.messages[0].text, /Reload marker/);
+  const responseState = await fetch(`${after.url.origin}/api/response`, { headers: after.headers });
+  assert.match((await responseState.json()).messages[0].text, /Reload marker/);
 });
 
 test("installed Pi accepts a browser prompt before the model finishes, then exposes the reply", {

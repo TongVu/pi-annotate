@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { createHash, randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { MAX_ANNOTATIONS, validateAnnotations, formatAnnotations, formatChatAnnotations, userImageBlocks, visibleChatMessage } from "./annotations.ts";
+import { MAX_ANNOTATIONS, formatChatAnnotations, userImageBlocks, visibleChatMessage } from "./annotations.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { shellQuote } from "./resume-chat.ts";
 import { CHAT_NOTE_LIMIT } from "./chat-notes.ts";
@@ -82,8 +82,6 @@ function attachmentBlocks(files, imagesOnly = false) {
     return { type: "text", text: `--- Attached file: ${JSON.stringify(name)} ---\n${text}\n--- End attached file ---` };
   });
 }
-
-const hasAnnotationImages = (annotations) => Array.isArray(annotations) && annotations.some((item) => item?.images !== undefined);
 
 function annotationImagesAt(annotations) {
   if (!Array.isArray(annotations) || annotations.length > MAX_ANNOTATIONS) return;
@@ -329,21 +327,19 @@ function chatRoutes({ noteStore, getSessionId, getSessionName, setSessionName, g
 }
 
 /** Loopback only; no direct model calls, session-file writes, cookies, or CORS. */
-export async function startAnnotationServer({ response, onSubmit, chat, onClose, isCurrent = () => true, ttlMs = 30 * 60_000 }) {
-  const renderedResponse = response && { id: response.id, ...renderMarkdown(response.text) };
-  const live = chat && chatRoutes(chat);
-  const presence = chat?.presence;
-  const explorer = chat?.explorer && explorerRoutes(chat.explorer, presence);
-  const reopenCommand = live ? "/chat" : "/annotate";
+export async function startChatServer({ chat, onClose, isCurrent = () => true, ttlMs = 30 * 60_000 }) {
+  const live = chatRoutes(chat);
+  const presence = chat.presence;
+  const explorer = chat.explorer && explorerRoutes(chat.explorer, presence);
+  const reopenCommand = "/chat";
   const token = randomBytes(32).toString("hex");
   let origin;
-  let accepted;
   let expired = false;
   const server = createServer(async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Referrer-Policy", "no-referrer");
     res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("Content-Security-Policy", `default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'${live ? " data: blob:" : ""}; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`);
+    res.setHeader("Content-Security-Policy", `default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`);
     const reply = (status, body) => {
       res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
       res.end(JSON.stringify(body));
@@ -413,11 +409,9 @@ export async function startAnnotationServer({ response, onSubmit, chat, onClose,
         return;
       }
       if (req.method === "GET" && url.pathname === "/api/response") {
-        if (live) {
-          timer.refresh(); // An authenticated poll keeps a chat alive; draft windows still have a fixed lifetime.
-          await presence?.touch(ttlMs);
-          if (checkCurrent()) live.read(url.searchParams.get("after"), reply);
-        } else reply(200, { response: renderedResponse, submitted: accepted !== undefined });
+        timer.refresh(); // An authenticated poll keeps a chat alive.
+        await presence?.touch(ttlMs);
+        if (checkCurrent()) live.read(url.searchParams.get("after"), reply);
         return;
       }
       const disconnect = live && req.url === "/api/close";
@@ -426,7 +420,7 @@ export async function startAnnotationServer({ response, onSubmit, chat, onClose,
       const saveNote = live && req.url === "/api/note";
       const openSession = explorer && req.url === "/api/session/open";
       const cloneSession = explorer && req.url === "/api/session/clone";
-      if (req.method === "POST" && (disconnect || renameSession || renderNote || saveNote || openSession || cloneSession || req.url === (live ? "/api/chat" : "/api/annotations"))) {
+      if (req.method === "POST" && (disconnect || renameSession || renderNote || saveNote || openSession || cloneSession || req.url === "/api/chat")) {
         if (req.headers.origin !== origin || req.headers["content-type"] !== "application/json") {
           reply(403, { error: "Expected a same-origin JSON request." });
           return;
@@ -443,7 +437,7 @@ export async function startAnnotationServer({ response, onSubmit, chat, onClose,
           reply(200, { ok: true });
           return;
         }
-        const raw = await readBody(req, renderNote || saveNote ? NOTE_BODY_LIMIT : openSession || renameSession ? 4096 : live ? CHAT_BODY_LIMIT : BODY_LIMIT);
+        const raw = await readBody(req, renderNote || saveNote ? NOTE_BODY_LIMIT : openSession || renameSession || cloneSession ? 4096 : CHAT_BODY_LIMIT);
         const body = JSON.parse(raw.toString("utf8"));
         if (saveNote) {
           if (!checkCurrent()) return;
@@ -468,30 +462,13 @@ export async function startAnnotationServer({ response, onSubmit, chat, onClose,
           if (checkCurrent()) await explorer.cloneSession(body?.id, reply, checkCurrent);
           return;
         }
-        const annotationImages = hasAnnotationImages(body?.annotations);
-        if (raw.length > BODY_LIMIT && body?.attachments === undefined && !(live && annotationImages)) throw new Error("Request is too large.");
+        if (raw.length > CHAT_BODY_LIMIT) throw new Error("Request is too large.");
         // Check again after awaiting the request body; Pi may have changed sessions.
         if (expired || !isCurrent()) {
           reply(410, { error: `Pi session/branch changed. Run ${reopenCommand} again.` });
           return;
         }
-        if (live) {
-          await live.send(body, reply);
-          return;
-        }
-        if (annotationImages) throw new Error("Images are only supported in live /chat annotations.");
-        const items = validateAnnotations(body.annotations, renderedResponse.text);
-        const formatted = formatAnnotations(response.id, items);
-        if (accepted !== undefined && accepted !== formatted) {
-          reply(409, { error: "Already added to Pi. Run /annotate for another batch." });
-          return;
-        }
-        if (accepted === undefined) {
-          // Synchronous callback: check idle state and append to the *current* draft atomically.
-          onSubmit(formatted);
-          accepted = formatted;
-        }
-        reply(200, { ok: true });
+        await live.send(body, reply);
         return;
       }
       reply(404, { error: "Not found." });

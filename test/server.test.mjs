@@ -7,22 +7,26 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createChatPresence } from "../src/chat-presence.ts";
 import { createChatNoteStore } from "../src/chat-notes.ts";
-import { startAnnotationServer } from "../src/server.ts";
+import { startChatServer } from "../src/server.ts";
 
 async function fixture(t, options = {}) {
-  const submissions = [];
-  const server = await startAnnotationServer({
-    response: { id: "message-1", text: "A reactor module" },
-    onSubmit: (text) => submissions.push(text),
-    ...options,
-  });
+  const sent = [];
+  const defaultBranch = [{ id: "message-1", type: "message", message: { role: "assistant", content: "A reactor module" } }];
+  const chat = {
+    getBranch: () => defaultBranch,
+    isIdle: () => true,
+    onSend: async (prompt) => sent.push(prompt),
+    ...options.chat,
+  };
+  const server = await startChatServer({ ...options, chat });
   t.after(server.close);
   const url = new URL(server.url);
   const base = url.origin;
   const headers = { Authorization: `Bearer ${url.hash.slice(1)}`, Origin: base, "Content-Type": "application/json" };
-  const body = { annotations: [{ start: 2, end: 9, quote: "reactor", comment: "What is this?" }] };
-  const post = (value = body, extra = {}) => fetch(`${base}/api/annotations`, { method: "POST", headers: { ...headers, ...extra }, body: JSON.stringify(value) });
-  return { base, headers, body, post, submissions };
+  const body = { requestId: "00000000-0000-4000-8000-000000000001", annotations: [{ responseId: "message-1", start: 2, end: 9, quote: "reactor", comment: "What is this?" }] };
+  const post = (value = body, extra = {}) => fetch(`${base}/api/chat`, { method: "POST", headers: { ...headers, ...extra }, body: JSON.stringify(value) });
+  const legacyPost = (value = body, extra = {}) => fetch(`${base}/api/annotations`, { method: "POST", headers: { ...headers, ...extra }, body: JSON.stringify(value) });
+  return { base, headers, body, post, legacyPost, sent };
 }
 
 test("loopback app requires token for response, serves safe static assets", async (t) => {
@@ -31,43 +35,44 @@ test("loopback app requires token for response, serves safe static assets", asyn
   const page = await fetch(f.base);
   assert.equal(page.status, 200);
   assert.match(page.headers.get("content-security-policy"), /frame-ancestors 'none'/);
-  assert.match(page.headers.get("content-security-policy"), /img-src 'self';/);
+  assert.match(page.headers.get("content-security-policy"), /img-src 'self' data: blob:/);
   assert.equal(page.headers.get("cache-control"), "no-store");
   const html = await page.text();
   assert.doesNotMatch(html, /A reactor module/);
-  assert.match(html, /rel="icon" href="\/favicon\.ico"/);
+  assert.match(html, /id="app-favicon" rel="icon" href="\/favicon\.ico"/);
   const icon = await fetch(`${f.base}/favicon.ico`);
   assert.equal(icon.status, 200);
   assert.equal(icon.headers.get("content-type"), "image/x-icon");
   assert.equal(Buffer.from(await icon.arrayBuffer()).readUInt32LE(0), 0x00010000);
   assert.equal((await fetch(`${f.base}/api/response`)).status, 401);
   const authorized = await fetch(`${f.base}/api/response`, { headers: f.headers });
-  assert.equal((await authorized.json()).response.id, "message-1");
+  assert.equal((await authorized.json()).mode, "chat");
   for (const path of ["/app.js", "/style.css"]) assert.equal((await fetch(f.base + path)).status, 200);
   assert.equal((await fetch(`${f.base}/not-a-file`, { headers: f.headers })).status, 404);
 });
 
-test("submissions validate quotes, append only once, and tolerate a lost-response retry", async (t) => {
+test("chat annotation sends validate quotes and acknowledge unchanged retries only once", async (t) => {
   const f = await fixture(t);
-  assert.equal((await f.post({ annotations: [{ ...f.body.annotations[0], quote: "forged" }] })).status, 400);
-  assert.equal(f.submissions.length, 0);
+  assert.equal((await f.post({ ...f.body, annotations: [{ ...f.body.annotations[0], quote: "forged" }] })).status, 400);
+  assert.equal(f.sent.length, 0);
   assert.equal((await f.post()).status, 200);
   assert.equal((await f.post()).status, 200);
-  assert.equal(f.submissions.length, 1);
-  assert.match(f.submissions[0], /> reactor\n\nWhat is this\?/);
-  assert.equal((await f.post({ annotations: [{ ...f.body.annotations[0], comment: "Different" }] })).status, 409);
+  assert.equal(f.sent.length, 1);
+  assert.match(f.sent[0], /> reactor\n\nWhat is this\?/);
+  assert.equal((await f.post({ ...f.body, annotations: [{ ...f.body.annotations[0], comment: "Different" }] })).status, 409);
 });
 
 test("rendered quotes validate against server-owned visible text, not raw Markdown", async (t) => {
-  const f = await fixture(t, { response: { id: "rendered-1", text: "**Bold** and [docs](https://example.com) &amp; `code`." } });
+  const f = await fixture(t, { chat: { getBranch: () => [{ id: "rendered-1", type: "message", message: { role: "assistant", content: "**Bold** and [docs](https://example.com) &amp; `code`." } }] } });
   const res = await fetch(`${f.base}/api/response`, { headers: f.headers });
-  const { response } = await res.json();
+  const { messages } = await res.json();
+  const response = messages[0];
   assert.match(response.html, /<strong>Bold<\/strong>/);
   assert.match(response.text, /^Bold and docs & code\./);
   const quote = "Bold and docs & code";
-  assert.equal((await f.post({ annotations: [{ start: 0, end: quote.length, quote, comment: "Why?" }] })).status, 200);
-  assert.match(f.submissions[0], /> Bold and docs & code\n\nWhy\?/);
-  assert.equal((await f.post({ annotations: [{ start: 0, end: 8, quote: "**Bold**", comment: "Wrong basis" }] })).status, 400);
+  assert.equal((await f.post({ ...f.body, requestId: "00000000-0000-4000-8000-000000000002", annotations: [{ responseId: "rendered-1", start: 0, end: quote.length, quote, comment: "Why?" }] })).status, 200);
+  assert.match(f.sent[0], /> Bold and docs & code\n\nWhy\?/);
+  assert.equal((await f.post({ ...f.body, requestId: "00000000-0000-4000-8000-000000000003", annotations: [{ responseId: "rendered-1", start: 0, end: 8, quote: "**Bold**", comment: "Wrong basis" }] })).status, 400);
 });
 
 test("rejects cross-origin requests, invalid Host, missing origin and invalid token", async (t) => {
@@ -86,7 +91,7 @@ test("rejects cross-origin requests, invalid Host, missing origin and invalid to
   assert.equal((await f.post(f.body, { Authorization: "Bearer wrong" })).status, 401);
   assert.equal((await f.post(f.body, { Origin: "" })).status, 403);
   assert.equal((await f.post(f.body, { "Content-Type": "text/plain" })).status, 403);
-  assert.equal(f.submissions.length, 0);
+  assert.equal(f.sent.length, 0);
 });
 
 test("session/branch invalidation prevents reads and writes", async (t) => {
@@ -95,21 +100,17 @@ test("session/branch invalidation prevents reads and writes", async (t) => {
   current = false;
   assert.equal((await f.post()).status, 410);
   assert.equal((await fetch(`${f.base}/api/response`, { headers: f.headers })).status, 410);
-  assert.equal(f.submissions.length, 0);
+  assert.equal(f.sent.length, 0);
 });
 
-test("busy editor preserves annotations for a later retry", async (t) => {
+test("busy Pi refuses annotation sends without consuming them", async (t) => {
   let busy = true;
-  let appended = 0;
-  const f = await fixture(t, { onSubmit: () => {
-    if (busy) throw new Error("Pi is busy");
-    appended++;
-  } });
-  assert.equal((await f.post()).status, 400);
-  assert.equal(appended, 0);
+  const f = await fixture(t, { chat: { isIdle: () => !busy } });
+  assert.equal((await f.post()).status, 409);
+  assert.equal(f.sent.length, 0);
   busy = false;
   assert.equal((await f.post()).status, 200);
-  assert.equal(appended, 1);
+  assert.equal(f.sent.length, 1);
 });
 
 test("chat note API persists per session across servers and flushes on disconnect", async (t) => {
@@ -209,7 +210,7 @@ test("chat protects the active transcript and validates quotes from each assista
   const renderedNote = await preview.json();
   assert.match(renderedNote.html, /<strong>note<\/strong>/);
   assert.doesNotMatch(renderedNote.html, /<script/);
-  assert.equal((await f.post()).status, 404);
+  assert.equal((await f.legacyPost()).status, 404, "the retired draft-only endpoint is unavailable");
 
   const annotation = (responseId, quote) => ({ responseId, start: 0, end: quote.length, quote, comment: `Explain ${quote}.` });
   const batch = { requestId: "00000000-0000-4000-8000-000000000001", annotations: [annotation("a1", "One"), annotation("a2", "Two")] };
@@ -359,18 +360,15 @@ test("separate browser chat servers discover active peers and remove them on dis
 test("authenticated polling keeps chat alive beyond its original deadline, then idle chat expires", async (t) => {
   const ttlMs = 750;
   const f = await fixture(t, { ttlMs, chat: { getBranch: () => [], isIdle: () => true } });
-  const draft = await fixture(t, { ttlMs });
   const poll = async ({ base, headers }) => {
     const res = await fetch(`${base}/api/response`, { headers });
     await res.json();
     return res.status;
   };
-  assert.equal(await poll(draft), 200);
   for (let i = 0; i < 3; i++) {
     assert.equal(await poll(f), 200);
     await delay(280);
   }
-  await assert.rejects(() => poll(draft), "draft-only polling doesn't renew its original timeout");
   assert.equal(await poll(f), 200, "chat survives more than the original TTL");
   await delay(ttlMs + 25);
   await assert.rejects(() => poll(f), "abandoned chat closes after the idle timeout");
@@ -416,9 +414,7 @@ test("chat annotation images stay associated with their questions and use separa
   assert.equal(received.length, 1);
   assert.match(received[0][0].text, /> One\n\nFirst\?\n\nAttached: Image 1\.[\s\S]*> Two\n\nSecond\?\n\nAttached: Image 2\./);
   assert.deepEqual(received[0].slice(1).map(({ data }) => data), [png, largePng]);
-  const draft = await fixture(t);
-  assert.equal((await draft.post({ annotations: [{ ...draft.body.annotations[0], images: [image] }] })).status, 400);
-  assert.deepEqual(draft.submissions, []);
+  assert.equal((await f.legacyPost(body)).status, 404, "annotation submission is available only through live chat");
 });
 
 test("chat validates mixed attachments and includes every file in duplicate detection", async (t) => {
@@ -454,11 +450,9 @@ test("chat validates mixed attachments and includes every file in duplicate dete
   assert.deepEqual(sent[0].slice(1), Array(2).fill({ type: "image", mimeType: image.mimeType, data: image.data }));
 });
 
-test("invalid JSON and oversized bodies do not reach the draft", async (t) => {
+test("invalid JSON is rejected by the live chat endpoint", async (t) => {
   const f = await fixture(t);
-  for (const body of ["{", JSON.stringify({ huge: "x".repeat(513 * 1024) })]) {
-    const res = await fetch(`${f.base}/api/annotations`, { method: "POST", headers: f.headers, body });
-    assert.equal(res.status, 400);
-  }
-  assert.equal(f.submissions.length, 0);
+  const res = await fetch(`${f.base}/api/chat`, { method: "POST", headers: f.headers, body: "{" });
+  assert.equal(res.status, 400);
+  assert.equal(f.sent.length, 0);
 });

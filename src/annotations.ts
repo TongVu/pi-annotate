@@ -7,16 +7,6 @@ function messageText(content) {
   return content.filter((block) => block.type === "text").map((block) => block.text).join("\n\n");
 }
 
-export function latestAssistantResponse(entries) {
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const entry = entries[i];
-    if (entry.type !== "message" || entry.message.role !== "assistant") continue;
-    const text = messageText(entry.message.content);
-    if (text.trim()) return { id: entry.id, text };
-  }
-  return undefined;
-}
-
 export function userImageBlocks(entry) {
   if (entry?.type !== "message" || entry.message.role !== "user" || !Array.isArray(entry.message.content)) return [];
   return entry.message.content.filter((block) => block.type === "image" &&
@@ -85,8 +75,4 @@ export function formatChatAnnotations(value, getResponseText, imagesAt) {
     return `${question}\n\nAttached: ${labels.join(", ")}.`;
   }).join("\n\n")).join("\n\n");
   return [{ type: "text", text }, ...images];
-}
-
-export function appendToDraft(draft, annotations) {
-  return draft ? `${draft}${draft.endsWith("\n\n") ? "" : "\n\n"}${annotations}` : annotations;
 }

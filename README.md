@@ -1,8 +1,7 @@
 # Pi Annotate
 
 A local Pi extension for chatting and asking questions about passages in assistant
-replies. Use `/chat` to send directly to the current Pi session, or
-`/annotate` to return quotes and questions to Pi's draft editor without sending.
+replies. Use `/chat` to talk directly to the current Pi session and annotate replies.
 
 ## Try it
 
@@ -50,8 +49,8 @@ filename to inspect a larger local preview before sending. Sent images can also
 be opened from the thumbnails in the conversation. Send up to 10 UTF-8
 text/code files or PNG, JPEG, GIF, and WebP images, with or without a message.
 Limits are 5 MiB per file, 10 MiB combined, and 128 KiB
-combined for text files. The same image limits apply across an annotation batch;
-`/annotate` remains text-only. PDFs, Office documents, and archives aren't supported.
+combined for text files. The same image limits apply across an annotation batch.
+PDFs, Office documents, and archives aren't supported.
 Images require an image-capable model and must not be blocked in Pi settings.
 
 Chat submissions start a normal Pi turn with the session's model and tools. They
@@ -89,27 +88,9 @@ command, including on other platforms. Click **Back to live chat** to pick up
 your draft where you left off. The filter searches session labels and directories,
 not message bodies.
 
-### Draft-only annotations
-
-1. Run `/annotate` after the assistant finishes responding. It opens a local page
-   in your default browser. Nothing opens merely from loading the extension.
-2. Select a passage in the response. A question/comment dialog appears.
-3. Enter your question and click **Add annotation**. Repeat for more passages.
-4. Edit or remove annotations in the side panel as needed.
-5. Click **Add to Pi draft** once. Switch back to Pi.
-6. Review the quotes and questions appended to your input, then press Enter to send.
-
-Existing input is preserved: annotations append to the draft as it exists at
-transfer time, including changes you made while the annotation page was open.
-There is no automatic model submission in draft mode. The browser tab stays open so you can see
-whether transfer succeeded; close it when done.
-
-Other commands:
-
-- `/annotate link` — show a local link without opening the browser.
-- `/chat close` or `/annotate close` — disconnect the current browser page.
-- `/reload` — reload extension source changes; old pages are disconnected.
-  Finish unsent drafts first, then open a new page.
+`/chat link` prints the local link without opening a browser. `/chat close` disconnects
+the current browser page. `/reload` reloads extension source changes and disconnects
+old pages; finish unsent drafts first, then open a new page.
 
 To load it in future chats, optionally install this local package yourself:
 
@@ -124,18 +105,17 @@ Pi settings; it does not publish anything. Remove it with
 ## What is implemented
 
 - A live chat view of the active branch's user messages and text-bearing assistant
-  replies. Draft mode shows only the latest such reply. Neither includes thinking
-  or tool calls.
-- Native browser text selection, a comment dialog, multiple annotations,
-  edit/remove, and batch return to Pi.
+  replies. It excludes thinking and tool calls.
+- Native browser text selection, a comment dialog, and multiple annotations with
+  edit/remove and batch submission as a normal Pi turn.
 - Headings, bold/italic text, lists, blockquotes, links, and code blocks rendered
   locally from Markdown.
 - Exact quote offsets validated against server-generated rendered text, plus the
-  original response's session entry ID in the returned draft.
-- Current-draft preservation, duplicate-transfer protection, and retry after a
-  busy-agent or connection failure.
-- Mode checks and invalidation on session switches, forks, tree navigation,
-  shutdown, or replacement by another `/chat` or `/annotate` page.
+  source response's session entry ID in each submitted annotation.
+- Independent browser message and annotation drafts, duplicate-send protection,
+  and retry after a busy-agent or connection failure.
+- Invalidation on session switches, forks, tree navigation, shutdown, or
+  replacement by another `/chat` page.
 
 Selections refer to the **rendered text**, not Markdown punctuation. The server
 renders once and derives canonical text with an HTML5 parser; the browser checks
@@ -150,7 +130,7 @@ not require clipboard access or access to Pi's private transcript selection.
 ## Privacy and lifetime
 
 - The server binds to `127.0.0.1` on a random port, not the network interface.
-- Response and transfer APIs require a random per-window bearer token. The opening
+- Chat APIs require a random per-window bearer token. The opening
   link carries it in a URL fragment; the page removes the fragment from the address
   bar/history after reading it. Do not share the link.
 - Host and Origin checks prevent cross-origin/rebinding requests. No CORS, external
@@ -161,14 +141,13 @@ not require clipboard access or access to Pi's private transcript selection.
   active markup. Links make no request unless you choose to open them.
 - This is a local authenticated capability, not protection against a compromised
   OS, browser, or extension. Response text can contain private data: use a trusted
-  browser/profile. `/annotate` uses the OS default browser; `/annotate link` lets
-  you choose where to open it.
+  browser/profile. `/chat link` lets you choose where to open the local chat.
 - A connected `/chat` tab keeps its port open by polling. The page asks Pi to close
   the port when you leave. If the browser crashes, is suspended, or can't send
-  that request, Pi closes the port after 30 minutes without a poll. Draft-only
-  pages still expire 30 minutes after opening.
-- The extension keeps no separate transcript or drafts on disk. Closing/reloading
-  the page loses unsent drafts and reloading discards the access token. Reopen from Pi.
+  that request, Pi closes the port after 30 minutes without a poll.
+- The extension keeps no separate transcript or message drafts on disk; the
+  reusable Markdown note is stored locally per Pi session. Closing/reloading the
+  page loses unsent drafts and reloading discards the access token. Reopen from Pi.
 - Chat mode shows visible user and assistant text and supported user images from
   the active branch, including older messages. It does not show system prompts,
   hidden reasoning, or tool calls/results. The local page fetches each visible
@@ -183,9 +162,8 @@ not require clipboard access or access to Pi's private transcript selection.
   Pi session open its own browser tab. Discovery does not share browser URLs or
   access tokens with other sessions.
 - Selected files are sent to Pi only when you send the message. Pi receives text
-  files inline with their names and images as normal image inputs. Draft-only
-  annotations enter the session only when **you submit** the terminal draft.
-- Opening a local annotation page does not modify Pi's MCP/browser allowlist or
+  files inline with their names and images as normal image inputs.
+- Opening a local chat page does not modify Pi's MCP/browser allowlist or
   authorize browser automation at any additional origin.
 
 ## Development
@@ -209,8 +187,8 @@ The native-loader regression test runs automatically inside the managed Pi
 environment. Elsewhere, set `PI_EXTENSION_LOADER` to your installed Pi's
 `dist/core/extensions/loader.js` to run it; without that path it is explicitly skipped.
 
-Tests cover response extraction, quote/offset validation, draft preservation,
-real loopback HTTP requests, authentication/origin/host restrictions, lifecycle
+Tests cover quote/offset validation, browser composer drafts, real loopback HTTP
+requests, authentication/origin/host restrictions, lifecycle
 invalidation, duplicate/retry behavior, mocked Pi commands, Markdown rendering,
 HTML/link/image safety, and jsdom browser interactions across formatted text,
 paragraphs, lists, entities, emoji, and code blocks. They do not prove native
@@ -218,41 +196,22 @@ selection or visual layout in a real browser.
 
 ### Verification so far
 
-- All 30 tests passed with Node.js 26.5.0 on this Mac, including a same-process
-  reload test through the installed Pi 1.3.0 loader and a stale-server UI test.
-- The installed Pi 1.3.0 native extension loader loaded `src/index.ts`, registered
-  `/annotate`, and served its local page through `/annotate link` with no errors.
+- The installed Pi native extension loader has been used to exercise local chat
+  reload and browser-server behavior.
 - No model request or browser UI control was used for these checks.
 - `npm audit` reported zero vulnerabilities after the Markdown dependencies were installed.
 - The user reported a rendered-text failure after `/reload`. A reproduction showed
   native `.mjs` helper caching across reloads; changing local helpers to `.ts` passed
-  same-process reload and rendered-quote transfer regression checks. The browser now
-  distinguishes a stale server from a genuine rendered-text mismatch.
+  same-process reload and rendered-text regression checks.
 - Live browser acceptance of the reload fix and rendered selection is still needed.
   Other OS browser launchers have not been live-tested.
 
 ### Manual acceptance
 
-For live chat: run `/chat`. Use Shift+Enter to create a newline and Enter to send.
-Check that the reply appears in the same tab. Scroll a long transcript and check
-that the dots stay centered, highlight the current turn, and jump to earlier
-messages. Attach several text files and screenshots and check that Pi receives
-all of them. Send an annotation batch and check that the right panel clears. Try a
-narrow browser window and check that closing the tab disconnects its link.
-
-For draft mode:
-
-1. Load the extension and resume the intended chat. Run `/annotate`.
-2. Confirm only the latest assistant text appears, with rendered headings/bold/lists
-   and code blocks, and no hidden reasoning. Images should be descriptions, not loads.
-3. Select across bold/link boundaries, paragraphs, and code lines; check that the
-   comment dialog quotes that passage without Markdown markers. Add two comments.
-4. Edit one, remove the other, and add another. Cancel a selection too.
-5. Type an extra draft in Pi while keeping the annotation tab open.
-6. Click **Add to Pi draft**. Confirm the existing draft remains and the ordered
-   questions appear once. Confirm no model turn starts automatically.
-7. Submit from Pi only when ready.
-8. Run `/annotate` again, then `/annotate close`; confirm the old page can no longer
-   transfer. Repeat around a session/tree switch if needed.
-9. Check narrow-window layout, emoji/non-ASCII quotes, long selections, and a failed
-   transfer/retry. Real keyboard selection support depends on browser caret browsing.
+Run `/chat`. Use Shift+Enter to create a newline and Enter to send. Check that the
+reply appears in the same tab. Scroll a long transcript and check that the dots
+stay centered, highlight the current turn, and jump to earlier messages. Attach
+several text files and screenshots and check that Pi receives all of them. Send an
+annotation batch and check that the right panel clears. Try a narrow browser
+window and check that closing the tab disconnects its link. Real keyboard
+selection support depends on browser caret browsing.

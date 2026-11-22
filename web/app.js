@@ -41,7 +41,6 @@ const FILE_LIMIT = 5 * 1024 * 1024;
 const ATTACHMENTS_LIMIT = 10 * 1024 * 1024;
 let attachments = [];
 let readingFiles = false;
-let chat = false;
 let cursor = null;
 let liveTitle = "Chat · Pi";
 let chatStatusEmoji = "⚪";
@@ -58,9 +57,7 @@ let liveScroll;
 let busy = false;
 let connected = true;
 let lastAttempt;
-let response;
 let pending;
-let submitted = false;
 let sending = false;
 let editing = -1;
 
@@ -170,7 +167,7 @@ function isRetry(body) {
 }
 
 function canSend(body) {
-  return !submitted && !savedSessionId && !sending && connected && (!chat || !busy || isRetry(body));
+  return !savedSessionId && !sending && connected && (!busy || isRetry(body));
 }
 
 function composerBody() {
@@ -272,7 +269,7 @@ function checkAttachmentLimits(files, existing) {
 }
 
 async function attachFiles(files) {
-  if (!chat || !files.length || sending || readingFiles) return;
+  if (!files.length || sending || readingFiles) return;
   readingFiles = true;
   updateButtons();
   try {
@@ -331,8 +328,8 @@ function setAnnotations(next) {
 }
 
 function renderAnnotations() {
-  $("count").textContent = chat ? String(annotations.length) : `(${annotations.length})`;
-  if (chat) send.setAttribute("aria-label", `Send ${annotations.length} question${annotations.length === 1 ? "" : "s"}`);
+  $("count").textContent = String(annotations.length);
+  send.setAttribute("aria-label", `Send ${annotations.length} question${annotations.length === 1 ? "" : "s"}`);
   updateButtons();
   $("empty").hidden = annotations.length > 0;
   $("annotations").replaceChildren();
@@ -354,7 +351,7 @@ function renderAnnotations() {
       button.className = "secondary annotation-action";
       button.title = action.label;
       button.setAttribute("aria-label", action.label);
-      button.disabled = submitted || sending;
+      button.disabled = sending;
       button.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${action.path}"/></svg>`;
       button.addEventListener("click", () => {
         if (action.label === "Edit annotation") {
@@ -391,12 +388,12 @@ function showComment(selection) {
 }
 
 function selectPassage() {
-  if ((!chat && !response) || submitted || sending || dialog.open) return;
+  if (sending || dialog.open) return;
   const selection = window.getSelection();
   if (!selection || selection.isCollapsed || !selection.rangeCount) return;
   const range = selection.getRangeAt(0);
   const startElement = range.startContainer.nodeType === Node.ELEMENT_NODE ? range.startContainer : range.startContainer.parentElement;
-  const passage = chat ? startElement?.closest("[data-response-id]") : responseElement;
+  const passage = startElement?.closest("[data-response-id]");
   if (!passage || !responseElement.contains(passage) || !passage.contains(range.startContainer) || !passage.contains(range.endContainer)) return;
   const before = range.cloneRange();
   before.selectNodeContents(passage);
@@ -412,7 +409,7 @@ function selectPassage() {
     return;
   }
   editing = -1;
-  showComment({ start, end: start + quote.length, quote, ...(chat ? { responseId: passage.dataset.responseId } : {}) });
+  showComment({ start, end: start + quote.length, quote, responseId: passage.dataset.responseId });
 }
 
 // Native browser selection, not a clipboard read. Keyboard selection is supported too.
@@ -453,7 +450,7 @@ $("comment-form").addEventListener("submit", (event) => {
   const next = editing >= 0 ? annotations.map((item, i) => i === editing ? annotation : item) : [...annotations, annotation];
   dialog.close();
   setAnnotations(next);
-  status(chat ? "Question saved in the right panel. Send when ready." : "Annotation saved here. Add more, or choose Add to Pi draft.");
+  status("Question saved in the right panel. Send when ready.");
 });
 
 async function sendChat(body) {
@@ -610,28 +607,11 @@ chatFile.addEventListener("change", () => {
 $("chat-form").addEventListener("submit", (event) => {
   event.preventDefault();
   const body = composerBody();
-  if (chat && !readingFiles && (body.text || body.attachments)) void sendChat(body);
+  if (!readingFiles && (body.text || body.attachments)) void sendChat(body);
 });
 send.addEventListener("click", async () => {
   if (!annotations.length || !canSend({ annotations })) return;
-  if (chat) {
-    await sendChat({ annotations });
-    return;
-  }
-  sending = true;
-  renderAnnotations();
-  status("Adding annotations to Pi’s draft…");
-  try {
-    await api("/api/annotations", { annotations });
-    submitted = true;
-    send.firstChild.textContent = "Added to Pi draft ";
-    status("Added to Pi’s draft—not sent. Switch back to Pi, review, and press Enter when ready. You can close this tab.");
-  } catch (error) {
-    status(error.message || "Could not connect to Pi. Keep this tab open and retry.", true);
-  } finally {
-    sending = false;
-    renderAnnotations();
-  }
+  await sendChat({ annotations });
 });
 function markCurrentDot(dot) {
   if (currentDot === dot) return;
@@ -742,7 +722,7 @@ function renderTurn(message, session) {
     const label = document.createElement("h2");
     label.textContent = "Pi";
     turn.append(label);
-    // Same restricted Markdown renderer and DOM-text check as draft mode.
+    // Same restricted Markdown renderer and DOM-text check as the live transcript.
     content.innerHTML = message.html;
     if (content.textContent !== message.text) content.textContent = "This reply could not be rendered safely. See Pi in the terminal.";
     else if (!session) content.dataset.responseId = message.id;
@@ -879,7 +859,7 @@ async function copyResumeCommand(id) {
 
 $("close-resume-command").addEventListener("click", () => $("resume-command-dialog").close());
 $("rename-session").addEventListener("click", () => {
-  if (!chat || savedSessionId) return;
+  if (savedSessionId) return;
   renameSessionInput.value = liveSessionName ?? "";
   $("rename-session-status").textContent = "";
   $("rename-session-status").classList.remove("error");
@@ -1244,7 +1224,6 @@ openSavedButton.addEventListener("click", () => void openSavedInBrowser());
 function startChat(data) {
   // Older servers silently ignore the new attachments field on messages with a caption.
   if (data.protocol !== 2) throw new Error("Pi's chat server is outdated. Run /reload, then /chat in Pi.");
-  chat = true;
   annotationImagesSupported = data.annotationImages === true;
   $("comment-images").hidden = !annotationImagesSupported;
   $("comment-attach").hidden = !annotationImagesSupported;
@@ -1293,34 +1272,16 @@ function startChat(data) {
 }
 
 window.addEventListener("beforeunload", (event) => {
-  if (!submitted && (annotations.length || comment.value.trim() || annotationFiles.length || readingAnnotationFiles || chatInput.value.trim() || attachments.length || readingFiles)) {
+  if (annotations.length || comment.value.trim() || annotationFiles.length || readingAnnotationFiles || chatInput.value.trim() || attachments.length || readingFiles) {
     event.preventDefault();
     event.returnValue = "";
   }
 });
 try {
-  if (!token) throw new Error("Open this page from Pi with /chat or /annotate. Reloading the page discards its access token.");
+  if (!token) throw new Error("Open this page from Pi with /chat. Reloading the page discards its access token.");
   const data = await api("/api/response");
-  if (data.mode === "chat") startChat(data);
-  else loadDraft(data);
+  if (data.mode !== "chat") throw new Error("Pi's chat server is outdated. Run /reload, then /chat in Pi.");
+  startChat(data);
 } catch (error) {
   status(error.message || "Could not load response.", true);
-}
-
-function loadDraft(data) {
-  if (typeof data.response?.html !== "string" || typeof data.response?.text !== "string") {
-    throw new Error("Pi's annotation server is outdated. Run /reload, then /annotate in Pi. If it persists, restart Pi with --continue and the extension.");
-  }
-  response = data.response;
-  submitted = data.submitted;
-  // Only the local server's restricted Markdown renderer supplies this HTML.
-  // Never insert the original assistant Markdown or annotation text as HTML.
-  responseElement.innerHTML = response.html;
-  if (responseElement.textContent !== response.text) {
-    responseElement.replaceChildren();
-    response = undefined;
-    throw new Error("Rendered text did not match Pi's quote validation. Run /annotate again.");
-  }
-  renderAnnotations();
-  status(submitted ? "This response was already added to Pi. Run /annotate for a new batch." : "Select a passage to add your first annotation. Drafts stay in this tab until you add them to Pi.");
 }
