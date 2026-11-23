@@ -54,6 +54,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .main { min-width: 0; padding: 28px 36px; }
 .top { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
 .dashboard-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; max-width: 100%; }
+/* Match the chat composer's light-mode Send button. */
+.dashboard-tools .toolbar-icon { display: grid; place-items: center; flex: none; width: 32px; height: 32px; padding: 0; border: 1px solid transparent; border-radius: 50%; background: #9cd3c0; color: #18362d; font-size: 17px; }
+.dashboard-tools .toolbar-icon:disabled { opacity: .5; }
 #session-filter { width: 210px; max-width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; background: white; }
 .sub, .directory { color: var(--muted); margin-top: 4px; overflow-wrap: anywhere; }
 .directory { font-size: 12px; }
@@ -83,7 +86,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .card h3 { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
 .card p { color: var(--muted); font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
 .row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-top: auto; font-size: 12px; color: var(--muted); }
-.open { padding: 0; border: 0; background: none; color: var(--accent); font-weight: 600; }
+.open { padding: 0; border: 0; background: none; color: #397f83; font-weight: 600; }
 .open:not([aria-disabled="true"])::after { content: ""; position: absolute; inset: 0; border-radius: 14px; }
 .open:disabled { color: var(--muted); }
 .dot { position: relative; display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex: none; }

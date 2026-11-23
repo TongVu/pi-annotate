@@ -209,7 +209,10 @@ test("dashboard filters projects and cards by name or directory within the selec
   filter("/WORK/SLIDES");
   assert.deepEqual(titles(), ["Export failure", "Draft deck"]);
   assert.equal(q('#projects [data-project="/work/site"]'), null);
-  q("#refresh").click();
+  const refresh = q("#refresh");
+  assert.equal(refresh.getAttribute("aria-label"), "Refresh chats");
+  assert.ok(refresh.querySelector('svg[aria-hidden="true"] path'));
+  refresh.click();
   await waitFor(() => q("#message").textContent === "Dashboard refreshed.");
   assert.deepEqual(titles(), ["Export failure", "Draft deck"], "refresh preserves the filter");
   q('[data-view="attention"]').click();
@@ -266,6 +269,8 @@ test("Create new chat offers all known projects and submits only the chosen dire
   const button = q("#create-chat");
   await waitFor(() => !button.disabled);
   assert.equal(button.closest(".dashboard-tools")?.className, "dashboard-tools");
+  assert.equal(button.getAttribute("aria-label"), "Create new chat");
+  assert.equal(button.querySelector('[aria-hidden="true"]').textContent, "📝");
   const filter = q("#session-filter");
   filter.value = "one";
   filter.dispatchEvent(new dom.window.Event("input"));

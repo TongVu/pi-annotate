@@ -28,8 +28,14 @@
         </div>
         <div class="dashboard-tools">
           <input id="session-filter" type="search" aria-label="Filter sessions by name or directory" placeholder="Name or directory" autocomplete="off">
-          <button class="accent" id="refresh" type="button">Refresh</button>
-          <button class="accent" id="create-chat" type="button" aria-haspopup="dialog" disabled>Create new chat</button>
+          <button class="toolbar-icon" id="refresh" type="button" aria-label="Refresh chats" title="Refresh chats">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M20 4v5h-5M4 20v-5h5M20 9a8 8 0 0 0-14-3M4 15a8 8 0 0 0 14 3"/>
+            </svg>
+          </button>
+          <button class="toolbar-icon" id="create-chat" type="button" aria-label="Create new chat" title="Create new chat" aria-haspopup="dialog" disabled>
+            <span aria-hidden="true">📝</span>
+          </button>
         </div>
       </header>
       <div id="stats" class="stats" aria-label="Session counts"></div>
