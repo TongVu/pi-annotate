@@ -54,17 +54,14 @@ test("new chat from the browser replaces the current Pi session and opens its ne
   const sessionDir = await mkdtemp(join(tmpdir(), "pi-chat-new-session-"));
   t.after(() => rm(sessionDir, { recursive: true, force: true }));
   const opened = [];
-  let sessionId = "session-1";
+  const replacement = fixture(t, { launchPage: async (url) => opened.push(url) });
+  replacement.ctx.sessionManager.getSessionId = () => "session-2";
+  replacement.ctx.sessionManager.getSessionDir = () => sessionDir;
   const f = fixture(t, {
-    launchPage: async (url) => opened.push(url),
     newSession: async ({ withSession }) => {
-      sessionId = "session-2";
-      const next = {
-        ...f.ctx,
-        newSession: f.ctx.newSession,
-        sessionManager: { ...f.ctx.sessionManager, getSessionId: () => sessionId },
-      };
-      await withSession(next);
+      await f.handlers.get("session_shutdown")();
+      await replacement.handlers.get("session_start")({ reason: "new" }, replacement.ctx);
+      await withSession(replacement.ctx);
       return { cancelled: false };
     },
   });
@@ -79,8 +76,11 @@ test("new chat from the browser replaces the current Pi session and opens its ne
   assert.equal(accepted.status, 202);
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(opened.length, 1);
-  assert.notEqual(new URL(opened[0]).origin, url.origin);
-  assert.equal(sessionId, "session-2");
+  const next = new URL(opened[0]);
+  assert.notEqual(next.origin, url.origin);
+  await assert.rejects(() => fetch(url.origin));
+  const state = await fetch(`${next.origin}/api/response`, { headers: { Authorization: `Bearer ${next.hash.slice(1)}` } });
+  assert.equal((await state.json()).sessionId, "session-2");
 });
 
 test("/chat rejects unsupported modes and non-TUI contexts", async (t) => {

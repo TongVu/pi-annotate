@@ -11,6 +11,14 @@ import { AUTO_CHAT_SESSION, forkChatInTerminal, resumeChatInTerminal } from "./r
 import { registerSessionOwner, requestOwnedChat } from "./session-owner.ts";
 import { focusTerminal } from "./focus-terminal.ts";
 
+// Pi reloads the extension factory on replacement. Hand off by the fresh session
+// manager, without reusing the outgoing factory's API or event handlers.
+const replacementKey = Symbol.for("pi-chat.replacement-openers");
+const processState = globalThis as typeof globalThis & {
+  [replacementKey]?: WeakMap<ExtensionContext["sessionManager"], (ctx: ExtensionCommandContext) => Promise<unknown>>;
+};
+const replacementOpeners = processState[replacementKey] ??= new WeakMap();
+
 // Keep the existing registry names so running Pi processes can still discover each other.
 async function ownerRegistry() {
   const { getAgentDir } = await import("@earendil-works/pi-coding-agent");
@@ -54,7 +62,6 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
     closeOwner = undefined;
     await close?.();
   });
-  pi.on("session_before_switch", stop);
   pi.on("session_before_fork", stop);
   pi.on("session_before_tree", stop);
 
@@ -111,11 +118,17 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
             ...(commandContext ? { createNewSession: async () => {
               try {
                 const result = await commandContext.newSession({
-                  withSession: async (newContext) => { await runChatPage("", newContext, newContext); },
+                  withSession: async (newContext) => {
+                    const manager = newContext.sessionManager;
+                    const open = replacementOpeners.get(manager);
+                    replacementOpeners.delete(manager);
+                    if (open) await open(newContext);
+                    else newContext.ui.notify("Could not open the new browser chat. Run /chat in Pi.", "warning");
+                  },
                 });
-                if (result.cancelled && ctx.sessionManager.getSessionId() === sessionId) ctx.ui.notify("New chat cancelled.", "info");
+                if (result.cancelled) ctx.ui.notify("New chat cancelled.", "info");
               } catch (error) {
-                if (ctx.sessionManager.getSessionId() === sessionId) ctx.ui.notify(`Could not start a new chat: ${error instanceof Error ? error.message : String(error)}`, "error");
+                if (generation === currentGeneration) ctx.ui.notify(`Could not start a new chat: ${error instanceof Error ? error.message : String(error)}`, "error");
               }
             } } : {}),
             list: () => listPiSessions(ctx.sessionManager.getSessionDir()),
@@ -167,6 +180,9 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
   };
 
   pi.on("session_start", async (event, ctx) => {
+    if (event.reason === "new" && ctx.mode === "tui") {
+      replacementOpeners.set(ctx.sessionManager, (newContext) => runChatPage("", newContext, newContext));
+    }
     if (ctx.mode === "tui" && process.platform !== "win32") {
       const owner = ++ownerGeneration;
       const id = ctx.sessionManager.getSessionId();
