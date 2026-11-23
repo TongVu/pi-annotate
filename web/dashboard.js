@@ -5,6 +5,8 @@ const filter = $("session-filter");
 const createChatButton = $("create-chat");
 const newChatDialog = $("new-chat-dialog");
 const newChatProject = $("new-chat-project");
+const newChatProjects = $("new-chat-projects");
+const noProjectMatches = $("new-chat-no-projects");
 const newChatError = $("new-chat-error");
 const submitNewChat = $("submit-new-chat");
 const cancelNewChat = $("cancel-new-chat");
@@ -34,6 +36,8 @@ let lastData;
 let refreshInFlight;
 let connected = false;
 let creatingChat = false;
+let chosenProject;
+let activeProjectOption;
 const pending = new Set();
 
 function el(tag, className, text) {
@@ -230,27 +234,103 @@ async function openChat(id) {
   }
 }
 
-createChatButton.addEventListener("click", () => {
-  const choices = [...projects].sort((a, b) => projectName(a).localeCompare(projectName(b)) || a.localeCompare(b));
-  const placeholder = el("option", "", "Select a project");
-  placeholder.value = "";
-  placeholder.disabled = true;
-  newChatProject.replaceChildren(placeholder, ...choices.map((cwd) => {
-    const option = el("option", "", cwd);
-    option.value = cwd;
+function highlightProject(option) {
+  activeProjectOption?.setAttribute("aria-selected", "false");
+  activeProjectOption = option;
+  if (option) {
+    option.setAttribute("aria-selected", "true");
+    newChatProject.setAttribute("aria-activedescendant", option.id);
+    option.scrollIntoView?.({ block: "nearest" });
+  } else newChatProject.removeAttribute("aria-activedescendant");
+}
+
+function hideProjectCompletions() {
+  highlightProject(undefined);
+  newChatProjects.hidden = noProjectMatches.hidden = true;
+  newChatProject.setAttribute("aria-expanded", "false");
+}
+
+function showProjectCompletions() {
+  const query = chosenProject ? "" : newChatProject.value.trim().toLowerCase();
+  const matches = projects.filter((cwd) => cwd.toLowerCase().includes(query))
+    .sort((a, b) => projectName(a).localeCompare(projectName(b)) || a.localeCompare(b));
+  highlightProject(undefined);
+  newChatProjects.replaceChildren(...matches.map((cwd, index) => {
+    const option = el("li");
+    option.id = `new-chat-option-${index}`;
+    option.dataset.cwd = cwd;
+    option.setAttribute("role", "option");
+    option.setAttribute("aria-selected", "false");
+    option.append(el("strong", "", projectName(cwd)), el("small", "", cwd));
     return option;
   }));
-  newChatProject.value = view === "project" && projects.includes(project) ? project : "";
+  newChatProjects.hidden = !matches.length;
+  noProjectMatches.hidden = !!matches.length;
+  newChatProject.setAttribute("aria-expanded", String(!!matches.length));
+}
+
+function chooseProject(cwd) {
+  chosenProject = cwd;
+  newChatProject.value = cwd ?? "";
+  submitNewChat.disabled = !cwd;
   newChatError.textContent = "";
+  hideProjectCompletions();
+}
+
+createChatButton.addEventListener("click", () => {
+  chooseProject(view === "project" && projects.includes(project) ? project : undefined);
   newChatDialog.showModal();
+  newChatProject.focus();
+  if (!chosenProject) showProjectCompletions();
 });
-newChatProject.addEventListener("change", () => { newChatError.textContent = ""; });
+newChatProject.addEventListener("input", () => {
+  chosenProject = undefined;
+  submitNewChat.disabled = true;
+  newChatError.textContent = "";
+  showProjectCompletions();
+});
+newChatProject.addEventListener("click", showProjectCompletions);
+newChatProject.addEventListener("blur", hideProjectCompletions);
+// Keep focus on the combobox when an option is clicked.
+newChatProjects.addEventListener("mousedown", (event) => event.preventDefault());
+newChatProjects.addEventListener("click", (event) => {
+  const option = event.target.closest('[role="option"]');
+  if (option) chooseProject(option.dataset.cwd);
+});
+newChatProject.addEventListener("keydown", (event) => {
+  if (event.isComposing) return;
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    if (newChatProjects.hidden) showProjectCompletions();
+    const down = event.key === "ArrowDown";
+    const option = activeProjectOption ? (down ? activeProjectOption.nextElementSibling : activeProjectOption.previousElementSibling) ?? activeProjectOption
+      : down ? newChatProjects.firstElementChild : newChatProjects.lastElementChild;
+    highlightProject(option);
+  } else if (event.key === "Enter" && !newChatProjects.hidden) {
+    const option = activeProjectOption ?? (newChatProjects.childElementCount === 1 ? newChatProjects.firstElementChild : null);
+    if (option) {
+      event.preventDefault();
+      chooseProject(option.dataset.cwd);
+    }
+  } else if (event.key === "Escape" && (!newChatProjects.hidden || !noProjectMatches.hidden)) {
+    event.preventDefault();
+    hideProjectCompletions();
+  }
+});
 cancelNewChat.addEventListener("click", () => newChatDialog.close());
 newChatDialog.addEventListener("cancel", (event) => { if (creatingChat) event.preventDefault(); });
 $("new-chat-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const cwd = newChatProject.value;
-  if (!cwd || creatingChat) return;
+  const cwd = chosenProject;
+  if (creatingChat || !cwd || newChatProject.value !== cwd) return;
+  if (!projects.includes(cwd)) {
+    chooseProject(undefined);
+    newChatError.textContent = "That project is no longer available. Choose another project.";
+    newChatProject.focus();
+    showProjectCompletions();
+    return;
+  }
+  hideProjectCompletions();
   creatingChat = newChatProject.disabled = submitNewChat.disabled = cancelNewChat.disabled = true;
   submitNewChat.textContent = "Starting…";
   newChatError.textContent = "";
@@ -276,7 +356,7 @@ document.addEventListener("click", (event) => {
     view = next || "project";
     project = cwd;
     render();
-    window.scrollTo(0, 0);
+    $("dashboard-scroll").scrollTop = 0;
   }
 });
 $("legend").append(...["working", "ready", "disconnected", "error", "saved"].map((state) => pill(state)));

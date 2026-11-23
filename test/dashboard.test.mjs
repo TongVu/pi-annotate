@@ -183,7 +183,6 @@ test("dashboard filters projects and cards by name or directory within the selec
     session("c", "Export failure", "/work/slides", "error", "focus"), session("d", "Draft deck", "/work/slides", "disconnected", "reopen")];
   const dom = new JSDOM(html, { url: "http://127.0.0.1:3456/#dashboard-test", runScripts: "outside-only" });
   t.after(() => dom.window.close());
-  dom.window.scrollTo = () => {};
   dom.window.fetch = async (path, init) => {
     assert.equal(init.headers.Authorization, "Bearer dashboard-test");
     if (path.startsWith("/api/dashboard")) return { ok: true, json: async () => ({ sessions: entries }) };
@@ -196,7 +195,13 @@ test("dashboard filters projects and cards by name or directory within the selec
   const workingCount = () => q("#stats .dot.working").closest(".stat").querySelector("b").textContent;
   await waitFor(() => q(".card"));
   assert.equal(dom.window.location.hash, "");
-  assert.ok(q(".card .dot.working"));
+  const scroll = q("#dashboard-scroll");
+  assert.ok(scroll.contains(q(".card .dot.working")));
+  for (const selector of ["#heading", "#summary", ".dashboard-tools", "#legend"]) {
+    assert.equal(scroll.contains(q(selector)), false, `${selector} stays outside session scrolling`);
+  }
+  assert.ok(q(".side-scroll").contains(q("#projects")));
+  assert.equal(q(".side-scroll").contains(q(".brand")), false);
   assert.ok(!q(".card img"), "saved message text stays inert");
   const filter = (value) => {
     const field = q("#session-filter");
@@ -215,7 +220,9 @@ test("dashboard filters projects and cards by name or directory within the selec
   refresh.click();
   await waitFor(() => q("#message").textContent === "Dashboard refreshed.");
   assert.deepEqual(titles(), ["Export failure", "Draft deck"], "refresh preserves the filter");
+  scroll.scrollTop = 100;
   q('[data-view="attention"]').click();
+  assert.equal(scroll.scrollTop, 0, "switching views resets the session scroller");
   assert.deepEqual(titles(), ["Export failure"]);
   assert.equal(workingCount(), "0", "the status overview still respects the directory filter");
   filter("");
@@ -244,12 +251,11 @@ test("dashboard filters projects and cards by name or directory within the selec
   assert.deepEqual(requests, [["/api/open", { id: "b", intent: "focus" }], ["/api/open", { id: "d", intent: "open" }]]);
 });
 
-test("Create new chat offers all known projects and submits only the chosen directory", async (t) => {
+test("Create new chat completes known projects by name or path and submits only the confirmed choice", async (t) => {
   const html = await readFile(new URL("../web/dashboard.html", import.meta.url), "utf8");
   const script = await readFile(new URL("../web/dashboard.js", import.meta.url), "utf8");
   const dom = new JSDOM(html, { url: "http://127.0.0.1:3456/#dashboard-test", runScripts: "outside-only" });
   t.after(() => dom.window.close());
-  dom.window.scrollTo = () => {};
   dom.window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
   dom.window.HTMLDialogElement.prototype.close = function () { this.open = false; };
   const projects = ["/work/one", "/work/two", "/work/empty"];
@@ -279,15 +285,47 @@ test("Create new chat offers all known projects and submits only the chosen dire
   button.click();
   assert.equal(dialog.open, true);
   assert.equal(field.value, "", "a project must be chosen from All sessions");
-  assert.deepEqual([...field.options].map(({ value }) => value), ["", "/work/empty", "/work/one", "/work/two"]);
+  assert.equal(dom.window.document.activeElement, field);
+  assert.equal(field.getAttribute("aria-expanded"), "true");
+  const options = () => [...q("#new-chat-projects").children];
+  assert.deepEqual(options().map(({ dataset }) => dataset.cwd), ["/work/empty", "/work/one", "/work/two"]);
+  assert.equal(options()[0].querySelector("strong").textContent, "empty");
+  const type = (value) => {
+    field.value = value;
+    field.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  };
+  const key = (key) => field.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+  const submit = () => q("#new-chat-form").dispatchEvent(new dom.window.Event("submit", { cancelable: true }));
+  type("  EMP ");
+  assert.deepEqual(options().map(({ dataset }) => dataset.cwd), ["/work/empty"]);
+  options()[0].querySelector("strong").click();
+  assert.equal(field.value, "/work/empty", "mouse selection fills the known directory");
+  assert.equal(q("#submit-new-chat").disabled, false);
+  assert.equal(field.getAttribute("aria-expanded"), "false");
   q("#cancel-new-chat").click();
   assert.equal(dialog.open, false);
   assert.deepEqual(requests, []);
   q('[data-project="/work/one"]').click();
   button.click();
   assert.equal(field.value, "/work/one", "the project view preselects its project");
-  field.value = "/work/two";
-  const submit = () => q("#new-chat-form").dispatchEvent(new dom.window.Event("submit", { cancelable: true }));
+  type("/work/unknown");
+  assert.equal(q("#new-chat-no-projects").hidden, false);
+  assert.equal(q("#submit-new-chat").disabled, true);
+  submit();
+  assert.deepEqual(requests, [], "edited or unlisted paths are not submitted");
+  type("/WORK/TW");
+  assert.deepEqual(options().map(({ dataset }) => dataset.cwd), ["/work/two"]);
+  assert.equal(key("ArrowDown"), false);
+  assert.equal(field.getAttribute("aria-activedescendant"), options()[0].id);
+  assert.equal(options()[0].getAttribute("aria-selected"), "true");
+  assert.equal(key("Escape"), false);
+  assert.equal(dialog.open, true, "Escape closes suggestions before the dialog");
+  assert.equal(field.getAttribute("aria-expanded"), "false");
+  assert.equal(field.hasAttribute("aria-activedescendant"), false);
+  key("ArrowUp");
+  assert.equal(key("Enter"), false);
+  assert.equal(field.value, "/work/two");
+  assert.deepEqual(requests, [], "accepting a completion does not start a chat");
   submit();
   submit();
   assert.deepEqual(requests, [{ cwd: "/work/two" }]);

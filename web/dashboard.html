@@ -12,12 +12,14 @@
   <div class="app">
     <aside class="side" aria-label="Chat navigation">
       <div class="brand"><img src="/logo.png" width="24" height="24" alt="">Projects</div>
-      <nav id="projects" aria-label="Projects"></nav>
-      <div class="label">Views</div>
-      <nav aria-label="Views">
-        <button class="nav-item" type="button" data-view="all" aria-current="true">All sessions</button>
-        <button class="nav-item" type="button" data-view="attention">Needs attention</button>
-      </nav>
+      <div class="side-scroll">
+        <nav id="projects" aria-label="Projects"></nav>
+        <div class="label">Views</div>
+        <nav aria-label="Views">
+          <button class="nav-item" type="button" data-view="all" aria-current="true">All sessions</button>
+          <button class="nav-item" type="button" data-view="attention">Needs attention</button>
+        </nav>
+      </div>
     </aside>
     <main class="main">
       <header class="top">
@@ -38,17 +40,19 @@
           </button>
         </div>
       </header>
-      <div id="stats" class="stats" aria-label="Session counts"></div>
-      <div id="notice" class="notice" hidden>
-        <p id="message" role="status"></p>
-        <div id="manual" hidden>
-          <label for="command">Run this in Terminal, then run /chat in Pi</label>
-          <input id="command" readonly>
-          <button id="copy" class="accent" type="button">Copy</button>
+      <div id="dashboard-scroll" role="region" aria-label="Session results" tabindex="0">
+        <div id="stats" class="stats" aria-label="Session counts"></div>
+        <div id="notice" class="notice" hidden>
+          <p id="message" role="status"></p>
+          <div id="manual" hidden>
+            <label for="command">Run this in Terminal, then run /chat in Pi</label>
+            <input id="command" readonly>
+            <button id="copy" class="accent" type="button">Copy</button>
+          </div>
+          <button id="dismiss" class="dismiss" type="button" aria-label="Dismiss message">×</button>
         </div>
-        <button id="dismiss" class="dismiss" type="button" aria-label="Dismiss message">×</button>
+        <div id="sessions"></div>
       </div>
-      <div id="sessions"></div>
       <footer id="legend" class="legend" aria-label="Status legend"></footer>
     </main>
   </div>
@@ -56,11 +60,15 @@
     <form id="new-chat-form" method="dialog">
       <h2 id="new-chat-heading">Create new chat</h2>
       <label for="new-chat-project">Which project should the chat be in?</label>
-      <select id="new-chat-project" required autofocus></select>
+      <div class="project-picker">
+        <input id="new-chat-project" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="new-chat-projects" placeholder="Search by project name or path" autocomplete="off" spellcheck="false" autofocus>
+        <ul id="new-chat-projects" role="listbox" aria-label="Matching projects" hidden></ul>
+        <p id="new-chat-no-projects" role="status" hidden>No projects match your search.</p>
+      </div>
       <p id="new-chat-error" role="alert"></p>
       <div class="dialog-actions">
         <button id="cancel-new-chat" type="button">Cancel</button>
-        <button class="accent" id="submit-new-chat" type="submit">Create chat</button>
+        <button class="accent" id="submit-new-chat" type="submit" disabled>Create chat</button>
       </div>
     </form>
   </dialog>
