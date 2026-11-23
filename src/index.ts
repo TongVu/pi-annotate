@@ -9,6 +9,7 @@ import { listPiSessions, readPiSession } from "./session-explorer.ts";
 import { createChatPresence } from "./chat-presence.ts";
 import { AUTO_CHAT_SESSION, forkChatInTerminal, resumeChatInTerminal } from "./resume-chat.ts";
 import { registerSessionOwner, requestOwnedChat } from "./session-owner.ts";
+import { focusTerminal } from "./focus-terminal.ts";
 
 // Keep the existing registry names so running Pi processes can still discover each other.
 async function ownerRegistry() {
@@ -97,6 +98,7 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
           getSessionId: () => ctx.sessionManager.getSessionId(),
           getSessionName: () => ctx.sessionManager.getSessionName(),
           setSessionName: (sessionName: string) => pi.setSessionName(sessionName),
+          focusTerminal,
           presence: createChatPresence(async () => {
             const { getAgentDir } = await import("@earendil-works/pi-coding-agent");
             return join(getAgentDir(), "pi-annotate-live");

@@ -911,6 +911,19 @@ async function copyResumeCommand(id) {
 }
 
 $("close-resume-command").addEventListener("click", () => $("resume-command-dialog").close());
+const focusTerminalButton = $("focus-terminal");
+focusTerminalButton.addEventListener("click", async () => {
+  focusTerminalButton.disabled = true;
+  status("Switching to Terminal…");
+  try {
+    await api("/api/session/focus-terminal", {});
+    status("");
+  } catch (error) {
+    status(error.status === 404 ? "Switch to Terminal needs the updated Pi extension. Run /reload, then reopen /chat." : error.message, true);
+  } finally {
+    focusTerminalButton.disabled = false;
+  }
+});
 $("rename-session").addEventListener("click", () => {
   if (savedSessionId) return;
   renameSessionInput.value = liveSessionName ?? "";

@@ -428,12 +428,13 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
       }
       const disconnect = live && req.url === "/api/close";
       const renameSession = live && req.url === "/api/session/name";
+      const focusTerminal = live && req.url === "/api/session/focus-terminal";
       const renderNote = live && req.url === "/api/markdown";
       const saveNote = live && req.url === "/api/note";
       const openSession = explorer && req.url === "/api/session/open";
       const cloneSession = explorer && req.url === "/api/session/clone";
       const newSession = explorer && req.url === "/api/session/new";
-      if (req.method === "POST" && (disconnect || renameSession || renderNote || saveNote || openSession || cloneSession || newSession || req.url === "/api/chat")) {
+      if (req.method === "POST" && (disconnect || renameSession || focusTerminal || renderNote || saveNote || openSession || cloneSession || newSession || req.url === "/api/chat")) {
         if (req.headers.origin !== origin || req.headers["content-type"] !== "application/json") {
           reply(403, { error: "Expected a same-origin JSON request." });
           return;
@@ -450,8 +451,21 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
           reply(200, { ok: true });
           return;
         }
-        const raw = await readBody(req, renderNote || saveNote ? NOTE_BODY_LIMIT : openSession || renameSession || cloneSession || newSession ? 4096 : CHAT_BODY_LIMIT);
+        const raw = await readBody(req, renderNote || saveNote ? NOTE_BODY_LIMIT : openSession || renameSession || focusTerminal || cloneSession || newSession ? 4096 : CHAT_BODY_LIMIT);
         const body = JSON.parse(raw.toString("utf8"));
+        if (focusTerminal) {
+          if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length) {
+            throw new Error("Terminal focus does not accept a target.");
+          }
+          if (!checkCurrent()) return;
+          if (!chat.focusTerminal) {
+            reply(501, { error: "Switch to Terminal is unavailable for this chat." });
+            return;
+          }
+          await chat.focusTerminal();
+          if (checkCurrent()) reply(200, { ok: true });
+          return;
+        }
         if (saveNote) {
           if (!checkCurrent()) return;
           await live.saveNote(body?.markdown);

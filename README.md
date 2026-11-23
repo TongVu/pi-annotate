@@ -44,6 +44,20 @@ sessions by working directory. Both regular and fullscreen terminal modes work.
    animated 👾💭 while Pi is working and a pulsing green dot when it's ready. Replies aren't streamed
    token by token. If Pi needs an approval or other interactive input, use the terminal.
 
+Click **🕹️** beside the live chat name to switch to the terminal tab running
+that chat. It does not start Pi, open a new tab, or send text to the terminal.
+On macOS, use Terminal.app and allow Terminal Automation if prompted. On Linux,
+Kitty needs a local remote-control socket. For example, in `kitty.conf`, use:
+
+```conf
+allow_remote_control socket-only
+listen_on unix:${XDG_RUNTIME_DIR}/kitty-{kitty_pid}
+```
+
+Use this path only if `XDG_RUNTIME_DIR` is set to your private runtime directory.
+Restart Kitty and start Pi directly in a new Kitty shell so Pi inherits the socket
+address. On Wayland, the compositor may not bring Kitty in front of the browser.
+
 Click the **Attach files** clipboard icon to select multiple files, or paste a
 screenshot into the composer. Draft images show a thumbnail; click it or the
 filename to inspect a larger local preview before sending. Sent images can also

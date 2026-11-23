@@ -327,6 +327,30 @@ test("chat tab follows the Pi session name and moves chat controls out of the he
   assert.equal(f.window.document.title, "Pi Chat · ✓ Ready");
 });
 
+test("the icon-only terminal button requests focus for the live chat and reports errors", async (t) => {
+  const result = Promise.withResolvers();
+  const requests = [];
+  const f = await fixture(t, { chatFetch: async (path, body) => {
+    if (path === "/api/session/focus-terminal") {
+      requests.push(body);
+      return result.promise;
+    }
+    assert.equal(path, "/api/response");
+    return { ok: true, json: async () => ({ mode: "chat", protocol: 2, cursor: null, messages: [], busy: true }) };
+  } });
+  const focus = f.$("focus-terminal");
+  assert.equal(focus.parentElement, f.$("session-title-pill"));
+  assert.equal(focus.textContent.trim(), "🕹️");
+  assert.equal(focus.getAttribute("aria-label"), "Switch to Terminal");
+  focus.click();
+  assert.equal(focus.disabled, true);
+  assert.deepEqual(requests, [{}]);
+  result.resolve({ ok: false, status: 400, json: async () => ({ error: "Kitty needs a local remote-control socket." }) });
+  await tick();
+  assert.equal(focus.disabled, false);
+  assert.match(f.$("status").textContent, /Kitty needs a local remote-control socket/);
+});
+
 test("the sticky session pill renames the Pi session and updates the browser tab", async (t) => {
   let sessionName = "Live browser chat feature with a long name that can be truncated in the sticky session pill";
   let renamed;

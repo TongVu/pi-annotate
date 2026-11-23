@@ -167,6 +167,25 @@ test("chat session rename validates names and updates Pi through the authenticat
   assert.equal((await rename({ name: "No cross origin" }, { ...f.headers, Origin: "https://other.example" })).status, 403);
 });
 
+test("terminal focus targets only the authenticated live chat's Pi process", async (t) => {
+  let current = true;
+  let calls = 0;
+  const f = await fixture(t, { isCurrent: () => current, chat: { focusTerminal: async () => { calls++; } } });
+  const focus = (body = {}, headers = f.headers) => fetch(`${f.base}/api/session/focus-terminal`, {
+    method: "POST", headers, body: JSON.stringify(body),
+  });
+  assert.equal((await focus({}, {})).status, 401);
+  assert.equal((await focus({}, { ...f.headers, Origin: "https://other.example" })).status, 403);
+  assert.equal((await focus({ tty: "/dev/ttys001" })).status, 400);
+  assert.equal(calls, 0);
+  const response = await focus();
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true });
+  current = false;
+  assert.equal((await focus()).status, 410);
+  assert.equal(calls, 1);
+});
+
 test("chat protects the active transcript and validates quotes from each assistant message", async (t) => {
   const entry = (id, role, content) => ({ id, type: "message", message: { role, content } });
   const text = (value) => ({ type: "text", text: value });
