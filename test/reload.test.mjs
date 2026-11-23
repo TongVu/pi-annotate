@@ -162,11 +162,15 @@ test("installed Pi accepts a browser prompt before the model finishes, then expo
     if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = oldAgentDir;
   });
-  const faux = fauxProvider({ provider: "chat-test", models: [{ id: "vision", input: ["text", "image"] }] });
+  const faux = fauxProvider({ provider: "chat-test", models: [
+    { id: "vision", input: ["text", "image"] }, { id: "reasoner", reasoning: true }, { id: "out-of-scope" },
+  ] });
   const modelRuntime = await ModelRuntime.create({ authPath: join(cwd, "auth.json"), modelsPath: join(cwd, "models.json") });
   modelRuntime.registerNativeProvider(faux.provider);
-  const model = faux.getModel();
-  const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false, keepRecentTokens: 1 } });
+  const model = faux.getModel("vision");
+  const reasoner = faux.getModel("reasoner");
+  const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false, keepRecentTokens: 1 },
+    defaultProvider: model.provider, defaultModel: model.id, defaultThinkingLevel: "medium" });
   const extensionPath = fileURLToPath(new URL("../src/index.ts", import.meta.url));
   const adapter = join(cwd, "test-chat-launch.ts");
   const openLog = join(cwd, "browser-url");
@@ -187,7 +191,7 @@ test("installed Pi accepts a browser prompt before the model finishes, then expo
   const sessionManager = SessionManager.inMemory(cwd);
   const { session } = await createAgentSession({
     cwd, agentDir: cwd, modelRuntime, model, settingsManager, resourceLoader: loader,
-    sessionManager, noTools: true,
+    sessionManager, noTools: true, scopedModels: [{ model }, { model: reasoner }],
   });
   const previousTarget = process.env[AUTO_CHAT_SESSION];
   process.env[AUTO_CHAT_SESSION] = sessionManager.getSessionId();
@@ -240,11 +244,32 @@ test("installed Pi accepts a browser prompt before the model finishes, then expo
     const compact = () => fetch(`${url.origin}/api/session/compact`, {
       method: "POST", headers, body: "{}", signal: AbortSignal.timeout(3000),
     });
+    const modelKey = (id) => JSON.stringify([model.provider, id]);
+    const modelUrl = () => `${url.origin}/api/session/model`;
+    const modelSettings = async () => {
+      const result = await fetch(modelUrl(), { headers });
+      assert.equal(result.status, 200, await result.clone().text());
+      return result.json();
+    };
+    const changeModel = (body, extra = {}) => fetch(modelUrl(), {
+      method: "POST", headers: { ...headers, ...extra }, body: JSON.stringify(body),
+    });
+    assert.equal((await fetch(modelUrl())).status, 401);
+    const initialModel = await modelSettings();
+    assert.equal(initialModel.model.key, modelKey("vision"));
+    assert.deepEqual(initialModel.models.map(({ key }) => key), [modelKey("vision"), modelKey("reasoner")]);
+    assert.deepEqual(initialModel.efforts, ["off"]);
+    assert.equal((await changeModel({ model: modelKey("out-of-scope") })).status, 400);
+    assert.equal((await changeModel({ effort: "high" })).status, 400);
+    assert.equal((await changeModel({ model: modelKey("reasoner"), effort: "high" })).status, 400);
+    assert.equal((await changeModel({ model: modelKey("reasoner") }, { Origin: "" })).status, 403);
     assert.equal((await state()).canCompact, false);
     assert.equal((await send({ requestId: "e126ac9d-7780-4853-8de2-5d6d0a869093", text: "/literal question" })).status, 200, JSON.stringify(errors));
     const working = await state();
     assert.equal(working.busy, true);
     assert.equal((await compact()).status, 409);
+    assert.equal((await changeModel({ model: modelKey("reasoner") })).status, 409);
+    assert.equal((await modelSettings()).model.key, modelKey("vision"));
     assert.equal(working.sessionName, "Live browser chat feature");
     assert.deepEqual(working.messages.map(({ role, text }) => [role, text]), [["user", "Transformed: /literal question\n"]]);
     const renamed = await rename("Browser-renamed session");
@@ -377,6 +402,16 @@ test("installed Pi accepts a browser prompt before the model finishes, then expo
     assert.notEqual(afterCompaction.cursor, beforeCompaction.cursor);
     assert.deepEqual(afterCompaction.messages, beforeCompaction.messages);
     assert.equal(afterCompaction.contextUsage.tokens, null);
+    const switched = await changeModel({ model: modelKey("reasoner") });
+    assert.equal(switched.status, 200, await switched.clone().text());
+    assert.ok((await switched.json()).efforts.includes("high"));
+    const effortChanged = await changeModel({ effort: "high" });
+    assert.equal(effortChanged.status, 200, await effortChanged.clone().text());
+    assert.equal((await effortChanged.json()).effort, "high");
+    assert.equal(session.model.id, "reasoner");
+    assert.equal(session.thinkingLevel, "high");
+    assert.equal(settingsManager.getDefaultModel(), "vision");
+    assert.equal(settingsManager.getDefaultThinkingLevel(), "medium");
     await session.prompt("/chat close");
     assert.equal((await dashboardState()).status, 200);
     await assert.rejects(() => get("/api/response"));

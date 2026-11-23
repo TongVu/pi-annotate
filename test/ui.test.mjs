@@ -48,6 +48,79 @@ async function fixture(t, { chatFetch } = {}) {
 }
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+test("the composer model picker shows supported efforts and only allows changes while idle", async (t) => {
+  const sol = { key: "sol", label: "Sol" };
+  const luna = { key: "luna", label: "Luna" };
+  const models = [sol, luna];
+  let current = { model: sol, models, effort: "medium", efforts: ["low", "medium", "high"] };
+  let busy = true;
+  const changes = [];
+  const finish = Promise.withResolvers();
+  const json = (data, code = 200) => ({ ok: code === 200, status: code, json: async () => data });
+  const f = await fixture(t, { chatFetch: async (path, body) => {
+    if (path === "/api/response") return json({ mode: "chat", protocol: 2, cursor: null, messages: [], busy });
+    assert.equal(path, "/api/session/model");
+    if (body) {
+      changes.push(body);
+      if (body.model === "luna") {
+        await finish.promise;
+        current = { model: luna, models, effort: "high", efforts: ["high", "xhigh"] };
+      } else if (body.effort === "xhigh") current = { ...current, effort: body.effort };
+      else return json({ error: "Pi is busy" }, 409);
+    }
+    return json(current);
+  } });
+  const toggle = f.$("chat-model-toggle");
+  const panel = f.$("chat-model-panel");
+  const model = f.$("chat-model");
+  const effort = f.$("chat-effort");
+  const change = (select, value) => {
+    select.value = value;
+    select.dispatchEvent(new f.window.Event("change"));
+  };
+  toggle.click();
+  await tick();
+  assert.equal(panel.hidden, false);
+  assert.equal(model.labels[0].textContent, "👽");
+  assert.equal(model.getAttribute("aria-label"), "Model");
+  assert.equal(effort.labels[0].textContent, "🧠");
+  assert.equal(effort.getAttribute("aria-label"), "Thinking effort");
+  assert.equal(model.value, "sol");
+  assert.equal(effort.value, "medium");
+  assert.equal(model.disabled, true);
+  assert.equal(effort.disabled, true);
+  assert.match(f.$("chat-model-status").textContent, /Wait for Pi/);
+  change(model, "luna");
+  assert.deepEqual(changes, []);
+  model.value = "sol";
+  busy = false;
+  await f.poll();
+  assert.equal(model.disabled, false);
+  assert.equal(effort.disabled, false);
+  const draft = f.$("chat-input");
+  draft.value = "Draft for the next model";
+  change(model, "luna");
+  assert.equal(model.disabled, true);
+  assert.equal(f.$("chat-send").disabled, true);
+  finish.resolve();
+  await tick();
+  assert.equal(model.value, "luna");
+  assert.equal(effort.value, "high");
+  assert.deepEqual([...effort.options].map(({ value }) => value), ["high", "xhigh"]);
+  assert.equal(draft.value, "Draft for the next model");
+  change(effort, "xhigh");
+  await tick();
+  assert.equal(effort.value, "xhigh");
+  change(model, "sol");
+  await tick();
+  assert.equal(model.value, "luna", "failed changes restore the active model");
+  assert.equal(f.$("chat-model-error").textContent, "Pi is busy");
+  assert.deepEqual(changes, [{ model: "luna" }, { effort: "xhigh" }, { model: "sol" }]);
+  effort.dispatchEvent(new f.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  assert.equal(panel.hidden, true);
+  assert.equal(f.window.document.activeElement, toggle);
+});
+
 test("composer shows live context usage and compacts only after confirmation while idle", async (t) => {
   const reply = { id: "a1", role: "assistant", ...renderMarkdown("An earlier reply.") };
   let busy = false;

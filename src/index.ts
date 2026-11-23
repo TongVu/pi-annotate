@@ -120,6 +120,20 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
     const isCurrent = () => generation === currentGeneration &&
       ctx.sessionManager.getSessionId() === sessionId &&
       (anchor === undefined || ctx.sessionManager.getBranch().some((entry) => entry.id === anchor));
+    const modelKey = (model: NonNullable<ExtensionContext["model"]>) => JSON.stringify([model.provider, model.id]);
+    const availableModels = () => ctx.scopedModels.length
+      ? ctx.scopedModels.map(({ model }) => model) : ctx.modelRegistry.getAvailable();
+    const describeModel = (model: NonNullable<ExtensionContext["model"]>) => ({ key: modelKey(model), label: `${model.name || model.id} (${model.provider})` });
+    const getModelSettings = async () => {
+      const { getSupportedThinkingLevels } = await import("@earendil-works/pi-ai");
+      const model = ctx.model;
+      return {
+        model: model && describeModel(model),
+        models: availableModels().map(describeModel),
+        effort: pi.getThinkingLevel(),
+        efforts: model ? getSupportedThinkingLevels(model) : [],
+      };
+    };
     try {
       // Keep the existing path so the repository rename doesn't strand saved notes.
       const noteStore = createChatNoteStore(join(ctx.sessionManager.getSessionDir(), ".pi-annotate-notes"));
@@ -164,6 +178,21 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
           getBranch: () => ctx.sessionManager.getBranch(),
           isIdle: () => ctx.isIdle(),
           getContextUsage: () => ctx.getContextUsage(),
+          getModelSettings,
+          setModelSettings: async (change: { model?: string; effort?: string }) => {
+            if (change.model !== undefined) {
+              const model = availableModels().find((candidate) => modelKey(candidate) === change.model);
+              if (!model) throw new Error("Choose an available model from this chat’s model cycle.");
+              if (!await pi.setModel(model)) throw new Error("This model’s provider is not signed in. Check authentication in Pi.");
+            } else {
+              const { getSupportedThinkingLevels } = await import("@earendil-works/pi-ai");
+              const model = ctx.model;
+              const level = model && getSupportedThinkingLevels(model).find((effort) => effort === change.effort);
+              if (!level) throw new Error("This thinking effort is not supported by the current model.");
+              if (!ctx.isIdle()) throw new Error("Pi is busy. Wait for it to finish and retry.");
+              pi.setThinkingLevel(level);
+            }
+          },
           onCompact: () => new Promise<void>((resolve, reject) => {
             ctx.compact({ onComplete: () => resolve(), onError: reject });
           }),

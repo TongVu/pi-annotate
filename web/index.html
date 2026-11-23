@@ -92,6 +92,17 @@
                 <p id="chat-context-usage">Context usage is unavailable.</p>
               </div>
             </div>
+            <div id="chat-model-tools">
+              <button id="chat-model-toggle" type="button" class="secondary" aria-label="Model and thinking effort" aria-controls="chat-model-panel" aria-expanded="false" title="Model &amp; thinking effort"><span aria-hidden="true">👾</span><svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m2 4 4 4 4-4"/></svg></button>
+              <div id="chat-model-panel" hidden>
+                <label for="chat-model" title="Model"><span aria-hidden="true">👽</span></label>
+                <select id="chat-model" aria-label="Model" disabled></select>
+                <label for="chat-effort" title="Thinking effort"><span aria-hidden="true">🧠</span></label>
+                <select id="chat-effort" aria-label="Thinking effort" disabled></select>
+                <p id="chat-model-status" role="status"></p>
+                <p id="chat-model-error" role="alert"></p>
+              </div>
+            </div>
             <span id="chat-state" role="status" hidden><span class="chat-state-icon" aria-hidden="true"></span><span class="chat-state-label"></span></span>
             <button id="chat-attach" type="button" class="secondary composer-icon" aria-label="Attach files" title="Attach text files or images">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

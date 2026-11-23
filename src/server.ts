@@ -222,7 +222,7 @@ function explorerRoutes({ current, list, read, launch, clone }, presence) {
   };
 }
 
-function chatRoutes({ noteStore, getSessionId, getSessionName, setSessionName, getBranch, isIdle, getContextUsage, onCompact, onSend }) {
+function chatRoutes({ noteStore, getSessionId, getSessionName, setSessionName, getBranch, isIdle, getContextUsage, getModelSettings, setModelSettings, onCompact, onSend }) {
   const rendered = new Map();
   const requests = new Map();
   let inFlight = false;
@@ -248,6 +248,27 @@ function chatRoutes({ noteStore, getSessionId, getSessionName, setSessionName, g
       const messages = branch.slice(index + 1).map(render).filter(Boolean);
       const state = status(branch);
       reply(200, { mode: "chat", protocol: 2, annotationImages: true, sessionId: getSessionId?.(), sessionName: getSessionName?.(), cursor: branch.at(-1)?.id ?? null, messages, busy: state === "working", failed: state === "error", contextUsage: getContextUsage?.(), canCompact: typeof onCompact === "function" && branch.some((entry) => entry.type === "message" && entry.message.role === "user") });
+    },
+    async modelSettings(reply, checkCurrent, change?) {
+      if (!getModelSettings || (change && !setModelSettings)) {
+        reply(501, { error: "Model settings are unavailable for this chat." });
+        return;
+      }
+      if (change) {
+        if (isBusy()) {
+          reply(409, { error: "Pi is busy. Wait for it to finish and retry." });
+          return;
+        }
+        inFlight = true;
+      }
+      try {
+        if (change) await setModelSettings(change);
+        if (!checkCurrent()) return;
+        const settings = await getModelSettings();
+        if (checkCurrent()) reply(200, settings);
+      } finally {
+        if (change) inFlight = false;
+      }
     },
     async compact(reply) {
       if (typeof onCompact !== "function") {
@@ -449,6 +470,11 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
         if (checkCurrent()) live.read(url.searchParams.get("after"), reply);
         return;
       }
+      const modelSettings = req.url === "/api/session/model";
+      if (req.method === "GET" && modelSettings) {
+        await live.modelSettings(reply, checkCurrent);
+        return;
+      }
       const disconnect = live && req.url === "/api/close";
       const renameSession = live && req.url === "/api/session/name";
       const compactSession = live && req.url === "/api/session/compact";
@@ -458,7 +484,7 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
       const saveNote = live && req.url === "/api/note";
       const openSession = explorer && req.url === "/api/session/open";
       const cloneSession = explorer && req.url === "/api/session/clone";
-      if (req.method === "POST" && (disconnect || renameSession || compactSession || localAction || renderNote || saveNote || openSession || cloneSession || req.url === "/api/chat")) {
+      if (req.method === "POST" && (disconnect || renameSession || compactSession || modelSettings || localAction || renderNote || saveNote || openSession || cloneSession || req.url === "/api/chat")) {
         if (req.headers.origin !== origin || req.headers["content-type"] !== "application/json") {
           reply(403, { error: "Expected a same-origin JSON request." });
           return;
@@ -475,8 +501,16 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
           reply(200, { ok: true });
           return;
         }
-        const raw = await readBody(req, renderNote || saveNote ? NOTE_BODY_LIMIT : openSession || renameSession || compactSession || localAction || cloneSession ? 4096 : CHAT_BODY_LIMIT);
+        const raw = await readBody(req, renderNote || saveNote ? NOTE_BODY_LIMIT : openSession || renameSession || compactSession || modelSettings || localAction || cloneSession ? 4096 : CHAT_BODY_LIMIT);
         const body = JSON.parse(raw.toString("utf8"));
+        if (modelSettings) {
+          if (!body || typeof body !== "object" || Object.keys(body).length !== 1 ||
+              ![body.model, body.effort].some((value) => typeof value === "string" && value.length > 0)) {
+            throw new Error("Choose a model or thinking effort.");
+          }
+          if (checkCurrent()) await live.modelSettings(reply, checkCurrent, body);
+          return;
+        }
         if (compactSession) {
           if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length) {
             throw new Error("Compact chat does not accept a target.");
