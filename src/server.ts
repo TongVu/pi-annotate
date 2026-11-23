@@ -1,16 +1,16 @@
 import { createServer } from "node:http";
 import { createHash, randomBytes } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { MAX_ANNOTATIONS, formatChatAnnotations, userImageBlocks, visibleChatMessage } from "./annotations.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { shellQuote } from "./resume-chat.ts";
 import { CHAT_NOTE_LIMIT } from "./chat-notes.ts";
+import { readWebAsset } from "./web-assets.ts";
 
 const assets = {
   "/": ["index.html", "text/html; charset=utf-8"],
-  "/app.js": ["app.js", "text/javascript; charset=utf-8"],
-  "/style.css": ["style.css", "text/css; charset=utf-8"],
+  "/app.js": ["app.js", "text/javascript; charset=utf-8", "tooltips.js"],
+  "/style.css": ["style.css", "text/css; charset=utf-8", "tooltips.css"],
   "/favicon.ico": ["favicon.ico", "image/x-icon"],
   "/logo.png": ["logo.png", "image/png"],
 };
@@ -406,8 +406,8 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
       if (!checkCurrent()) return;
       const asset = Object.hasOwn(assets, req.url) ? assets[req.url] : req.url === landing ? assets["/"] : undefined;
       if (req.method === "GET" && asset) {
-        const [file, type] = asset;
-        const data = await readFile(new URL(`../web/${file}`, import.meta.url));
+        const [file, type, prefix] = asset;
+        const data = await readWebAsset(file, prefix);
         res.writeHead(200, { "Content-Type": type });
         res.end(data);
         return;

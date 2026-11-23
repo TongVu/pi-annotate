@@ -93,6 +93,9 @@ input or whose last turn stopped. Its status counts still include all matching
 chats. Pulsing amber and green dots mark working and ready chats, respectively.
 Status updates even when the chat tab is in the background.
 
+- **🕹️ Switch to Terminal** focuses the Pi terminal hosting the dashboard, not
+  the terminal for a selected chat. It supports Terminal.app on macOS and Kitty
+  on Linux with local remote control enabled.
 - **Go to tab** on macOS switches to the existing tab in Chrome or Safari without
   reloading it or discarding its draft. macOS may ask for Automation permission.
   On unsupported browsers or when the tab can't be found, select it manually;

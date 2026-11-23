@@ -65,8 +65,7 @@ h2 { font-size: 17px; margin: 0 0 16px; }
 #chat-note-dialog .chat-note-box { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; }
 #chat-note-dialog #chat-note-input, #chat-note-dialog .chat-note-preview { flex: 1 1 auto; width: 100%; height: 100%; min-height: 0; max-height: none; }
 #empty { color: var(--muted); line-height: 1.6; }
-#annotate-selection, .message-preview.session-tooltip { position: fixed; z-index: 10; padding: 6px 10px; box-shadow: 0 4px 12px #0003; font-size: 13px; }
-.message-preview.session-tooltip { border: 1px solid #d4d8ce; border-radius: 9px; background: #fff; color: #292d2a; font-weight: 600; }
+#annotate-selection { position: fixed; z-index: 10; padding: 6px 10px; box-shadow: 0 4px 12px #0003; font-size: 13px; }
 ol { padding-left: 20px; margin: 0; }
 #annotations > li { position: relative; padding: 32px 0 20px 6px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
 blockquote { margin: 0 0 12px; padding-left: 12px; border-left: 3px solid var(--accent); color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow: auto; }
@@ -133,8 +132,6 @@ textarea { width: 100%; resize: vertical; background: var(--bg); color: var(--te
 #turns button:hover, #turns button:focus-visible { color: var(--text); outline-offset: -2px; }
 #turns button[aria-current] { color: #74baff; }
 #turns button[aria-current]::before { opacity: 1; }
-.message-preview { position: fixed; z-index: 10; width: max-content; max-width: min(320px, calc(100vw - 24px)); max-height: min(180px, calc(100vh - 16px)); overflow: auto; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px 12px 12px 4px; background: var(--panel); color: var(--text); box-shadow: 0 6px 20px #0003; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.4; pointer-events: none; }
-.message-preview-left { border-radius: 12px 12px 4px 12px; }
 .chat-page article:not([hidden]) { grid-area: 1 / 2 / span 2; display: grid; grid-template-rows: subgrid; min-height: 0; padding: 0; }
 .chat-page #response { overflow: auto; overscroll-behavior: contain; padding: 0 clamp(16px, 4vw, 46px) 20px; }
 .chat-page #response:focus-visible { outline: none; box-shadow: inset 2px 0 var(--muted); }

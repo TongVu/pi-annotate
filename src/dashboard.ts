@@ -1,17 +1,17 @@
 import { createServer } from "node:http";
 import { randomBytes } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import type { SessionInfo } from "@earendil-works/pi-coding-agent";
 import { listLiveChats } from "./chat-presence.ts";
 import { canFocusBrowser, focusBrowserChat } from "./focus-browser.ts";
 import { shellQuote } from "./resume-chat.ts";
 import { listOwnedSessions, requestOwnedChat } from "./session-owner.ts";
+import { readWebAsset } from "./web-assets.ts";
 
 const assets = new Map([
   ["/", ["dashboard.html", "text/html; charset=utf-8"]],
-  ["/dashboard.css", ["dashboard.css", "text/css; charset=utf-8"]],
-  ["/dashboard.js", ["dashboard.js", "text/javascript; charset=utf-8"]],
+  ["/dashboard.css", ["dashboard.css", "text/css; charset=utf-8", "tooltips.css"]],
+  ["/dashboard.js", ["dashboard.js", "text/javascript; charset=utf-8", "tooltips.js"]],
   ["/favicon.ico", ["favicon.ico", "image/x-icon"]],
   ["/logo.png", ["logo.png", "image/png"]],
 ]);
@@ -26,9 +26,10 @@ type Options = {
   createChat?: (cwd: string) => Promise<void>;
   canFocus?: typeof canFocusBrowser;
   focus?: typeof focusBrowserChat;
+  focusTerminal?: () => Promise<void>;
 };
 
-export async function startDashboard({ list, presenceDir, ownerDir, project, resume, createChat, canFocus = canFocusBrowser, focus = focusBrowserChat }: Options) {
+export async function startDashboard({ list, presenceDir, ownerDir, project, resume, createChat, canFocus = canFocusBrowser, focus = focusBrowserChat, focusTerminal }: Options) {
   const token = randomBytes(32).toString("hex");
   let origin: string;
   let closed = false;
@@ -68,8 +69,8 @@ export async function startDashboard({ list, presenceDir, ownerDir, project, res
       }
       const asset = req.method === "GET" && assets.get(req.url ?? "");
       if (asset) {
-        const [file, type] = asset;
-        const data = await readFile(new URL(`../web/${file}`, import.meta.url));
+        const [file, type, prefix] = asset;
+        const data = await readWebAsset(file, prefix);
         res.writeHead(200, { "Content-Type": type }).end(data);
         return;
       }
@@ -93,10 +94,11 @@ export async function startDashboard({ list, presenceDir, ownerDir, project, res
               : owner ? "reopen" : session?.cwd ? (resume ? "resume" : "manual-resume") : "unavailable",
           };
         });
-        return reply(200, { projects: [...projects].sort(), sessions });
+        return reply(200, { projects: [...projects].sort(), sessions, canFocusTerminal: focusTerminal ? true : undefined });
       }
       const newChat = req.url === "/api/session/new";
-      if (req.method === "POST" && (newChat || req.url === "/api/open")) {
+      const focusHost = req.url === "/api/focus-terminal";
+      if (req.method === "POST" && (newChat || focusHost || req.url === "/api/open")) {
         if (req.headers.origin !== origin || req.headers["content-type"] !== "application/json") {
           return reply(403, { error: "Expected a same-origin JSON request." });
         }
@@ -106,6 +108,15 @@ export async function startDashboard({ list, presenceDir, ownerDir, project, res
           if (raw.length > 4096) return reply(413, { error: "Request is too large." });
         }
         const body = JSON.parse(raw);
+        if (focusHost) {
+          if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length) {
+            return reply(400, { error: "Switch to Terminal does not accept a target." });
+          }
+          if (!focusTerminal) return reply(501, { error: "Switch to Terminal is unavailable for this dashboard." });
+          if (closed) return;
+          await focusTerminal();
+          return reply(200, { message: "Switched to the terminal hosting this dashboard." });
+        }
         if (newChat) {
           const cwd = body?.cwd;
           if (typeof cwd !== "string" || !isAbsolute(cwd) || Object.keys(body).length !== 1) {

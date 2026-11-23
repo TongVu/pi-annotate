@@ -11,6 +11,7 @@ import { browserFocusArgs } from "../src/focus-browser.ts";
 import { startChatServer } from "../src/server.ts";
 import { registerSessionOwner } from "../src/session-owner.ts";
 
+const tooltipScript = await readFile(new URL("../web/tooltips.js", import.meta.url), "utf8");
 const saved = { id: "saved", cwd: "/work/project", path: "/private/transcripts/saved.jsonl", name: "Saved work", modified: new Date(), firstMessage: "Earlier conversation" };
 const connect = (value) => {
   const url = new URL(value);
@@ -38,6 +39,56 @@ async function fixture(t, options = {}) {
   const action = (id, intent) => client.request("/api/open", { id, intent });
   return { ...client, presenceDir, ownerDir, sessions, action };
 }
+
+test("dashboard serves shared tooltips at the existing static asset URLs", async (t) => {
+  const dashboard = await fixture(t);
+  const page = await fetch(dashboard.url.origin);
+  assert.equal(page.status, 200);
+  const html = await page.text();
+  assert.doesNotMatch(html, /\/tooltips\.(css|js)/);
+  for (const [file, type, marker] of [["dashboard.js", "text/javascript", /function createTooltips/], ["dashboard.css", "text/css", /\.message-preview\s*\{/]]) {
+    const asset = await fetch(`${dashboard.url.origin}/${file}`);
+    assert.equal(asset.status, 200);
+    assert.ok(asset.headers.get("content-type").startsWith(type));
+    assert.match(await asset.text(), marker);
+  }
+});
+
+test("dashboard still loads sessions when an existing Pi listener serves unbundled assets", async (t) => {
+  const html = await readFile(new URL("../web/dashboard.html", import.meta.url), "utf8");
+  const script = await readFile(new URL("../web/dashboard.js", import.meta.url), "utf8");
+  const dom = new JSDOM(html, { url: "http://127.0.0.1:3456/#older-listener", runScripts: "outside-only" });
+  t.after(() => dom.window.close());
+  dom.window.fetch = async (path, { headers }) => {
+    assert.equal(path, "/api/dashboard");
+    assert.equal(headers.Authorization, "Bearer older-listener");
+    return { ok: true, json: async () => ({ sessions: [{ ...saved, modified: +saved.modified, status: "saved", action: "resume" }] }) };
+  };
+  dom.window.eval(script); // The old server reads this file from disk without the tooltip prefix.
+  const card = await waitFor(() => dom.window.document.querySelector(".card"));
+  assert.equal(card.querySelector("h3").textContent, saved.name);
+  assert.equal(card.querySelector("button").title, saved.name);
+  assert.equal(dom.window.document.getElementById("create-chat").disabled, false);
+});
+
+test("dashboard can focus only its own hosting terminal through an authenticated same-origin request", async (t) => {
+  let focused = 0;
+  const dashboard = await fixture(t, { focusTerminal: async () => { focused++; } });
+  const path = "/api/focus-terminal";
+  const origin = dashboard.url.origin;
+  const state = await (await dashboard.request("/api/dashboard")).json();
+  assert.equal(state.canFocusTerminal, true);
+  assert.equal((await fetch(origin + path, { method: "POST", body: "{}" })).status, 401);
+  assert.equal((await fetch(origin + path, { method: "POST", headers: {
+    Authorization: `Bearer ${dashboard.token}`, Origin: "null", "Content-Type": "application/json",
+  }, body: "{}" })).status, 403);
+  assert.equal((await dashboard.request(path, { id: saved.id })).status, 400);
+  assert.equal(focused, 0);
+  const response = await dashboard.request(path, {});
+  assert.equal(response.status, 200);
+  assert.match((await response.json()).message, /terminal hosting this dashboard/);
+  assert.equal(focused, 1);
+});
 
 test("dashboard shows live Pi status without chat-tab polling and focuses the exact connected tab", async (t) => {
   let idle = true;
@@ -178,6 +229,7 @@ test("dashboard filters projects and cards by name or directory within the selec
   const html = await readFile(new URL("../web/dashboard.html", import.meta.url), "utf8");
   const script = await readFile(new URL("../web/dashboard.js", import.meta.url), "utf8");
   const requests = [];
+  const focus = Promise.withResolvers();
   const session = (id, name, cwd, status, action) => ({ id, name, cwd, status, action, modified: Date.now(), preview: "<img src=x>" });
   const entries = [session("a", "Hero copy", "/work/site", "working", "focus"), session("b", "Pricing review", "/work/site", "ready", "focus"),
     session("c", "Export failure", "/work/slides", "error", "focus"), session("d", "Draft deck", "/work/slides", "disconnected", "reopen")];
@@ -185,11 +237,15 @@ test("dashboard filters projects and cards by name or directory within the selec
   t.after(() => dom.window.close());
   dom.window.fetch = async (path, init) => {
     assert.equal(init.headers.Authorization, "Bearer dashboard-test");
-    if (path.startsWith("/api/dashboard")) return { ok: true, json: async () => ({ sessions: entries }) };
+    if (path.startsWith("/api/dashboard")) return { ok: true, json: async () => ({ sessions: entries, canFocusTerminal: true }) };
     requests.push([path, JSON.parse(init.body)]);
+    if (path === "/api/focus-terminal") {
+      assert.equal(init.referrerPolicy, "same-origin");
+      return focus.promise;
+    }
     return { ok: true, json: async () => ({ message: "Action taken" }) };
   };
-  dom.window.eval(script);
+  dom.window.eval(`${tooltipScript}\n${script}`);
   const q = (selector) => dom.window.document.querySelector(selector);
   const titles = () => [...dom.window.document.querySelectorAll(".card h3")].map((node) => node.textContent);
   const workingCount = () => q("#stats .dot.working").closest(".stat").querySelector("b").textContent;
@@ -203,6 +259,22 @@ test("dashboard filters projects and cards by name or directory within the selec
   assert.ok(q(".side-scroll").contains(q("#projects")));
   assert.equal(q(".side-scroll").contains(q(".brand")), false);
   assert.ok(!q(".card img"), "saved message text stays inert");
+  const tooltip = () => q('[role="tooltip"]');
+  q("#refresh").focus();
+  assert.equal(tooltip().className, "message-preview");
+  assert.equal(tooltip().textContent, "Refresh chats");
+  assert.equal(q("#refresh").getAttribute("aria-describedby"), tooltip().id);
+  q('[data-project="/work/site"]').dispatchEvent(new dom.window.MouseEvent("mouseenter"));
+  assert.equal(tooltip().textContent, "/work/site");
+  q('.card [data-id="a"]').dispatchEvent(new dom.window.MouseEvent("mouseenter"));
+  assert.equal(tooltip().textContent, "Hero copy");
+  const time = q(".card time");
+  time.dispatchEvent(new dom.window.MouseEvent("mouseenter"));
+  assert.equal(tooltip().textContent, new Date(time.dateTime).toLocaleString());
+  time.dispatchEvent(new dom.window.MouseEvent("mouseleave"));
+  assert.equal(tooltip(), null);
+  assert.equal(dom.window.document.querySelectorAll("[title]").length, 0);
+  q("#refresh").blur();
   const filter = (value) => {
     const field = q("#session-filter");
     field.value = value;
@@ -249,6 +321,16 @@ test("dashboard filters projects and cards by name or directory within the selec
   q('.card button[data-id="d"]').click();
   await waitFor(() => requests.length === 2);
   assert.deepEqual(requests, [["/api/open", { id: "b", intent: "focus" }], ["/api/open", { id: "d", intent: "open" }]]);
+  const terminal = q("#focus-terminal");
+  assert.equal(terminal.hidden, false);
+  assert.equal(terminal.dataset.tooltip, "Switch to Terminal");
+  terminal.click();
+  assert.equal(terminal.disabled, true);
+  terminal.click();
+  assert.deepEqual(requests.slice(2), [["/api/focus-terminal", {}]], "a project selection cannot redirect terminal focus");
+  focus.resolve({ ok: false, json: async () => ({ error: "Check macOS Automation permissions." }) });
+  await waitFor(() => !terminal.disabled);
+  assert.equal(q("#message").textContent, "Check macOS Automation permissions.");
 });
 
 test("Create new chat completes known projects by name or path and submits only the confirmed choice", async (t) => {
@@ -270,7 +352,7 @@ test("Create new chat completes known projects by name or path and submits only 
     requests.push(JSON.parse(init.body));
     return created.promise;
   };
-  dom.window.eval(script);
+  dom.window.eval(`${tooltipScript}\n${script}`);
   const q = (selector) => dom.window.document.querySelector(selector);
   const button = q("#create-chat");
   await waitFor(() => !button.disabled);

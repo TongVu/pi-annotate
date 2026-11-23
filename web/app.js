@@ -107,9 +107,9 @@ function loadChatNote(sessionId) {
   chatNoteExpand.hidden = false;
   chatNoteExpand.setAttribute("aria-expanded", "false");
   chatNoteExpand.setAttribute("aria-label", "Expand Markdown note");
-  chatNoteExpand.title = "Expand Markdown note";
+  setTooltip(chatNoteExpand, "Expand Markdown note");
   chatNotePreviewToggle.setAttribute("aria-label", "Preview note");
-  chatNotePreviewToggle.title = "Preview Markdown note";
+  setTooltip(chatNotePreviewToggle, "Preview Markdown note");
   chatNotePreviewToggle.setAttribute("aria-pressed", "false");
   chatNoteStatus("");
   if (!chatSessionId) {
@@ -160,7 +160,7 @@ function updateSessionTitle(name) {
   liveTitle = liveSessionName || appTitle;
   sessionTitleText.textContent = liveSessionName || "Untitled chat";
   sessionTitleText.setAttribute("aria-label", `Rename ${sessionTitleText.textContent}`);
-  sessionTitleText.dataset.tooltip = `${sessionTitleText.textContent}\nClick to rename`;
+  setTooltip(sessionTitleText, `${sessionTitleText.textContent}\nClick to rename`);
   if (!savedSessionId) updateLiveDocumentTitle();
   if (catalog && catalog.current.name !== liveSessionName) {
     catalog.current.name = liveSessionName;
@@ -238,7 +238,7 @@ function renderAttachmentList(list, files, removeFile) {
       if (removeFile) item.className = "image-attachment";
       remove.classList.add("attachment-remove");
       remove.textContent = "×";
-      remove.title = `Remove ${file.name}`;
+      setTooltip(remove, `Remove ${file.name}`);
       const src = `data:${file.mimeType};base64,${file.data}`;
       const thumb = document.createElement("img");
       thumb.src = src;
@@ -372,7 +372,7 @@ function renderAnnotations() {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "secondary annotation-action";
-      button.title = action.label;
+      setTooltip(button, action.label);
       button.setAttribute("aria-label", action.label);
       button.disabled = sending;
       button.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${action.path}"/></svg>`;
@@ -540,7 +540,7 @@ for (const [buttonId, label] of [["chat-expand", "message composer"]]) {
     const text = `${action} ${label}`;
     button.setAttribute("aria-expanded", String(expanded));
     button.setAttribute("aria-label", text);
-    button.title = text;
+    setTooltip(button, text);
   });
 }
 
@@ -551,7 +551,7 @@ function restoreChatNoteFromDialog() {
   chatNoteHome = undefined;
   chatNoteExpand.setAttribute("aria-expanded", "false");
   chatNoteExpand.setAttribute("aria-label", "Expand Markdown note");
-  chatNoteExpand.title = "Expand Markdown note";
+  setTooltip(chatNoteExpand, "Expand Markdown note");
 }
 
 chatNoteExpand.addEventListener("click", () => {
@@ -563,7 +563,7 @@ chatNoteExpand.addEventListener("click", () => {
   chatNoteDialog.append(chatNote);
   chatNoteExpand.setAttribute("aria-expanded", "true");
   chatNoteExpand.setAttribute("aria-label", "Collapse Markdown note");
-  chatNoteExpand.title = "Collapse Markdown note";
+  setTooltip(chatNoteExpand, "Collapse Markdown note");
   try { chatNoteDialog.showModal(); }
   catch {
     restoreChatNoteFromDialog();
@@ -606,7 +606,7 @@ rightPanelToggle.addEventListener("click", () => {
   rightPanelToggle.setAttribute("aria-expanded", String(!expanded));
   const label = `${expanded ? "Expand" : "Collapse"} right sidebar`;
   rightPanelToggle.setAttribute("aria-label", label);
-  rightPanelToggle.title = label;
+  setTooltip(rightPanelToggle, label);
 });
 chatNotePreviewToggle.addEventListener("click", async () => {
   if (chatNotePreviewing) {
@@ -614,7 +614,7 @@ chatNotePreviewToggle.addEventListener("click", async () => {
     chatNotePreview.hidden = true;
     chatNotePreviewing = false;
     chatNotePreviewToggle.setAttribute("aria-label", "Preview note");
-    chatNotePreviewToggle.title = "Preview Markdown note";
+    setTooltip(chatNotePreviewToggle, "Preview Markdown note");
     chatNotePreviewToggle.setAttribute("aria-pressed", "false");
     chatNoteInput.focus();
     return;
@@ -628,7 +628,7 @@ chatNotePreviewToggle.addEventListener("click", async () => {
     chatNotePreview.hidden = false;
     chatNotePreviewing = true;
     chatNotePreviewToggle.setAttribute("aria-label", "Edit note");
-    chatNotePreviewToggle.title = "Edit Markdown note";
+    setTooltip(chatNotePreviewToggle, "Edit Markdown note");
     chatNotePreviewToggle.setAttribute("aria-pressed", "true");
   } catch (error) {
     chatNoteStatus(error.message || "Could not preview this note.", true);
@@ -682,7 +682,7 @@ function updateContextUsage(usage) {
   const known = Number.isFinite(tokens) && Number.isFinite(percent);
   const percentage = known ? `${percent.toLocaleString(undefined, { maximumFractionDigits: 1 })}%` : "";
   const label = known ? `Context usage: ${percentage}` : "Context usage";
-  contextButton.title = label;
+  setTooltip(contextButton, label);
   contextButton.setAttribute("aria-label", label);
   $("chat-context-ring").setAttribute("stroke-dasharray", `${known ? Math.min(100, Math.max(0, percent)) : 0} 100`);
   $("chat-context-usage").textContent = known
@@ -903,7 +903,7 @@ function updateChatState() {
   const indicator = $("chat-state");
   if (indicator.dataset.state === state) return;
   indicator.dataset.state = state;
-  indicator.title = chatStates[state];
+  setTooltip(indicator, chatStates[state]);
   indicator.querySelector(".chat-state-label").textContent = chatStates[state];
   chatTitleStatus = ({ ready: "✓ Ready", working: "🏗️", stopped: "🚫", disconnected: "🔌" })[state] ?? "🔌";
   updateFaviconStatus(state);
@@ -939,60 +939,10 @@ function renderTurn(message, session) {
 }
 
 const nearChatEnd = () => responseElement.scrollHeight - responseElement.scrollTop - responseElement.clientHeight < 80;
-let messagePreview;
-let previewedTarget;
-function hideMessagePreview() {
-  previewedTarget?.removeAttribute("aria-describedby");
-  previewedTarget = undefined;
-  messagePreview?.remove();
-  messagePreview = undefined;
-}
-function bindMessageTooltip(target, text) {
-  target.removeAttribute("title");
-  if (text !== undefined) target.dataset.tooltip = text;
-  const show = () => showMessagePreview(target, target.dataset.tooltip ?? target.textContent);
-  target.addEventListener("mouseenter", show);
-  target.addEventListener("mouseleave", hideMessagePreview);
-  target.addEventListener("focus", show);
-  target.addEventListener("blur", hideMessagePreview);
-}
-
-document.querySelectorAll('#chat-explorer [title], #explorer-toggle[title]').forEach((target) => bindMessageTooltip(target, target.title));
-bindMessageTooltip(sessionTitleText);
-
-function showMessagePreview(dot, text) {
-  hideMessagePreview();
-  messagePreview = document.createElement("div");
-  messagePreview.id = "message-preview";
-  const sessionTooltip = sessionTitlePill.contains(dot);
-  messagePreview.className = sessionTooltip ? "message-preview session-tooltip" : "message-preview";
-  messagePreview.setAttribute("role", "tooltip");
-  messagePreview.textContent = text;
-  document.body.append(messagePreview);
-  previewedTarget = dot;
-  dot.setAttribute("aria-describedby", messagePreview.id);
-  const rect = dot.getBoundingClientRect();
-  const bounds = messagePreview.getBoundingClientRect();
-  const gap = 8;
-  if (sessionTooltip) {
-    const centered = (rect.left + rect.right - bounds.width) / 2;
-    const left = Math.max(gap, Math.min(centered, window.innerWidth - bounds.width - gap));
-    const below = rect.bottom + gap;
-    const top = below + bounds.height <= window.innerHeight - gap ? below : Math.max(gap, rect.top - bounds.height - gap);
-    messagePreview.style.left = `${left}px`;
-    messagePreview.style.top = `${top}px`;
-    return;
-  }
-  const placeRight = rect.right + gap + bounds.width <= window.innerWidth - gap;
-  messagePreview.classList.toggle("message-preview-left", !placeRight);
-  const left = placeRight ? rect.right + gap : Math.max(gap, rect.left - bounds.width - gap);
-  const top = Math.max(gap, Math.min(rect.top + rect.height / 2 - bounds.height / 2, window.innerHeight - bounds.height - gap));
-  messagePreview.style.left = `${left}px`;
-  messagePreview.style.top = `${top}px`;
-}
-
-turnRail.addEventListener("scroll", hideMessagePreview, { passive: true });
-window.addEventListener("resize", hideMessagePreview);
+// An older running Pi server may serve this file without the shared prefix.
+const { set: setTooltip, hide: hideMessagePreview } = typeof createTooltips === "function"
+  ? createTooltips({ sideTargets: "#turns, #chat-explorer" })
+  : { set: (target, text) => { target.title = text; }, hide: () => {} };
 
 function updateChat(data) {
   if (data.mode !== "chat" || !Array.isArray(data.messages)) throw new Error("Chat data is unavailable. Reopen from Pi.");
@@ -1008,10 +958,7 @@ function updateChat(data) {
       const dot = document.createElement("button");
       dot.type = "button";
       dot.setAttribute("aria-label", `Jump to your message: ${preview}`);
-      dot.addEventListener("mouseenter", () => showMessagePreview(dot, preview));
-      dot.addEventListener("mouseleave", hideMessagePreview);
-      dot.addEventListener("focus", () => showMessagePreview(dot, preview));
-      dot.addEventListener("blur", hideMessagePreview);
+      setTooltip(dot, preview);
       dot.addEventListener("click", () => {
         responseElement.scrollTop += turn.getBoundingClientRect().top - responseElement.getBoundingClientRect().top;
         markCurrentDot(dot);
@@ -1077,7 +1024,6 @@ async function copyResumeCommand(id) {
 
 $("close-resume-command").addEventListener("click", () => $("resume-command-dialog").close());
 const focusTerminalButton = $("focus-terminal");
-bindMessageTooltip(focusTerminalButton, focusTerminalButton.title);
 focusTerminalButton.addEventListener("click", async () => {
   hideMessagePreview();
   focusTerminalButton.disabled = true;
@@ -1202,7 +1148,7 @@ function renderSessionList() {
       });
       const heading = document.createElement("summary");
       heading.textContent = cwd.split(/[\\/]/).filter(Boolean).at(-1) || cwd || "Unknown directory";
-      bindMessageTooltip(heading, cwd);
+      setTooltip(heading, cwd);
       element.append(heading);
       list.append(element);
       group = { element, roots: [] };
@@ -1220,10 +1166,7 @@ function renderSessionList() {
     title.className = "session-name";
     title.textContent = name;
     button.append(title);
-    button.addEventListener("mouseenter", () => showMessagePreview(button, name));
-    button.addEventListener("mouseleave", hideMessagePreview);
-    button.addEventListener("focus", () => showMessagePreview(button, name));
-    button.addEventListener("blur", hideMessagePreview);
+    setTooltip(button, name);
     button.addEventListener("click", () => {
       if (own) showLiveChat();
       else if (savedIds.has(id)) void showSavedChat({ id, cwd, name });
@@ -1237,7 +1180,7 @@ function renderSessionList() {
       indicator.className = "session-indicator live";
       indicator.setAttribute("role", "img");
       indicator.setAttribute("aria-label", own ? "Live session" : "Live in another tab");
-      bindMessageTooltip(indicator, indicator.getAttribute("aria-label"));
+      setTooltip(indicator, indicator.getAttribute("aria-label"));
       actions.append(indicator);
       if (session.canClone) {
         const clone = document.createElement("button");
@@ -1245,7 +1188,7 @@ function renderSessionList() {
         clone.className = "secondary session-clone";
         clone.textContent = "🧬";
         clone.setAttribute("aria-label", `Clone chat session ${name}`);
-        bindMessageTooltip(clone, `Clone chat session ${name}`);
+        setTooltip(clone, `Clone chat session ${name}`);
         clone.addEventListener("click", () => void cloneChatSession(id, clone));
         actions.append(clone);
       }
@@ -1256,7 +1199,7 @@ function renderSessionList() {
       copy.type = "button";
       copy.className = "secondary session-copy";
       copy.setAttribute("aria-label", `Copy resume command for ${name}`);
-      bindMessageTooltip(copy, "Copy resume command");
+      setTooltip(copy, "Copy resume command");
       const copyIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
       copyIcon.setAttribute("viewBox", "0 0 24 24");
       copyIcon.setAttribute("width", "16");
@@ -1485,7 +1428,7 @@ function startChat(data) {
   for (const id of ["chat-rail", "turns", "chat-form", "chat-state", "explorer-toggle"]) $(id).hidden = false;
   $("empty").textContent = "Highlight text in a Pi reply to ask about it.";
   send.classList.add("chat-question-send");
-  send.title = "Send questions";
+  setTooltip(send, "Send questions");
   send.setAttribute("aria-label", "Send 0 questions");
   send.replaceChildren();
   send.innerHTML = '<span class="send-icon" aria-hidden="true">🚀</span><span id="count" class="send-count">0</span>';

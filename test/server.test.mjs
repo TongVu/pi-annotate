@@ -47,7 +47,12 @@ test("loopback app requires token for response, serves safe static assets", asyn
   assert.equal((await fetch(`${f.base}/api/response`)).status, 401);
   const authorized = await fetch(`${f.base}/api/response`, { headers: f.headers });
   assert.equal((await authorized.json()).mode, "chat");
-  for (const path of ["/app.js", "/style.css"]) assert.equal((await fetch(f.base + path)).status, 200);
+  assert.doesNotMatch(html, /\/tooltips\.(css|js)/);
+  for (const [path, marker] of [["/app.js", /function createTooltips/], ["/style.css", /\.message-preview\s*\{/]]) {
+    const asset = await fetch(f.base + path);
+    assert.equal(asset.status, 200);
+    assert.match(await asset.text(), marker);
+  }
   assert.equal((await fetch(f.base + "/logo.png")).headers.get("content-type"), "image/png");
   assert.equal((await fetch(`${f.base}/not-a-file`, { headers: f.headers })).status, 404);
 });

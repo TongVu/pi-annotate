@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { JSDOM } from "jsdom";
 import { renderMarkdown } from "../src/markdown.ts";
 const logo = await readFile(new URL("../web/logo.png", import.meta.url));
+const tooltipScript = await readFile(new URL("../web/tooltips.js", import.meta.url), "utf8");
 async function fixture(t, { chatFetch } = {}) {
   const html = await readFile(new URL("../web/index.html", import.meta.url), "utf8");
   const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
@@ -22,7 +23,7 @@ async function fixture(t, { chatFetch } = {}) {
     if (!chatFetch) throw new Error(`Unexpected chat request: ${path}`);
     return chatFetch(path, opts.body && JSON.parse(opts.body), opts);
   };
-  await window.eval(`(async () => { ${source}\n})()`);
+  await window.eval(`(async () => { ${tooltipScript}\n${source}\n})()`);
   const select = (start, end, target = $("response")) => {
     const range = window.document.createRange();
     const locate = (offset) => {
@@ -213,7 +214,7 @@ test("chat dots jump to user turns; failed questions are kept, accepted question
   assert.equal(f.window.location.search, "?tab=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "keep the dashboard tab locator");
   assert.equal(f.$("turns").children.length, 1);
   assert.equal(f.$("send").parentElement.id, "annotation-heading");
-  assert.equal(f.$("send").title, "Send questions");
+  assert.equal(f.$("send").dataset.tooltip, "Send questions");
   assert.equal(f.$("send").getAttribute("aria-label"), "Send 0 questions");
   assert.equal(f.$("count").textContent, "0");
   assert.equal(f.$("send").classList.contains("chat-question-send"), true);
@@ -524,6 +525,40 @@ test("the icon-only terminal button requests focus for the live chat and reports
   assert.match(f.$("status").textContent, /Kitty needs a local remote-control socket/);
 });
 
+test("composer, sidebar, and dialog controls share the Switch to Terminal tooltip", async (t) => {
+  const f = await fixture(t, { chatFetch: async () => ({ ok: true, json: async () => ({
+    mode: "chat", protocol: 2, cursor: null, messages: [],
+  }) }) });
+  const hover = (id) => f.$(id).dispatchEvent(new f.window.MouseEvent("mouseenter"));
+  const preview = () => f.$("message-preview");
+  hover("focus-terminal");
+  const tooltipClass = preview().className;
+  const expand = f.$("chat-expand");
+  const bottom = f.window.innerHeight;
+  expand.getBoundingClientRect = () => ({ left: 60, right: 86, top: bottom - 40, bottom: bottom - 8 });
+  hover("chat-expand");
+  assert.equal(preview().className, tooltipClass);
+  assert.equal(preview().textContent, "Expand message composer");
+  assert.equal(preview().style.top, `${bottom - 48}px`, "near the bottom the tooltip opens above the control");
+  expand.click();
+  assert.equal(preview(), null);
+  hover("chat-expand");
+  assert.equal(preview().textContent, "Collapse message composer");
+  assert.equal(expand.hasAttribute("title"), false);
+  hover("chat-note-preview-toggle");
+  assert.equal(preview().className, tooltipClass);
+  assert.equal(preview().textContent, "Preview Markdown note");
+  assert.equal(f.window.document.querySelectorAll("[title]").length, 0, "no native tooltips remain");
+  const dialog = f.$("comment-dialog");
+  dialog.showModal();
+  f.$("comment-close").focus();
+  assert.equal(preview().className, tooltipClass);
+  assert.equal(preview().textContent, "Close annotation");
+  assert.equal(preview().parentElement, dialog, "dialog tooltips render in the modal layer");
+  f.window.document.dispatchEvent(new f.window.KeyboardEvent("keydown", { key: "Escape" }));
+  assert.equal(preview(), null);
+});
+
 test("clicking the live chat title opens renaming and updates the browser tab", async (t) => {
   let sessionName = "Live browser chat feature with a long name that can be truncated in the sticky session pill";
   let renamed;
@@ -552,7 +587,7 @@ test("clicking the live chat title opens renaming and updates the browser tab", 
   const preview = () => f.$("message-preview");
   title.dispatchEvent(new f.window.MouseEvent("mouseenter"));
   assert.equal(title.title, "");
-  assert.equal(preview().classList.contains("session-tooltip"), true);
+  assert.equal(preview().className, "message-preview");
   assert.equal(preview().textContent, `${sessionName}\nClick to rename`);
   title.dispatchEvent(new f.window.MouseEvent("mouseleave"));
   assert.equal(preview(), null);
@@ -560,7 +595,7 @@ test("clicking the live chat title opens renaming and updates the browser tab", 
   terminal.getBoundingClientRect = () => ({ left: 60, right: 86, top: 14, bottom: 40 });
   terminal.focus();
   assert.equal(preview().textContent, "Switch to Terminal");
-  assert.equal(preview().classList.contains("session-tooltip"), true);
+  assert.equal(preview().className, "message-preview");
   assert.equal(preview().style.top, "48px");
   assert.equal(terminal.getAttribute("aria-describedby"), preview().id);
   terminal.blur();

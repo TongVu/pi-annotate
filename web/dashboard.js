@@ -1,8 +1,13 @@
 const token = location.hash.slice(1);
 history.replaceState(null, "", location.pathname);
 const $ = (id) => document.getElementById(id);
+// An older running Pi server may serve this file without the shared prefix.
+const { set: setTooltip, hide: hideTooltip } = typeof createTooltips === "function"
+  ? createTooltips({ sideTargets: ".side" })
+  : { set: (target, text) => { target.title = text; }, hide: () => {} };
 const filter = $("session-filter");
 const createChatButton = $("create-chat");
+const focusTerminalButton = $("focus-terminal");
 const newChatDialog = $("new-chat-dialog");
 const newChatProject = $("new-chat-project");
 const newChatProjects = $("new-chat-projects");
@@ -82,7 +87,7 @@ function actionButton(session, inSidebar = false) {
   node.disabled = session.action === "unavailable";
   node.setAttribute("aria-disabled", String(pending.has(session.id) || node.disabled));
   node.setAttribute("aria-label", `${label}: ${session.name} (${statuses[session.status]})`);
-  node.title = session.name;
+  setTooltip(node, session.name);
   if (inSidebar) node.append(dot(session.status), el("span", "truncate", session.name), el("span", "meta", age(session.modified)));
   return node;
 }
@@ -95,7 +100,7 @@ function sidebar(groups) {
     const heading = el("button", "project-heading");
     heading.type = "button";
     heading.dataset.project = cwd;
-    heading.title = cwd;
+    setTooltip(heading, cwd);
     if (selected) heading.setAttribute("aria-current", "true");
     heading.append(el("span", "truncate", projectName(cwd)), el("span", "meta", items.length));
     group.append(heading, ...items.map((session) => actionButton(session, true)));
@@ -120,7 +125,7 @@ function cards(cwd, items) {
     const when = el("time", "", session.modified ? `Updated ${age(session.modified)}` : "");
     if (session.modified) {
       when.dateTime = new Date(session.modified).toISOString();
-      when.title = new Date(session.modified).toLocaleString();
+      setTooltip(when, new Date(session.modified).toLocaleString());
     }
     row.append(when, actionButton(session));
     card.append(row);
@@ -131,6 +136,7 @@ function cards(cwd, items) {
 }
 
 function render() {
+  hideTooltip();
   const focused = document.activeElement?.dataset;
   createChatButton.disabled = !projects.length;
   if (view === "project" && !projects.includes(project) && !sessions.some(({ cwd }) => cwd === project)) view = "all";
@@ -179,7 +185,8 @@ function render() {
 async function api(path, data) {
   const headers = { Authorization: `Bearer ${token}` };
   if (data) headers["Content-Type"] = "application/json";
-  const response = await fetch(path, data ? { method: "POST", headers, body: JSON.stringify(data) } : { headers });
+  // Same-origin POSTs need a non-opaque Origin despite the page's no-referrer policy.
+  const response = await fetch(path, data ? { method: "POST", headers, body: JSON.stringify(data), referrerPolicy: "same-origin" } : { headers });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || "Dashboard request failed.");
   return result;
@@ -204,6 +211,7 @@ async function refresh(force = false) {
         lastData = key;
         sessions = result.sessions;
         projects = result.projects ?? [...new Set(sessions.map(({ cwd }) => cwd).filter(Boolean))];
+        focusTerminalButton.hidden = result.canFocusTerminal !== true;
         render();
       }
       if (force) notice("Dashboard refreshed.");
@@ -362,6 +370,18 @@ document.addEventListener("click", (event) => {
 $("legend").append(...["working", "ready", "disconnected", "error", "saved"].map((state) => pill(state)));
 filter.addEventListener("input", render);
 $("refresh").addEventListener("click", () => void refresh(true));
+focusTerminalButton.addEventListener("click", async () => {
+  if (focusTerminalButton.hidden || focusTerminalButton.disabled) return;
+  focusTerminalButton.disabled = true;
+  try {
+    const result = await api("/api/focus-terminal", {});
+    notice(result.message);
+  } catch (error) {
+    notice(error.message, true);
+  } finally {
+    focusTerminalButton.disabled = false;
+  }
+});
 $("dismiss").addEventListener("click", () => { $("notice").hidden = true; });
 $("copy").addEventListener("click", async () => {
   try {

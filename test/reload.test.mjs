@@ -136,7 +136,7 @@ test("Pi --dashboard opens the dashboard at startup without advertising the laun
       headers: { Authorization: `Bearer ${dashboard.hash.slice(1)}` }, signal: AbortSignal.timeout(3000),
     });
     assert.equal(res.status, 200);
-    assert.deepEqual(await res.json(), { projects: [cwd], sessions: [] });
+    assert.deepEqual(await res.json(), { projects: [cwd], sessions: [], canFocusTerminal: true });
     assert.equal(faux.state.callCount, 0);
     assert.deepEqual(errors, []);
   } finally {
@@ -386,7 +386,8 @@ test("installed Pi accepts a browser prompt before the model finishes, then expo
     });
     const response = await dashboardState();
     assert.equal(response.status, 200);
-    const { sessions } = await response.json();
+    const { sessions, canFocusTerminal } = await response.json();
+    assert.equal(canFocusTerminal, true);
     assert.equal(sessions.find(({ id }) => id === sessionManager.getSessionId())?.status, "ready");
     assert.equal(sessions.find(({ id }) => id === saved[1].manager.getSessionId())?.status, "saved");
     assert.equal(faux.state.callCount, 4);
