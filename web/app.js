@@ -805,12 +805,18 @@ function bindMessageTooltip(target, text) {
 
 document.querySelectorAll('#chat-explorer [title], #explorer-toggle[title]').forEach((target) => bindMessageTooltip(target, target.title));
 bindMessageTooltip(sessionTitleText);
+for (const id of ["rename-session", "focus-terminal"]) {
+  const button = $(id);
+  bindMessageTooltip(button, button.title);
+  button.addEventListener("click", hideMessagePreview);
+}
 
 function showMessagePreview(dot, text) {
   hideMessagePreview();
   messagePreview = document.createElement("div");
   messagePreview.id = "message-preview";
-  messagePreview.className = "message-preview";
+  const sessionTooltip = sessionTitlePill.contains(dot);
+  messagePreview.className = sessionTooltip ? "message-preview session-tooltip" : "message-preview";
   messagePreview.setAttribute("role", "tooltip");
   messagePreview.textContent = text;
   document.body.append(messagePreview);
@@ -819,6 +825,15 @@ function showMessagePreview(dot, text) {
   const rect = dot.getBoundingClientRect();
   const bounds = messagePreview.getBoundingClientRect();
   const gap = 8;
+  if (sessionTooltip) {
+    const centered = (rect.left + rect.right - bounds.width) / 2;
+    const left = Math.max(gap, Math.min(centered, window.innerWidth - bounds.width - gap));
+    const below = rect.bottom + gap;
+    const top = below + bounds.height <= window.innerHeight - gap ? below : Math.max(gap, rect.top - bounds.height - gap);
+    messagePreview.style.left = `${left}px`;
+    messagePreview.style.top = `${top}px`;
+    return;
+  }
   const placeRight = rect.right + gap + bounds.width <= window.innerWidth - gap;
   messagePreview.classList.toggle("message-preview-left", !placeRight);
   const left = placeRight ? rect.right + gap : Math.max(gap, rect.left - bounds.width - gap);

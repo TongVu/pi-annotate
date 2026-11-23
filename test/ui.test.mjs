@@ -375,10 +375,22 @@ test("the sticky session pill renames the Pi session and updates the browser tab
   const preview = () => f.$("message-preview");
   title.dispatchEvent(new f.window.MouseEvent("mouseenter"));
   assert.equal(title.title, "");
-  assert.equal(preview().classList.contains("message-preview"), true);
+  assert.equal(preview().classList.contains("session-tooltip"), true);
   assert.equal(preview().textContent, sessionName);
   title.dispatchEvent(new f.window.MouseEvent("mouseleave"));
   assert.equal(preview(), null);
+  for (const [id, label] of [["rename-session", "Rename chat"], ["focus-terminal", "Switch to Terminal"]]) {
+    const button = f.$(id);
+    assert.equal(button.hasAttribute("title"), false);
+    button.getBoundingClientRect = () => ({ left: 60, right: 86, top: 14, bottom: 40 });
+    button.focus();
+    assert.equal(preview().textContent, label);
+    assert.equal(preview().classList.contains("session-tooltip"), true);
+    assert.equal(preview().style.top, "48px");
+    assert.equal(button.getAttribute("aria-describedby"), preview().id);
+    button.blur();
+    assert.equal(preview(), null);
+  }
   f.$("rename-session").click();
   const input = f.$("rename-session-input");
   input.value = "Personal repository cleanup";
