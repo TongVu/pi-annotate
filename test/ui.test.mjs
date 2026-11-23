@@ -228,20 +228,20 @@ test("status icon distinguishes ready, working, stopped and disconnected", async
   assert.equal(indicator.dataset.state, "working");
   assert.match(indicator.textContent, /working/);
   assert.match(favicon(), /fill="#dc4141"/);
-  assert.match(f.window.document.title, /^🏗️ /);
+  assert.equal(f.window.document.title, "Pi Chat · 🏗️");
   busy = false;
   await f.poll();
   assert.equal(indicator.dataset.state, "ready");
-  assert.equal(f.window.document.title, "✓ Ready · Pi Chat");
+  assert.equal(f.window.document.title, "Pi Chat · ✓ Ready");
   assert.match(favicon(), /fill="#2f9b69"/);
   failed = true;
   await f.poll();
   assert.equal(indicator.dataset.state, "stopped");
-  assert.match(f.window.document.title, /^🚫 /);
+  assert.equal(f.window.document.title, "Pi Chat · 🚫");
   offline = true;
   await f.poll();
   assert.equal(indicator.dataset.state, "disconnected");
-  assert.match(f.window.document.title, /^🔌 /);
+  assert.equal(f.window.document.title, "Pi Chat · 🔌");
 });
 
 test("the tab shows working from send through the next fresh Pi status", async (t) => {
@@ -255,8 +255,8 @@ test("the tab shows working from send through the next fresh Pi status", async (
     return response ? response.promise : json(chat());
   } });
   const title = () => f.window.document.title;
-  const readyTitle = "✓ Ready · Pi Chat";
-  const workingTitle = "🏗️ Pi Chat";
+  const readyTitle = "Pi Chat · ✓ Ready";
+  const workingTitle = "Pi Chat · 🏗️";
   const submit = () => f.$("chat-form").dispatchEvent(new f.window.Event("submit", { cancelable: true }));
   const input = f.$("chat-input");
   assert.equal(title(), readyTitle);
@@ -289,12 +289,27 @@ test("the tab shows working from send through the next fresh Pi status", async (
   assert.equal(title(), readyTitle);
 });
 
+test("two live chats keep their session name first regardless of shared status", async (t) => {
+  let secondBusy = false;
+  const response = (sessionName, busy) => ({
+    ok: true, json: async () => ({ mode: "chat", protocol: 2, cursor: null, messages: [], sessionName, busy }),
+  });
+  const first = await fixture(t, { chatFetch: async () => response("Fix markdown overflow", false) });
+  const second = await fixture(t, { chatFetch: async () => response("Merging renovate PRs", secondBusy) });
+  assert.equal(first.window.document.title, "Fix markdown overflow · ✓ Ready");
+  assert.equal(second.window.document.title, "Merging renovate PRs · ✓ Ready");
+  secondBusy = true;
+  await second.poll();
+  assert.equal(first.window.document.title, "Fix markdown overflow · ✓ Ready");
+  assert.equal(second.window.document.title, "Merging renovate PRs · 🏗️");
+});
+
 test("chat tab follows the Pi session name and moves chat controls out of the header", async (t) => {
   let sessionName = "Live browser chat feature";
   const f = await fixture(t, { chatFetch: async () => ({
     ok: true, json: async () => ({ mode: "chat", protocol: 2, cursor: null, messages: [], busy: false, sessionName }),
   }) });
-  assert.equal(f.window.document.title, `✓ Ready · ${sessionName}`);
+  assert.equal(f.window.document.title, `${sessionName} · ✓ Ready`);
   assert.equal(f.$("page-intro").hidden, true);
   assert.equal(f.$("chat-state").hidden, false);
   assert.equal(f.$("chat-state").parentElement, f.$("chat-form").querySelector(".actions"));
@@ -305,11 +320,11 @@ test("chat tab follows the Pi session name and moves chat controls out of the he
 
   sessionName = "Renamed <em>chat</em>";
   await f.poll();
-  assert.equal(f.window.document.title, `✓ Ready · ${sessionName}`);
+  assert.equal(f.window.document.title, `${sessionName} · ✓ Ready`);
 
   sessionName = undefined;
   await f.poll();
-  assert.equal(f.window.document.title, "✓ Ready · Pi Chat");
+  assert.equal(f.window.document.title, "Pi Chat · ✓ Ready");
 });
 
 test("the sticky session pill renames the Pi session and updates the browser tab", async (t) => {
@@ -332,7 +347,7 @@ test("the sticky session pill renames the Pi session and updates the browser tab
   const title = f.$("session-title-text");
   assert.equal(pill.hidden, false);
   assert.equal(title.textContent, sessionName);
-  assert.equal(f.window.document.title, `✓ Ready · ${sessionName}`);
+  assert.equal(f.window.document.title, `${sessionName} · ✓ Ready`);
   const preview = () => f.$("message-preview");
   title.dispatchEvent(new f.window.MouseEvent("mouseenter"));
   assert.equal(title.title, "");
@@ -351,7 +366,7 @@ test("the sticky session pill renames the Pi session and updates the browser tab
   await tick();
   assert.equal(renamed, input.value);
   assert.equal(title.textContent, renamed);
-  assert.equal(f.window.document.title, `✓ Ready · ${renamed}`);
+  assert.equal(f.window.document.title, `${renamed} · ✓ Ready`);
   assert.equal(f.$("status").textContent, "Chat renamed.");
   title.focus();
   assert.equal(preview().textContent, renamed);
@@ -513,7 +528,7 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.match(f.$("response").textContent, /New live message/);
 
   f.$("back-to-live").click();
-  assert.equal(f.window.document.title, "✓ Ready · Live chat");
+  assert.equal(f.window.document.title, "Live chat · ✓ Ready");
   assert.equal(f.$("conversation").hidden, false);
   assert.equal(f.$("right-panel").hidden, false);
   assert.equal(f.window.document.querySelector("main").classList.contains("right-panel-collapsed"), true);
@@ -609,7 +624,10 @@ test("Markdown notes persist per chat, preview safely, and copy their source", a
   panelToggle.click();
   assert.equal(f.window.document.querySelector("main").classList.contains("right-panel-collapsed"), false);
   const expandNote = f.$("chat-note-expand");
-  assert.equal(expandNote.getAttribute("aria-controls"), "chat-note-input");
+  const noteBox = f.$(expandNote.getAttribute("aria-controls"));
+  const preview = f.$("chat-note-preview");
+  assert.ok(noteBox.contains(note) && noteBox.contains(preview));
+  assert.equal(expandNote.closest(".chat-note-actions"), f.$("chat-note-preview-toggle").parentElement);
   expandNote.click();
   assert.equal(expandNote.getAttribute("aria-expanded"), "true");
   assert.equal(expandNote.getAttribute("aria-label"), "Collapse Markdown note");
@@ -623,9 +641,10 @@ test("Markdown notes persist per chat, preview safely, and copy their source", a
   assert.match(css, /main\.right-panel-collapsed #right-panel-content\s*\{\s*display:\s*none;/);
   assert.match(css, /main\.right-panel-collapsed #right-panel\[hidden\]\s*\{\s*display:\s*none;/);
   assert.match(css, /#chat-note-dialog \{[^}]*width: 80vw; height: 80dvh/);
-  assert.match(css, /#chat-note\[data-previewing="true"\] \.chat-note-box:hover #chat-note-expand/);
+  assert.match(css, /#right-panel-content \{[^}]*grid-template-columns: minmax\(0, 1fr\)/);
   assert.equal(note.value, "# Saved snippet");
-  note.value = "# Reusable\n\n**Prompt text** <script>bad()</script>";
+  const longLine = "wide code ".repeat(200).trimEnd();
+  note.value = `# Reusable\n\n**Prompt text** <script>bad()</script>\n\n\`\`\`\n${longLine}\n\`\`\`\n\n${"More text.\n\n".repeat(80)}End of note.`;
   note.dispatchEvent(new f.window.Event("input"));
   note.dispatchEvent(new f.window.Event("blur"));
   await tick();
@@ -633,14 +652,17 @@ test("Markdown notes persist per chat, preview safely, and copy their source", a
   f.$("chat-note-preview-toggle").click();
   await tick();
   assert.equal(note.hidden, true);
-  assert.ok(f.$("chat-note-preview").querySelector("h1 strong") || f.$("chat-note-preview").querySelector("h1"));
-  assert.equal(f.$("chat-note-preview").querySelector("script"), null);
-  assert.equal(f.$("chat-note-expand").hidden, false);
-  f.$("chat-note-expand").click();
+  assert.ok(preview.querySelector("h1"));
+  assert.equal(preview.querySelector("script"), null);
+  assert.equal(preview.querySelector("pre code").textContent.trimEnd(), longLine);
+  assert.equal(expandNote.hidden, false);
+  expandNote.click();
   assert.equal(f.$("chat-note-dialog").open, true);
-  assert.equal(f.$("chat-note-preview").hidden, false, "expansion retains preview mode");
-  f.$("chat-note-expand").click();
+  assert.equal(preview.hidden, false, "expansion retains preview mode");
+  assert.equal(preview.lastElementChild.textContent, "End of note.");
+  expandNote.click();
   assert.equal(f.$("chat-note-dialog").open, false);
+  assert.equal(preview.hidden, false, "collapsing retains preview mode");
   f.$("chat-note-preview-toggle").click();
   assert.equal(note.hidden, false);
   const copied = [];

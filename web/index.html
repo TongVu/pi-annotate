@@ -121,15 +121,15 @@
               <button id="chat-note-copy" type="button" class="secondary composer-icon" aria-label="Copy note Markdown" title="Copy note Markdown" disabled>
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>
               </button>
+              <button id="chat-note-expand" type="button" class="secondary composer-icon" aria-label="Expand Markdown note" aria-controls="chat-note-box" aria-expanded="false" title="Expand Markdown note">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path class="expand-icon" d="M15 3h6v6M21 3l-7 7M9 21H3v-6M3 21l7-7"/>
+                  <path class="collapse-icon" d="M21 3l-7 7m0-6v6h6M3 21l7-7m-6 0h6v6"/>
+                </svg>
+              </button>
             </div>
           </div>
-          <div class="chat-note-box">
-            <button id="chat-note-expand" type="button" class="secondary composer-icon" aria-label="Expand Markdown note" aria-controls="chat-note-input" aria-expanded="false" title="Expand Markdown note">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path class="expand-icon" d="M15 3h6v6M21 3l-7 7M9 21H3v-6M3 21l7-7"/>
-                <path class="collapse-icon" d="M21 3l-7 7m0-6v6h6M3 21l7-7m-6 0h6v6"/>
-              </svg>
-            </button>
+          <div id="chat-note-box" class="chat-note-box">
             <textarea id="chat-note-input" rows="4" maxlength="32000" aria-label="Reusable Markdown note" placeholder="Keep reusable text here…"></textarea>
             <div id="chat-note-preview" class="chat-note-preview" hidden></div>
           </div>

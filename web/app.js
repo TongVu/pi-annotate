@@ -46,7 +46,7 @@ let readingFiles = false;
 let cursor = null;
 const appTitle = "Pi Chat";
 let liveTitle = appTitle;
-let chatTitlePrefix = "⚪";
+let chatTitleStatus = "⚪";
 let liveSessionName;
 let catalog;
 let catalogProblem = "";
@@ -90,7 +90,6 @@ function loadChatNote(sessionId) {
   chatNoteInput.hidden = false;
   chatNotePreview.hidden = true;
   chatNotePreviewing = false;
-  chatNote.dataset.previewing = "false";
   chatNoteExpand.hidden = false;
   chatNoteExpand.setAttribute("aria-expanded", "false");
   chatNoteExpand.setAttribute("aria-label", "Expand Markdown note");
@@ -138,7 +137,8 @@ function loadChatNote(sessionId) {
 }
 
 function updateLiveDocumentTitle() {
-  document.title = `${chatTitlePrefix} ${liveTitle}`;
+  // Keep the session name first: the tab strip can hide prefixes shared by multiple chats.
+  document.title = `${liveTitle} · ${chatTitleStatus}`;
 }
 
 function updateSessionTitle(name) {
@@ -595,7 +595,6 @@ chatNotePreviewToggle.addEventListener("click", async () => {
   if (chatNotePreviewing) {
     chatNoteInput.hidden = false;
     chatNotePreview.hidden = true;
-    chatNote.dataset.previewing = "false";
     chatNotePreviewing = false;
     chatNotePreviewToggle.setAttribute("aria-label", "Preview note");
     chatNotePreviewToggle.title = "Preview Markdown note";
@@ -610,7 +609,6 @@ chatNotePreviewToggle.addEventListener("click", async () => {
     chatNotePreview.innerHTML = html || "<p>Nothing to preview yet.</p>";
     chatNoteInput.hidden = true;
     chatNotePreview.hidden = false;
-    chatNote.dataset.previewing = "true";
     chatNotePreviewing = true;
     chatNotePreviewToggle.setAttribute("aria-label", "Edit note");
     chatNotePreviewToggle.title = "Edit Markdown note";
@@ -753,7 +751,7 @@ function updateChatState() {
   indicator.dataset.state = state;
   indicator.title = chatStates[state];
   indicator.querySelector(".chat-state-label").textContent = chatStates[state];
-  chatTitlePrefix = ({ ready: "✓ Ready ·", working: "🏗️", stopped: "🚫", disconnected: "🔌" })[state] ?? "🔌";
+  chatTitleStatus = ({ ready: "✓ Ready", working: "🏗️", stopped: "🚫", disconnected: "🔌" })[state] ?? "🔌";
   updateFaviconStatus(state);
   if (!savedSessionId) updateLiveDocumentTitle();
 }

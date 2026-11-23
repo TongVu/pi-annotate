@@ -43,13 +43,9 @@ h2 { font-size: 17px; margin: 0 0 16px; }
 #chat-note-preview-toggle .note-edit-icon { display: none; }
 #chat-note-preview-toggle[aria-pressed="true"] .note-preview-icon { display: none; }
 #chat-note-preview-toggle[aria-pressed="true"] .note-edit-icon { display: block; }
-.chat-note-box { position: relative; }
-.chat-note-box .composer-icon { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border-radius: 50%; }
-#chat-note-input { display: block; width: 100%; height: 104px; min-height: 72px; max-height: 22dvh; margin: 0; padding: 8px 44px 8px 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; line-height: 1.45; resize: none; }
+#chat-note-input { display: block; width: 100%; height: 104px; min-height: 72px; max-height: 22dvh; margin: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; line-height: 1.45; resize: none; }
 #chat-note-input[hidden], #chat-note-preview[hidden], #chat-note-expand[hidden] { display: none; }
-#chat-note-expand { position: absolute; inset-block-start: 6px; inset-inline-end: 6px; z-index: 1; }
 #chat-note-expand[aria-expanded="false"] .collapse-icon, #chat-note-expand[aria-expanded="true"] .expand-icon { display: none; }
-#chat-note-expand[aria-expanded="true"] + #chat-note-input { height: min(40dvh, 24rem); max-height: none; }
 .chat-note-preview { max-height: 22dvh; overflow: auto; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 .chat-note-preview > :first-child { margin-top: 0; }
 .chat-note-preview > :last-child { margin-bottom: 0; }
@@ -60,6 +56,7 @@ h2 { font-size: 17px; margin: 0 0 16px; }
 .chat-note-preview code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .9em; padding: .1em .25em; background: var(--panel); border-radius: 4px; }
 .chat-note-preview pre { padding: 8px; overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 7px; }
 .chat-note-preview pre code { padding: 0; background: transparent; }
+.chat-note-preview table { display: block; overflow: auto; }
 #chat-note-status { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
 #chat-note-status:empty { display: none; }
 #chat-note-status.error { color: var(--attachment-error, #ffb4a6); }
@@ -67,11 +64,6 @@ h2 { font-size: 17px; margin: 0 0 16px; }
 #chat-note-dialog #chat-note { display: flex; flex-direction: column; height: 100%; padding: 0; border: 0; }
 #chat-note-dialog .chat-note-box { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; }
 #chat-note-dialog #chat-note-input, #chat-note-dialog .chat-note-preview { flex: 1 1 auto; width: 100%; height: 100%; min-height: 0; max-height: none; }
-@media (hover: hover) {
-  #chat-note[data-previewing="true"] #chat-note-expand { opacity: 0; pointer-events: none; transition: opacity 100ms ease-out; }
-  #chat-note[data-previewing="true"] .chat-note-box:hover #chat-note-expand,
-  #chat-note[data-previewing="true"] #chat-note-expand:focus-visible { opacity: 1; pointer-events: auto; }
-}
 #empty { color: var(--muted); line-height: 1.6; }
 #annotate-selection { position: fixed; z-index: 10; padding: 6px 10px; box-shadow: 0 4px 12px #0003; font-size: 13px; }
 ol { padding-left: 20px; margin: 0; }
@@ -171,7 +163,7 @@ textarea { width: 100%; resize: vertical; background: var(--bg); color: var(--te
 .chat-page #right-panel[hidden] { display: none; }
 .chat-page #right-panel-toggle { grid-row: 1; justify-self: end; display: grid; place-items: center; width: 30px; height: 28px; padding: 0; border: 0; border-radius: 50%; }
 .chat-page #right-panel-toggle svg { transform: rotate(180deg); }
-.chat-page #right-panel-content { grid-row: 2; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 14px; min-height: 0; overflow: hidden; }
+.chat-page #right-panel-content { grid-row: 2; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: 14px; min-height: 0; overflow: hidden; }
 .chat-page #annotations-panel { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height: 0; overflow: hidden; }
 .chat-page #annotations { min-height: 0; overflow: auto; scrollbar-width: thin; }
 @media (min-width: 761px) { .chat-page aside { border-top: 0; border-left: 1px solid var(--border); } }
