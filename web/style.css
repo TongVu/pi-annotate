@@ -121,14 +121,14 @@ textarea { width: 100%; resize: vertical; background: var(--bg); color: var(--te
 .chat-state-icon { white-space: nowrap; }
 .chat-state-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .chat-state-icon::before { content: ""; display: block; }
-#chat-state[data-state="working"] .chat-state-icon::before { content: "👾💭"; font-size: 16px; line-height: 1; animation: chat-think 1.4s ease-in-out infinite; }
-#chat-state[data-state="ready"] .chat-state-icon::before { content: "👾"; display: inline; font-size: 16px; line-height: 1; }
-#chat-state[data-state="ready"] .chat-state-icon::after { content: ""; display: inline-block; width: 10px; height: 10px; margin-inline-start: 4px; border-radius: 50%; background: var(--ready, #77bda7); animation: chat-breathe 2.8s ease-in-out infinite; }
+#chat-state[data-state="ready"] { --chat-state-dot: var(--ready, #77bda7); }
+#chat-state[data-state="working"] { --chat-state-dot: var(--working, #ecaa52); }
+#chat-state:is([data-state="ready"], [data-state="working"]) .chat-state-icon::before { content: "👾"; display: inline; font-size: 16px; line-height: 1; }
+#chat-state:is([data-state="ready"], [data-state="working"]) .chat-state-icon::after { content: ""; display: inline-block; width: 10px; height: 10px; margin-inline-start: 4px; border-radius: 50%; background: var(--chat-state-dot); animation: chat-breathe 2.8s ease-in-out infinite; }
 #chat-state[data-state="stopped"] .chat-state-icon::before, #chat-state[data-state="disconnected"] .chat-state-icon::before { content: "!"; width: 18px; height: 18px; border: 1px solid currentColor; border-radius: 50%; font: 700 14px/16px ui-sans-serif, system-ui, sans-serif; text-align: center; }
-@keyframes chat-think { 50% { transform: translateY(-2px); } }
 @keyframes chat-breathe { 50% { opacity: .55; transform: scale(.82); } }
-@media (prefers-reduced-motion: reduce) { #chat-state[data-state] .chat-state-icon::before { animation: none; } }
-@media (prefers-color-scheme: light) { #chat-state { --ready: #26694c; } }
+@media (prefers-reduced-motion: reduce) { #chat-state[data-state] .chat-state-icon::after { animation: none; } }
+@media (prefers-color-scheme: light) { #chat-state { --ready: #26694c; --working: #9a5c00; } }
 /* The rail shares the transcript row, not the transcript plus the composer. */
 #turns { align-self: center; max-height: 100%; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 2px; }
 #turns button { display: grid; place-items: center; width: 100%; height: 16px; padding: 0; background: transparent; color: var(--muted); }

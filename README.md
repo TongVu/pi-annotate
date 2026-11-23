@@ -40,8 +40,8 @@ sessions by working directory. Both regular and fullscreen terminal modes work.
    field or attach images with its clipboard button. Each question keeps its own
    images. These are separate sends: each leaves the other draft untouched and
    clears its own draft only after Pi accepts it. The terminal draft is untouched.
-4. New messages appear in the same tab as Pi finishes them. The status shows an
-   animated 👾💭 while Pi is working and a pulsing green dot when it's ready. Replies aren't streamed
+4. New messages appear in the same tab as Pi finishes them. The dot next to 👾
+   pulses amber while Pi is working and green when it's ready. Replies aren't streamed
    token by token. If Pi needs an approval or other interactive input, use the terminal.
 
 Click the live chat title to rename the session.
