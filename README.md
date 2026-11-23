@@ -44,6 +44,7 @@ sessions by working directory. Both regular and fullscreen terminal modes work.
    animated 👾💭 while Pi is working and a pulsing green dot when it's ready. Replies aren't streamed
    token by token. If Pi needs an approval or other interactive input, use the terminal.
 
+Click the live chat title to rename the session.
 Click **🕹️** beside the live chat name to switch to the terminal tab running
 that chat. It does not start Pi, open a new tab, or send text to the terminal.
 On macOS, use Terminal.app and allow Terminal Automation if prompted. On Linux,

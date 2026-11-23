@@ -351,7 +351,7 @@ test("the icon-only terminal button requests focus for the live chat and reports
   assert.match(f.$("status").textContent, /Kitty needs a local remote-control socket/);
 });
 
-test("the sticky session pill renames the Pi session and updates the browser tab", async (t) => {
+test("clicking the live chat title opens renaming and updates the browser tab", async (t) => {
   let sessionName = "Live browser chat feature with a long name that can be truncated in the sticky session pill";
   let renamed;
   let oldServer = true;
@@ -369,30 +369,36 @@ test("the sticky session pill renames the Pi session and updates the browser tab
   } });
   const pill = f.$("session-title-pill");
   const title = f.$("session-title-text");
+  const terminal = f.$("focus-terminal");
   assert.equal(pill.hidden, false);
+  assert.deepEqual([...pill.querySelectorAll("button")], [title, terminal]);
+  assert.equal(title.getAttribute("aria-haspopup"), "dialog");
+  assert.equal(title.getAttribute("aria-label"), `Rename ${sessionName}`);
   assert.equal(title.textContent, sessionName);
   assert.equal(f.window.document.title, `${sessionName} · ✓ Ready`);
   const preview = () => f.$("message-preview");
   title.dispatchEvent(new f.window.MouseEvent("mouseenter"));
   assert.equal(title.title, "");
   assert.equal(preview().classList.contains("session-tooltip"), true);
-  assert.equal(preview().textContent, sessionName);
+  assert.equal(preview().textContent, `${sessionName}\nClick to rename`);
   title.dispatchEvent(new f.window.MouseEvent("mouseleave"));
   assert.equal(preview(), null);
-  for (const [id, label] of [["rename-session", "Rename chat"], ["focus-terminal", "Switch to Terminal"]]) {
-    const button = f.$(id);
-    assert.equal(button.hasAttribute("title"), false);
-    button.getBoundingClientRect = () => ({ left: 60, right: 86, top: 14, bottom: 40 });
-    button.focus();
-    assert.equal(preview().textContent, label);
-    assert.equal(preview().classList.contains("session-tooltip"), true);
-    assert.equal(preview().style.top, "48px");
-    assert.equal(button.getAttribute("aria-describedby"), preview().id);
-    button.blur();
-    assert.equal(preview(), null);
-  }
-  f.$("rename-session").click();
+  assert.equal(terminal.hasAttribute("title"), false);
+  terminal.getBoundingClientRect = () => ({ left: 60, right: 86, top: 14, bottom: 40 });
+  terminal.focus();
+  assert.equal(preview().textContent, "Switch to Terminal");
+  assert.equal(preview().classList.contains("session-tooltip"), true);
+  assert.equal(preview().style.top, "48px");
+  assert.equal(terminal.getAttribute("aria-describedby"), preview().id);
+  terminal.blur();
+  assert.equal(preview(), null);
+  title.focus();
+  title.click();
   const input = f.$("rename-session-input");
+  assert.equal(f.$("rename-session-dialog").open, true);
+  assert.equal(f.window.document.activeElement, input);
+  assert.equal(input.value, sessionName);
+  assert.equal(preview(), null);
   input.value = "Personal repository cleanup";
   const submitRename = () => f.$("rename-session-form").dispatchEvent(new f.window.Event("submit", { cancelable: true }));
   submitRename();
@@ -402,10 +408,11 @@ test("the sticky session pill renames the Pi session and updates the browser tab
   await tick();
   assert.equal(renamed, input.value);
   assert.equal(title.textContent, renamed);
+  assert.equal(title.getAttribute("aria-label"), `Rename ${renamed}`);
   assert.equal(f.window.document.title, `${renamed} · ✓ Ready`);
   assert.equal(f.$("status").textContent, "Chat renamed.");
   title.focus();
-  assert.equal(preview().textContent, renamed);
+  assert.equal(preview().textContent, `${renamed}\nClick to rename`);
   assert.equal(title.getAttribute("aria-describedby"), preview().id);
   title.blur();
   assert.equal(preview(), null);

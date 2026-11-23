@@ -145,7 +145,8 @@ function updateSessionTitle(name) {
   liveSessionName = typeof name === "string" && name.trim() ? name.trim() : undefined;
   liveTitle = liveSessionName || appTitle;
   sessionTitleText.textContent = liveSessionName || "Untitled chat";
-  $("rename-session").setAttribute("aria-label", liveSessionName ? `Rename ${liveSessionName}` : "Name this chat");
+  sessionTitleText.setAttribute("aria-label", `Rename ${sessionTitleText.textContent}`);
+  sessionTitleText.dataset.tooltip = `${sessionTitleText.textContent}\nClick to rename`;
   if (!savedSessionId) updateLiveDocumentTitle();
   if (catalog && catalog.current.name !== liveSessionName) {
     catalog.current.name = liveSessionName;
@@ -796,7 +797,7 @@ function hideMessagePreview() {
 function bindMessageTooltip(target, text) {
   target.removeAttribute("title");
   if (text !== undefined) target.dataset.tooltip = text;
-  const show = () => showMessagePreview(target, text ?? target.textContent);
+  const show = () => showMessagePreview(target, target.dataset.tooltip ?? target.textContent);
   target.addEventListener("mouseenter", show);
   target.addEventListener("mouseleave", hideMessagePreview);
   target.addEventListener("focus", show);
@@ -805,11 +806,6 @@ function bindMessageTooltip(target, text) {
 
 document.querySelectorAll('#chat-explorer [title], #explorer-toggle[title]').forEach((target) => bindMessageTooltip(target, target.title));
 bindMessageTooltip(sessionTitleText);
-for (const id of ["rename-session", "focus-terminal"]) {
-  const button = $(id);
-  bindMessageTooltip(button, button.title);
-  button.addEventListener("click", hideMessagePreview);
-}
 
 function showMessagePreview(dot, text) {
   hideMessagePreview();
@@ -927,7 +923,9 @@ async function copyResumeCommand(id) {
 
 $("close-resume-command").addEventListener("click", () => $("resume-command-dialog").close());
 const focusTerminalButton = $("focus-terminal");
+bindMessageTooltip(focusTerminalButton, focusTerminalButton.title);
 focusTerminalButton.addEventListener("click", async () => {
+  hideMessagePreview();
   focusTerminalButton.disabled = true;
   status("Switching to Terminal…");
   try {
@@ -939,8 +937,9 @@ focusTerminalButton.addEventListener("click", async () => {
     focusTerminalButton.disabled = false;
   }
 });
-$("rename-session").addEventListener("click", () => {
+sessionTitleText.addEventListener("click", () => {
   if (savedSessionId) return;
+  hideMessagePreview();
   renameSessionInput.value = liveSessionName ?? "";
   $("rename-session-status").textContent = "";
   $("rename-session-status").classList.remove("error");
