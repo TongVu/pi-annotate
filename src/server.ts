@@ -12,6 +12,7 @@ const assets = {
   "/app.js": ["app.js", "text/javascript; charset=utf-8"],
   "/style.css": ["style.css", "text/css; charset=utf-8"],
   "/favicon.ico": ["favicon.ico", "image/x-icon"],
+  "/logo.png": ["logo.png", "image/png"],
 };
 const BODY_LIMIT = 512 * 1024;
 const MAX_ATTACHMENTS = 10;
@@ -114,14 +115,13 @@ function readChatImage(branch, id, index) {
   if (imageMimeType(bytes) === image.mimeType) return { bytes, mimeType: image.mimeType };
 }
 
-function explorerRoutes({ current, list, read, launch, clone, createNewSession }, presence) {
+function explorerRoutes({ current, list, read, launch, clone }, presence) {
   let catalog = new Map();
   let liveCloneSession;
   let saved;
   let listing;
   const opening = new Map();
   const cloning = new Map();
-  let creatingSession = false;
   const savedBranch = (id) => {
     const session = catalog.get(id);
     if (!session) return;
@@ -159,7 +159,6 @@ function explorerRoutes({ current, list, read, launch, clone, createNewSession }
         current: { id: live.id, cwd: live.cwd, name: live.name, ...(liveParent ? { parentId: liveParent } : {}), ...(liveRecord && clone ? { canClone: true } : {}) },
         sessions: [...catalog.values()].filter(({ id }) => id !== live.id).map(({ id, cwd, name, parentId }) => ({ id, cwd, name, ...(parentId ? { parentId } : {}), ...(clone ? { canClone: true } : {}) })),
         ...(launch ? { canOpen: true } : {}),
-        ...(createNewSession ? { canCreateNewSession: true } : {}),
       };
     },
     noteActive(sessions) {
@@ -187,16 +186,6 @@ function explorerRoutes({ current, list, read, launch, clone, createNewSession }
       } finally {
         if (opening.get(id) === Infinity) opening.delete(id);
       }
-    },
-    createSession(reply, checkCurrent, afterResponse) {
-      if (!createNewSession) return reply(404, { error: "Creating a new chat is unavailable." });
-      if (creatingSession) return reply(409, { error: "Pi is already starting a new chat." });
-      if (!checkCurrent()) return;
-      creatingSession = true;
-      afterResponse(() => {
-        Promise.resolve().then(createNewSession).catch(() => {}).finally(() => { creatingSession = false; });
-      });
-      reply(202, { ok: true });
     },
     async cloneSession(id, reply, checkCurrent) {
       const session = typeof id === "string" && (id === current().id ? liveCloneSession : catalog.get(id));
@@ -241,7 +230,13 @@ function chatRoutes({ noteStore, getSessionId, getSessionName, setSessionName, g
     if (!rendered.has(entry.id)) rendered.set(entry.id, renderChatEntry(entry));
     return rendered.get(entry.id);
   };
+  const status = (branch?) => {
+    if (inFlight || !isIdle()) return "working";
+    const last = (branch ?? getBranch()).findLast((entry) => entry.type === "message" && ["user", "assistant"].includes(entry.message.role));
+    return ["error", "aborted"].includes(last?.message.stopReason) ? "error" : "ready";
+  };
   return {
+    status,
     read(after, reply) {
       const branch = getBranch();
       const index = after === null ? -1 : branch.findIndex((entry) => entry.id === after);
@@ -250,10 +245,8 @@ function chatRoutes({ noteStore, getSessionId, getSessionName, setSessionName, g
         return;
       }
       const messages = branch.slice(index + 1).map(render).filter(Boolean);
-      const busy = inFlight || !isIdle();
-      const last = branch.findLast((entry) => entry.type === "message" && ["user", "assistant"].includes(entry.message.role));
-      const failed = !busy && ["error", "aborted"].includes(last?.message.stopReason);
-      reply(200, { mode: "chat", protocol: 2, annotationImages: true, sessionId: getSessionId?.(), sessionName: getSessionName?.(), cursor: branch.at(-1)?.id ?? null, messages, busy, failed });
+      const state = status(branch);
+      reply(200, { mode: "chat", protocol: 2, annotationImages: true, sessionId: getSessionId?.(), sessionName: getSessionName?.(), cursor: branch.at(-1)?.id ?? null, messages, busy: state === "working", failed: state === "error" });
     },
     image(id, index) {
       return readChatImage(getBranch(), id, index);
@@ -345,8 +338,11 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
   const explorer = chat.explorer && explorerRoutes(chat.explorer, presence);
   const reopenCommand = "/chat";
   const token = randomBytes(32).toString("hex");
+  const landing = `/?tab=${randomBytes(16).toString("hex")}`;
   let origin;
+  let activityTimer;
   let expired = false;
+  const publishActivity = (heartbeat) => presence?.touch?.(ttlMs, { status: live.status(), tab: origin + landing }, heartbeat);
   const server = createServer(async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Referrer-Policy", "no-referrer");
@@ -369,8 +365,9 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
         return false;
       };
       if (!checkCurrent()) return;
-      if (req.method === "GET" && assets[req.url]) {
-        const [file, type] = assets[req.url];
+      const asset = Object.hasOwn(assets, req.url) ? assets[req.url] : req.url === landing ? assets["/"] : undefined;
+      if (req.method === "GET" && asset) {
+        const [file, type] = asset;
         const data = await readFile(new URL(`../web/${file}`, import.meta.url));
         res.writeHead(200, { "Content-Type": type });
         res.end(data);
@@ -422,19 +419,27 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
       }
       if (req.method === "GET" && url.pathname === "/api/response") {
         timer.refresh(); // An authenticated poll keeps a chat alive.
-        await presence?.touch(ttlMs);
+        if (presence?.touch && !activityTimer) {
+          // Background tabs may be throttled. Pi itself publishes status changes.
+          activityTimer = setInterval(() => {
+            if (isCurrent()) void publishActivity(false);
+            else close();
+          }, 1000);
+          activityTimer.unref();
+        }
+        await publishActivity(true);
         if (checkCurrent()) live.read(url.searchParams.get("after"), reply);
         return;
       }
       const disconnect = live && req.url === "/api/close";
       const renameSession = live && req.url === "/api/session/name";
-      const focusTerminal = live && req.url === "/api/session/focus-terminal";
+      const localAction = req.url === "/api/session/focus-terminal" ? { name: "Switch to Terminal", run: chat.focusTerminal }
+        : req.url === "/api/dashboard/open" ? { name: "Open dashboard", run: chat.openDashboard } : undefined;
       const renderNote = live && req.url === "/api/markdown";
       const saveNote = live && req.url === "/api/note";
       const openSession = explorer && req.url === "/api/session/open";
       const cloneSession = explorer && req.url === "/api/session/clone";
-      const newSession = explorer && req.url === "/api/session/new";
-      if (req.method === "POST" && (disconnect || renameSession || focusTerminal || renderNote || saveNote || openSession || cloneSession || newSession || req.url === "/api/chat")) {
+      if (req.method === "POST" && (disconnect || renameSession || localAction || renderNote || saveNote || openSession || cloneSession || req.url === "/api/chat")) {
         if (req.headers.origin !== origin || req.headers["content-type"] !== "application/json") {
           reply(403, { error: "Expected a same-origin JSON request." });
           return;
@@ -451,18 +456,18 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
           reply(200, { ok: true });
           return;
         }
-        const raw = await readBody(req, renderNote || saveNote ? NOTE_BODY_LIMIT : openSession || renameSession || focusTerminal || cloneSession || newSession ? 4096 : CHAT_BODY_LIMIT);
+        const raw = await readBody(req, renderNote || saveNote ? NOTE_BODY_LIMIT : openSession || renameSession || localAction || cloneSession ? 4096 : CHAT_BODY_LIMIT);
         const body = JSON.parse(raw.toString("utf8"));
-        if (focusTerminal) {
+        if (localAction) {
           if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length) {
-            throw new Error("Terminal focus does not accept a target.");
+            throw new Error(`${localAction.name} does not accept a target.`);
           }
           if (!checkCurrent()) return;
-          if (!chat.focusTerminal) {
-            reply(501, { error: "Switch to Terminal is unavailable for this chat." });
+          if (!localAction.run) {
+            reply(501, { error: `${localAction.name} is unavailable for this chat.` });
             return;
           }
-          await chat.focusTerminal();
+          await localAction.run();
           if (checkCurrent()) reply(200, { ok: true });
           return;
         }
@@ -487,10 +492,6 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
         }
         if (cloneSession) {
           if (checkCurrent()) await explorer.cloneSession(body?.id, reply, checkCurrent);
-          return;
-        }
-        if (newSession) {
-          if (checkCurrent()) explorer.createSession(reply, checkCurrent, (run) => res.once("finish", run));
           return;
         }
         if (raw.length > CHAT_BODY_LIMIT) throw new Error("Request is too large.");
@@ -518,6 +519,7 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
     if (expired) return;
     expired = true;
     clearTimeout(timer);
+    clearInterval(activityTimer);
     server.close();
     server.closeAllConnections();
     void presence?.close();
@@ -525,5 +527,5 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
   };
   const timer = setTimeout(close, ttlMs);
   timer.unref();
-  return { url: `${origin}/#${token}`, close };
+  return { url: `${origin}${landing}#${token}`, close };
 }

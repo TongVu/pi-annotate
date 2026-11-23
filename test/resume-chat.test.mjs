@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { terminalForkArgs, terminalResumeArgs } from "../src/resume-chat.ts";
+import { terminalForkArgs, terminalNewArgs, terminalResumeArgs } from "../src/resume-chat.ts";
 
 test("Terminal resume command quotes paths, opts in to browser startup, and sends no prompt", { skip: process.platform === "win32" }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), "pi-chat-launch-"));
@@ -29,6 +29,12 @@ test("Terminal resume command quotes paths, opts in to browser startup, and send
   const output = run();
   assert.equal(output.status, 0, output.stderr);
   assert.deepEqual(output.stdout.trimEnd().split("\n"), [cwd, agentDir, "saved-id", "--session", path, "--extension", extension]);
+  const freshArgs = terminalNewArgs(cwd, pi, extension, agentDir);
+  assert.equal(freshArgs[1], args[1]);
+  const fresh = spawnSync("/bin/sh", ["-c", freshArgs[2]], { cwd: root, encoding: "utf8" });
+  assert.equal(fresh.status, 0, fresh.stderr);
+  assert.deepEqual(fresh.stdout.trimEnd().split("\n"), [cwd, agentDir, "new", "--extension", extension],
+    "a fresh launch changes directory, opts in to opening chat, and never resumes a session or sends a prompt");
   await rm(path);
   const deleted = run();
   assert.equal(deleted.status, 1);

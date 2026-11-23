@@ -1,6 +1,6 @@
 const token = location.hash.slice(1);
 // Do not leave the capability in history/address bar. It remains in this page's memory only.
-history.replaceState(null, "", location.pathname);
+history.replaceState(null, "", location.pathname + location.search);
 const $ = (id) => document.getElementById(id);
 const responseElement = $("response");
 const turnRail = $("turns");
@@ -736,10 +736,21 @@ const chatStates = {
   disconnected: "Disconnected. If it persists, run /chat again in Pi.",
 };
 
+let faviconLogo;
+async function loadFaviconLogo() {
+  try {
+    const response = await fetch("/logo.png");
+    if (!response.ok) return;
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    faviconLogo = `data:image/png;base64,${btoa(String.fromCharCode(...bytes))}`;
+  } catch { /* Fall back to the static favicon if the logo cannot be loaded. */ }
+}
+
 function updateFaviconStatus(state) {
+  if (!faviconLogo) return;
   const colors = { ready: "#2f9b69", working: "#dc4141", stopped: "#d99b25", disconnected: "#858b91" };
   const statusColor = colors[state] ?? colors.disconnected;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="#4169f5"/><stop offset="1" stop-color="#16c3b4"/></linearGradient></defs><rect width="32" height="32" rx="7" fill="url(#g)"/><g fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round"><path d="m8 11 8-5 8 5v10l-8 5-8-5zM8 11l8 5 8-5M16 16v10m-8-5 8-5 8 5"/></g><g fill="white"><circle cx="8" cy="11" r="3"/><circle cx="16" cy="6" r="3"/><circle cx="24" cy="11" r="3"/><circle cx="8" cy="21" r="3"/><circle cx="16" cy="16" r="3"/><circle cx="24" cy="21" r="3"/><circle cx="16" cy="26" r="3"/></g><circle cx="26" cy="26" r="5" fill="${statusColor}" stroke="white" stroke-width="2"/></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><image href="${faviconLogo}" width="32" height="32"/><circle cx="26" cy="26" r="5" fill="${statusColor}" stroke="white" stroke-width="2"/></svg>`;
   const favicon = $("app-favicon");
   favicon.type = "image/svg+xml";
   favicon.href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
@@ -888,7 +899,6 @@ const explorer = $("chat-explorer");
 const explorerToggle = $("explorer-toggle");
 const sessionFilter = $("session-filter");
 const refreshSessions = $("refresh-sessions");
-const newChatSession = $("new-chat-session");
 const openSavedButton = $("open-saved-chat");
 const projectControls = $("project-view-controls");
 const projectView = () => ({ mode: "normal", collapsed: new Set(), overrides: new Set() });
@@ -1173,7 +1183,6 @@ async function loadSessions() {
       catalog = await api("/api/sessions"); // Retry a dropped Safari connection once.
     }
     catalogProblem = "";
-    newChatSession.hidden = !catalog.canCreateNewSession;
     if (savedSessionId && !catalog.sessions.some(({ id }) => id === savedSessionId)) {
       savedSelection++;
       clearSavedTranscript();
@@ -1283,14 +1292,16 @@ sessionFilter.addEventListener("input", () => {
   searchProjects = projectView();
   renderSessionList();
 });
-newChatSession.addEventListener("click", async () => {
-  newChatSession.disabled = true;
-  status("Starting a new chat in this project…");
+const dashboardButton = $("open-dashboard");
+dashboardButton.addEventListener("click", async () => {
+  hideMessagePreview();
+  dashboardButton.disabled = true;
   try {
-    await api("/api/session/new", {});
+    await api("/api/dashboard/open", {});
   } catch (error) {
-    status(error.message || "Could not start a new chat.", true);
-    newChatSession.disabled = false;
+    status(error.status === 404 ? "The dashboard button needs the updated Pi extension. Run /reload, then reopen /chat." : error.message, true);
+  } finally {
+    dashboardButton.disabled = false;
   }
 });
 projectControls.addEventListener("click", (event) => {
@@ -1374,7 +1385,7 @@ window.addEventListener("beforeunload", (event) => {
 });
 try {
   if (!token) throw new Error("Open this page from Pi with /chat. Reloading the page discards its access token.");
-  const data = await api("/api/response");
+  const [data] = await Promise.all([api("/api/response"), loadFaviconLogo()]);
   if (data.mode !== "chat") throw new Error("Pi's chat server is outdated. Run /reload, then /chat in Pi.");
   startChat(data);
 } catch (error) {

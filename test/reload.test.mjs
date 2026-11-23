@@ -8,7 +8,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { JSDOM } from "jsdom";
 import { AUTO_CHAT_SESSION } from "../src/resume-chat.ts";
 import { requestOwnedChat } from "../src/session-owner.ts";
-import { registerChatExtension } from "../src/index.ts";
 
 async function findLoader() {
   if (process.env.PI_EXTENSION_LOADER) return process.env.PI_EXTENSION_LOADER;
@@ -87,84 +86,64 @@ test("Pi reload picks up changed local helper modules in the same process for /c
   assert.match((await responseState.json()).messages[0].text, /Reload marker/);
 });
 
-test("a browser-created chat can rename, send, and create another chat after Pi replaces its runtime", {
+test("Pi --dashboard opens the dashboard at startup without advertising the launcher as a chat", {
   skip: !loaderPath && "Requires an installed Pi loader",
   timeout: 10000,
 }, async (t) => {
-  const { createAgentSession, createAgentSessionRuntime, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } = await import(new URL("../../index.js", pathToFileURL(loaderPath)));
-  const { fauxProvider, fauxAssistantMessage } = await import(new URL("../../../../pi-ai/dist/index.js", pathToFileURL(loaderPath)));
-  if (!createAgentSessionRuntime || !ModelRuntime || !fauxProvider) return t.skip("Requires Pi's replaceable runtime and faux provider");
-  const cwd = await mkdtemp(join(tmpdir(), "pi-chat-replace-"));
-  t.after(() => rm(cwd, { recursive: true, force: true }));
-  const links = [];
-  const errors = [];
-  let cancelNew = true;
-  const faux = fauxProvider({ provider: "chat-replacement-test", models: [{ id: "test" }] });
-  faux.setResponses([fauxAssistantMessage("Reply from the replacement session.")]);
+  const { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } = await import(new URL("../../index.js", pathToFileURL(loaderPath)));
+  const { parseArgs } = await import(new URL("../../cli/args.js", pathToFileURL(loaderPath)));
+  const { fauxProvider } = await import(new URL("../../../../pi-ai/dist/index.js", pathToFileURL(loaderPath)));
+  if (!ModelRuntime || !fauxProvider) return t.skip("Requires Pi's ModelRuntime and faux provider");
+  const cwd = await mkdtemp(join(tmpdir(), "pi-chat-dashboard-startup-"));
+  const agentDir = join(cwd, "agent");
+  const priorAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  t.after(async () => {
+    if (priorAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = priorAgentDir;
+    await rm(cwd, { recursive: true, force: true });
+  });
+  const faux = fauxProvider({ provider: "dashboard-startup-test", models: [{ id: "test" }] });
   const modelRuntime = await ModelRuntime.create({ authPath: join(cwd, "auth.json"), modelsPath: join(cwd, "models.json") });
   modelRuntime.registerNativeProvider(faux.provider);
-  const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false } });
-  const runtime = await createAgentSessionRuntime(async ({ sessionManager, sessionStartEvent }) => {
-    const resourceLoader = new DefaultResourceLoader({
-      cwd, agentDir: cwd, settingsManager,
-      extensionFactories: [
-        (pi) => registerChatExtension(pi, async (url) => { links.push(new URL(url)); }),
-        (pi) => pi.on("session_before_switch", () => cancelNew ? { cancel: true } : undefined),
-      ],
-    });
-    await resourceLoader.reload();
-    const result = await createAgentSession({ cwd, agentDir: cwd, modelRuntime, model: faux.getModel(), settingsManager, resourceLoader, sessionManager, sessionStartEvent, noTools: true });
-    return { ...result, services: { cwd, agentDir: cwd } };
-  }, { cwd, agentDir: cwd, sessionManager: SessionManager.inMemory(cwd) });
-  let replacement;
-  const bind = () => runtime.session.bindExtensions({ mode: "tui", onError: (error) => errors.push(error), commandContextActions: {
-    newSession: (options) => { replacement = runtime.newSession(options); return replacement; },
-  } });
-  runtime.setRebindSession(bind);
+  const settingsManager = SettingsManager.inMemory({});
+  const openLog = join(cwd, "dashboard-url");
+  const adapter = join(cwd, "dashboard-launch.ts");
+  const extensionPath = fileURLToPath(new URL("../src/index.ts", import.meta.url));
+  await writeFile(adapter, `
+    import { writeFile } from "node:fs/promises";
+    import { registerChatExtension } from ${JSON.stringify(extensionPath)};
+    export default function (pi) {
+      registerChatExtension(pi, (url) => writeFile(${JSON.stringify(openLog)}, url));
+    }
+  `);
+  const resourceLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager, additionalExtensionPaths: [adapter] });
+  await resourceLoader.reload();
+  const parsed = parseArgs(["--dashboard"]);
+  assert.equal(parsed.unknownFlags.get("dashboard"), true);
+  assert.ok(parseArgs(["-dashboard"]).diagnostics.some(({ message }) => message.includes("Unknown option")));
+  const { session } = await createAgentSession({
+    cwd, agentDir, modelRuntime, model: faux.getModel(), settingsManager, resourceLoader,
+    sessionManager: SessionManager.inMemory(cwd), noTools: true,
+  });
+  for (const [name, value] of parsed.unknownFlags) session.extensionRunner.setFlagValue(name, value);
+  const errors = [];
+  let dashboard;
   try {
-    await bind();
-    await runtime.session.prompt("/chat");
-    const request = (url, path, body) => fetch(`${url.origin}${path}`, {
-      headers: { Authorization: `Bearer ${url.hash.slice(1)}`, Origin: url.origin, "Content-Type": "application/json" },
-      ...(body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }),
-      signal: AbortSignal.timeout(3000),
+    await session.bindExtensions({ mode: "tui", onError: (error) => errors.push(error) });
+    dashboard = new URL(await readFile(openLog, "utf8"));
+    const res = await fetch(`${dashboard.origin}/api/dashboard`, {
+      headers: { Authorization: `Bearer ${dashboard.hash.slice(1)}` }, signal: AbortSignal.timeout(3000),
     });
-    const startReplacement = async (url) => {
-      replacement = undefined;
-      assert.equal((await request(url, "/api/session/new", {})).status, 202);
-      for (let attempt = 0; !replacement && attempt < 30; attempt++) await delay(10);
-      assert.ok(replacement);
-      return replacement;
-    };
-    const replace = async (url) => {
-      assert.deepEqual(await startReplacement(url), { cancelled: false });
-      await assert.rejects(() => request(url, "/api/response"));
-      return links.at(-1);
-    };
-    const original = links[0];
-    assert.deepEqual(await startReplacement(original), { cancelled: true });
-    assert.equal((await request(original, "/api/response")).status, 200, "cancelled creation must not disconnect the current chat");
-    assert.equal(links.length, 1);
-    cancelNew = false;
-    const newChat = await replace(original);
-    assert.notEqual(newChat.origin, original.origin);
-    assert.equal(faux.state.callCount, 0, "opening an empty chat must not prompt the model");
-    const rename = await request(newChat, "/api/session/name", { name: "Replacement chat" });
-    assert.equal(rename.status, 200, JSON.stringify(await rename.clone().json()));
-    const sent = await request(newChat, "/api/chat", { requestId: "d4aa4e7e-ad4d-489c-8e11-141a766ae60c", text: "New chat prompt" });
-    assert.equal(sent.status, 200, JSON.stringify(await sent.clone().json()));
-    await runtime.session.waitForIdle();
-    const state = await (await request(newChat, "/api/response")).json();
-    assert.equal(state.sessionName, "Replacement chat");
-    assert.deepEqual(state.messages.map(({ role, text }) => [role, text.trim()]), [["user", "New chat prompt"], ["assistant", "Reply from the replacement session."]]);
-    assert.equal(faux.state.callCount, 1);
-    const next = await replace(newChat);
-    assert.notEqual(next.origin, newChat.origin);
-    assert.equal((await request(next, "/api/response")).status, 200);
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { projects: [cwd], sessions: [] });
+    assert.equal(faux.state.callCount, 0);
     assert.deepEqual(errors, []);
   } finally {
-    await runtime.dispose();
+    await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+    session.dispose();
   }
+  await assert.rejects(() => fetch(dashboard.origin, { signal: AbortSignal.timeout(3000) }));
 });
 
 test("installed Pi accepts a browser prompt before the model finishes, then exposes the reply", {
@@ -217,6 +196,7 @@ test("installed Pi accepts a browser prompt before the model finishes, then expo
     else process.env[AUTO_CHAT_SESSION] = previousTarget;
   });
   let link;
+  let dashboard;
   let finishReply;
   const replyGate = new Promise((resolve) => { finishReply = resolve; });
   let imagePrompt;
@@ -365,6 +345,23 @@ test("installed Pi accepts a browser prompt before the model finishes, then expo
     assert.equal(updated.current.name, catalog.current.name);
     assert.deepEqual(updated.sessions.map(({ id }) => id), [saved[1].manager.getSessionId()]);
     assert.equal((await get(`/api/session?${new URLSearchParams({ id })}`)).status, 404);
+    const dashboardLaunch = await fetch(`${url.origin}/api/dashboard/open`, { method: "POST", headers, body: "{}" });
+    assert.equal(dashboardLaunch.status, 200, await dashboardLaunch.clone().text());
+    dashboard = new URL(await readFile(openLog, "utf8"));
+    assert.notEqual(dashboard.origin, url.origin);
+    await session.prompt("/chat dashboard");
+    assert.equal(link, dashboard.href, "the command and explorer button share one dashboard server");
+    const dashboardState = () => fetch(`${dashboard.origin}/api/dashboard`, {
+      headers: { Authorization: `Bearer ${dashboard.hash.slice(1)}` }, signal: AbortSignal.timeout(3000),
+    });
+    const response = await dashboardState();
+    assert.equal(response.status, 200);
+    const { sessions } = await response.json();
+    assert.equal(sessions.find(({ id }) => id === sessionManager.getSessionId())?.status, "ready");
+    assert.equal(sessions.find(({ id }) => id === saved[1].manager.getSessionId())?.status, "saved");
+    await session.prompt("/chat close");
+    assert.equal((await dashboardState()).status, 200);
+    await assert.rejects(() => get("/api/response"));
     assert.equal(faux.state.callCount, 4);
     assert.deepEqual(errors, []);
   } finally {
@@ -373,4 +370,5 @@ test("installed Pi accepts a browser prompt before the model finishes, then expo
     await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
     session.dispose();
   }
+  if (dashboard) await assert.rejects(() => fetch(dashboard.origin, { signal: AbortSignal.timeout(3000) }));
 });

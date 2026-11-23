@@ -48,6 +48,7 @@ test("loopback app requires token for response, serves safe static assets", asyn
   const authorized = await fetch(`${f.base}/api/response`, { headers: f.headers });
   assert.equal((await authorized.json()).mode, "chat");
   for (const path of ["/app.js", "/style.css"]) assert.equal((await fetch(f.base + path)).status, 200);
+  assert.equal((await fetch(f.base + "/logo.png")).headers.get("content-type"), "image/png");
   assert.equal((await fetch(`${f.base}/not-a-file`, { headers: f.headers })).status, 404);
 });
 
@@ -184,6 +185,25 @@ test("terminal focus targets only the authenticated live chat's Pi process", asy
   current = false;
   assert.equal((await focus()).status, 410);
   assert.equal(calls, 1);
+});
+
+test("opening the dashboard accepts only the authenticated live chat and no browser target", async (t) => {
+  let current = true;
+  let launches = 0;
+  const f = await fixture(t, { isCurrent: () => current, chat: { openDashboard: async () => { launches++; } } });
+  const url = `${f.base}/api/dashboard/open`;
+  const open = (body = {}, headers = f.headers) => fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
+  assert.equal((await fetch(url, { headers: f.headers })).status, 404);
+  assert.equal((await open({}, {})).status, 401);
+  assert.equal((await open({}, { ...f.headers, Origin: "https://example.test" })).status, 403);
+  assert.equal((await open({ url: "https://example.test" })).status, 400);
+  assert.equal(launches, 0);
+  const response = await open();
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true }, "the dashboard bearer token stays out of the response");
+  current = false;
+  assert.equal((await open()).status, 410);
+  assert.equal(launches, 1);
 });
 
 test("chat protects the active transcript and validates quotes from each assistant message", async (t) => {
@@ -380,29 +400,13 @@ test("opening a saved chat requires the catalogued ID and refuses an active or p
   assert.deepEqual(launches, [saved]);
 });
 
-test("new-chat requests start a new session only after acknowledging the browser request", async (t) => {
-  const started = Promise.withResolvers();
-  const finish = Promise.withResolvers();
-  let count = 0;
-  const f = await fixture(t, { chat: {
-    getBranch: () => [], isIdle: () => true,
-    explorer: {
-      current: () => ({ id: "live", cwd: "/project" }), list: async () => [],
-      createNewSession: async () => { count++; started.resolve(); await finish.promise; },
-    },
-  } });
-  const create = (headers = f.headers) => fetch(`${f.base}/api/session/new`, { method: "POST", headers, body: "{}" });
+test("the live chat server no longer lets the explorer replace its Pi session", async (t) => {
+  const f = await fixture(t, { chat: { explorer: { current: () => ({ id: "live", cwd: "/project" }), list: async () => [] } } });
   const catalog = await (await fetch(`${f.base}/api/sessions`, { headers: f.headers })).json();
-  assert.equal(catalog.canCreateNewSession, true);
-  assert.equal((await create({ ...f.headers, Origin: "https://other.example" })).status, 403);
-  const accepted = await create();
-  assert.equal(accepted.status, 202);
-  assert.deepEqual(await accepted.json(), { ok: true });
-  await started.promise;
-  assert.equal((await create()).status, 409, "do not switch sessions twice while startup is pending");
-  finish.resolve();
-  for (let retry = 0; retry < 20 && count; retry++) await delay(5);
-  assert.equal(count, 1);
+  assert.equal(Object.hasOwn(catalog, "canCreateNewSession"), false);
+  const response = await fetch(`${f.base}/api/session/new`, { method: "POST", headers: f.headers, body: "{}" });
+  assert.equal(response.status, 404);
+  assert.equal((await fetch(`${f.base}/api/response`, { headers: f.headers })).status, 200);
 });
 
 test("separate browser chat servers discover active peers and remove them on disconnect", async (t) => {

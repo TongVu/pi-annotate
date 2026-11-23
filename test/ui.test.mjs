@@ -3,10 +3,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { JSDOM } from "jsdom";
 import { renderMarkdown } from "../src/markdown.ts";
+const logo = await readFile(new URL("../web/logo.png", import.meta.url));
 async function fixture(t, { chatFetch } = {}) {
   const html = await readFile(new URL("../web/index.html", import.meta.url), "utf8");
   const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
-  const dom = new JSDOM(html, { url: "http://127.0.0.1:12345/#test-token", runScripts: "outside-only" });
+  const dom = new JSDOM(html, { url: "http://127.0.0.1:12345/?tab=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#test-token", runScripts: "outside-only" });
   t.after(() => dom.window.close());
   const { window } = dom;
   const $ = (id) => window.document.getElementById(id);
@@ -16,6 +17,7 @@ async function fixture(t, { chatFetch } = {}) {
   const polls = [];
   if (chatFetch) window.setTimeout = (fn) => polls.push(fn);
   window.fetch = async (path, opts) => {
+    if (path === "/logo.png") return { ok: true, arrayBuffer: async () => logo };
     assert.equal(opts.headers.Authorization, "Bearer test-token");
     if (!chatFetch) throw new Error(`Unexpected chat request: ${path}`);
     return chatFetch(path, opts.body && JSON.parse(opts.body), opts);
@@ -65,6 +67,8 @@ test("chat dots jump to user turns; failed questions are kept, accepted question
     if (posts.length === 2) await accept.promise;
     return json({ ok: true });
   } });
+  assert.equal(f.window.location.hash, "", "remove the chat token from the URL");
+  assert.equal(f.window.location.search, "?tab=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "keep the dashboard tab locator");
   assert.equal(f.$("turns").children.length, 1);
   assert.equal(f.$("send").parentElement.id, "annotation-heading");
   assert.equal(f.$("send").title, "Send questions");
@@ -222,6 +226,7 @@ test("status icon distinguishes ready, working, stopped and disconnected", async
   assert.equal(indicator.dataset.state, "ready");
   assert.match(indicator.textContent, /ready for the next task/);
   const favicon = () => decodeURIComponent(f.$("app-favicon").href);
+  assert.ok(favicon().includes(`data:image/png;base64,${logo.toString("base64")}`), "the status badge is drawn over the supplied logo");
   assert.match(favicon(), /fill="#2f9b69"/);
   busy = true;
   await f.poll();
@@ -327,6 +332,32 @@ test("chat tab follows the Pi session name and moves chat controls out of the he
   assert.equal(f.window.document.title, "Pi Chat · ✓ Ready");
 });
 
+test("the explorer logo opens the dashboard without replacing the chat or its draft", async (t) => {
+  const calls = [];
+  const result = Promise.withResolvers();
+  const f = await fixture(t, { chatFetch: async (path, body) => {
+    if (path === "/api/dashboard/open") {
+      calls.push(body);
+      return result.promise;
+    }
+    assert.equal(path, "/api/response");
+    return { ok: true, json: async () => ({ mode: "chat", protocol: 2, messages: [], busy: false }) };
+  } });
+  const button = f.$("open-dashboard");
+  const original = f.window.location.href;
+  assert.equal(button.parentElement, f.$("project-view-controls"));
+  assert.equal(button.querySelector("img").getAttribute("src"), "/logo.png");
+  f.$("chat-input").value = "Keep my draft";
+  button.click();
+  assert.equal(button.disabled, true);
+  assert.deepEqual(calls, [{}]);
+  result.resolve({ ok: true, json: async () => ({ ok: true }) });
+  await tick();
+  assert.equal(button.disabled, false);
+  assert.equal(f.window.location.href, original);
+  assert.equal(f.$("chat-input").value, "Keep my draft");
+});
+
 test("the icon-only terminal button requests focus for the live chat and reports errors", async (t) => {
   const result = Promise.withResolvers();
   const requests = [];
@@ -426,11 +457,10 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
     if (path === "/api/activity") return { ok: true, json: async () => ({ sessions: [{ id: "a", name: "Earlier live work", cwd: "/work/alpha" }] }) };
     if (path === "/api/sessions") return { ok: true, json: async () => ({
       current: { id: "current", name: "Live chat", cwd: "/work/alpha", canClone: true },
-      canCreateNewSession: true,
       sessions: [{ id: "a", name: "Earlier live work", cwd: "/work/alpha", parentId: "current", canClone: true }, { id: "b", name: longTitle, cwd: "/work/beta" }],
     }) };
     if (path === "/api/session/resume?id=b") return { ok: true, json: async () => ({ command: "cd -- '/work/beta' && pi --session '/store/b.jsonl'" }) };
-    if (path === "/api/session/clone" || path === "/api/session/new") return { ok: true, json: async () => ({ ok: true }) };
+    if (path === "/api/session/clone") return { ok: true, json: async () => ({ ok: true }) };
     if (path === "/api/session?id=b") return { ok: true, json: async () => ({
       messages: [{ id: "r1", role: "assistant", ...renderMarkdown("**Saved reply**") }],
     }) };
@@ -471,13 +501,6 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.equal(live.textContent, "Live chat");
   assert.equal(live.dataset.currentChat, "true");
   assert.ok(live.parentElement.querySelector('.session-indicator.live[aria-label="Live session"]'));
-  const newChat = f.$("new-chat-session");
-  assert.equal(newChat.hidden, false);
-  assert.equal(newChat.textContent, "📝");
-  assert.equal(newChat.getAttribute("aria-label"), "New chat");
-  newChat.click();
-  await tick();
-  assert.ok(calls.includes("/api/session/new"));
   const clone = live.parentElement.querySelector(".session-clone");
   assert.equal(clone.textContent, "🧬");
   assert.equal(clone.getAttribute("aria-label"), "Clone chat session Live chat");
@@ -505,7 +528,7 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.ok(controls.parentElement.firstElementChild === controls, "view-mode pill replaces the old heading position");
   assert.equal(f.$("session-filter").getAttribute("aria-label"), "Search chats by name or directory");
   assert.ok(f.$("session-filter").closest(".session-search").querySelector('svg[aria-hidden="true"]'));
-  assert.deepEqual([...controls.querySelectorAll("button")].map((button) => button.getAttribute("aria-label")), ["New chat", "Collapse all", "Show current chat in explorer", "Expand all", "Refresh chats"]);
+  assert.deepEqual([...controls.querySelectorAll("button")].map((button) => button.getAttribute("aria-label")), ["Open chat dashboard", "Collapse all", "Show current chat in explorer", "Expand all", "Refresh chats"]);
   assert.ok(controls.querySelector('[data-action="show-current"] svg path'));
   assert.ok(controls.querySelector('[data-action="show-current"] svg circle'));
   assert.equal(controls.querySelectorAll('svg[aria-hidden="true"]').length, 4);

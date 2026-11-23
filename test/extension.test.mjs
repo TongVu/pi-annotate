@@ -1,17 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { registerChatExtension } from "../src/index.ts";
+import { AUTO_CHAT_SESSION, NEW_CHAT_TARGET } from "../src/resume-chat.ts";
 
-function fixture(t, { newSession = async () => ({ cancelled: false }), launchPage = async () => {} } = {}) {
+function fixture(t, { dashboard = false, launchPage = async () => {} } = {}) {
   const handlers = new Map();
   const commands = new Map();
+  const flags = new Map();
   const notices = [];
   registerChatExtension({
     on: (event, callback) => handlers.set(event, callback),
     registerCommand: (name, options) => commands.set(name, options),
+    registerFlag: (name, options) => flags.set(name, options),
+    getFlag: (name) => name === "dashboard" && dashboard,
     setSessionName: () => {},
     getSettings: () => ({}),
     sendUserMessage: () => {},
@@ -28,10 +29,9 @@ function fixture(t, { newSession = async () => ({ cancelled: false }), launchPag
       getCwd: () => process.cwd(),
       getSessionFile: () => undefined,
     },
-    newSession,
     ui: { notify: (message) => notices.push(message) },
   };
-  return { handlers, notices, ctx, commands, run: (args = "link") => commands.get("chat").handler(args, ctx) };
+  return { handlers, notices, ctx, commands, flags, run: (args = "link") => commands.get("chat").handler(args, ctx) };
 }
 
 function openedUrl(notices) {
@@ -41,7 +41,8 @@ function openedUrl(notices) {
 test("/chat is the sole registered browser command and opens a live session", async (t) => {
   const f = fixture(t);
   assert.deepEqual([...f.commands.keys()], ["chat"]);
-  assert.deepEqual(f.commands.get("chat").getArgumentCompletions("").map(({ value }) => value), ["link", "close"]);
+  assert.equal(f.flags.get("dashboard").type, "boolean");
+  assert.deepEqual(f.commands.get("chat").getArgumentCompletions("").map(({ value }) => value), ["link", "close", "dashboard"]);
   await f.run();
   const url = openedUrl(f.notices);
   const response = await fetch(`${url.origin}/api/response`, { headers: { Authorization: `Bearer ${url.hash.slice(1)}` } });
@@ -50,37 +51,30 @@ test("/chat is the sole registered browser command and opens a live session", as
   await assert.rejects(() => fetch(url.origin));
 });
 
-test("new chat from the browser replaces the current Pi session and opens its new chat page", async (t) => {
-  const sessionDir = await mkdtemp(join(tmpdir(), "pi-chat-new-session-"));
-  t.after(() => rm(sessionDir, { recursive: true, force: true }));
+test("--dashboard does not launch a browser from non-interactive Pi", async (t) => {
+  const f = fixture(t, { dashboard: true, launchPage: async () => assert.fail("unexpected browser launch") });
+  f.ctx.mode = "print";
+  await f.handlers.get("session_start")({ reason: "startup" }, f.ctx);
+  assert.deepEqual(f.notices, []);
+});
+
+test("a fresh Pi launched by the dashboard opens an empty browser chat on startup", async (t) => {
+  const previous = process.env[AUTO_CHAT_SESSION];
+  process.env[AUTO_CHAT_SESSION] = NEW_CHAT_TARGET;
+  t.after(() => {
+    if (previous === undefined) delete process.env[AUTO_CHAT_SESSION];
+    else process.env[AUTO_CHAT_SESSION] = previous;
+  });
   const opened = [];
-  const replacement = fixture(t, { launchPage: async (url) => opened.push(url) });
-  replacement.ctx.sessionManager.getSessionId = () => "session-2";
-  replacement.ctx.sessionManager.getSessionDir = () => sessionDir;
-  const f = fixture(t, {
-    newSession: async ({ withSession }) => {
-      await f.handlers.get("session_shutdown")();
-      await replacement.handlers.get("session_start")({ reason: "new" }, replacement.ctx);
-      await withSession(replacement.ctx);
-      return { cancelled: false };
-    },
-  });
-  f.ctx.sessionManager.getSessionDir = () => sessionDir;
-  await f.run("link");
-  const url = openedUrl(f.notices);
-  const accepted = await fetch(`${url.origin}/api/session/new`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${url.hash.slice(1)}`, Origin: url.origin, "Content-Type": "application/json" },
-    body: "{}",
-  });
-  assert.equal(accepted.status, 202);
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  const f = fixture(t, { launchPage: async (url) => opened.push(url) });
+  await f.handlers.get("session_start")({ reason: "startup" }, f.ctx);
+  assert.equal(process.env[AUTO_CHAT_SESSION], undefined);
   assert.equal(opened.length, 1);
-  const next = new URL(opened[0]);
-  assert.notEqual(next.origin, url.origin);
-  await assert.rejects(() => fetch(url.origin));
-  const state = await fetch(`${next.origin}/api/response`, { headers: { Authorization: `Bearer ${next.hash.slice(1)}` } });
-  assert.equal((await state.json()).sessionId, "session-2");
+  const url = new URL(opened[0]);
+  const res = await fetch(`${url.origin}/api/response`, { headers: { Authorization: `Bearer ${url.hash.slice(1)}` } });
+  const chat = await res.json();
+  assert.equal(chat.sessionId, "session-1");
+  assert.deepEqual(chat.messages, []);
 });
 
 test("/chat rejects unsupported modes and non-TUI contexts", async (t) => {

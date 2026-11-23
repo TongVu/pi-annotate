@@ -1,7 +1,7 @@
 # Pi Chat
 
-A local Pi extension for chatting and asking questions about passages in assistant
-replies. Use `/chat` to talk directly to the current Pi session and annotate replies.
+A local Pi extension for managing chat sessions by project, chatting in the
+browser, and asking questions about passages in assistant replies.
 
 ## Try it
 
@@ -12,21 +12,24 @@ root, install the local Markdown-rendering dependencies once:
 npm ci --omit=dev --ignore-scripts --legacy-peer-deps
 ```
 
-Then exit Pi and run this **from the project whose chat you want to continue**:
+Install the local extension once, then open the dashboard:
 
 ```sh
-pi --continue --extension /path/to/pi-chat/src/index.ts
+pi install /path/to/pi-chat
+pi --dashboard
 ```
 
-Replace `/path/to/pi-chat` with your checkout's absolute path. Run Pi from the
-project whose chat you want to resume, not from the extension checkout; Pi groups
-sessions by working directory. Both regular and fullscreen terminal modes work.
+Replace `/path/to/pi-chat` with your checkout's absolute path. To try it without
+installing, run `pi --extension /path/to/pi-chat/src/index.ts --dashboard`.
+Run the dashboard from a project directory if you want to start its first chat.
+Keep the Pi terminal that opened the dashboard running. Both regular and
+fullscreen terminal modes work.
 
 ### Live browser chat
 
-1. Run `/chat` in the Pi session you want to use. Use `/chat link` if you prefer to
-   open the link yourself. You can start from an empty session. If the session
-   has a name, it appears in the browser tab.
+1. Open or create a chat from the dashboard. To attach directly to an
+   already-running Pi session, run `/chat` in its terminal, or use `/chat link`
+   to open the link yourself. A named session appears by name in its browser tab.
 2. Type a message in the bottom composer, or select text in a Pi reply and click
    **Add annotation** to write a question. You can also copy the selected text
    normally without opening the dialog. Keep reusable Markdown in the right-panel note;
@@ -75,12 +78,44 @@ in the browser; retrying the unchanged send checks the same request rather than
 starting another turn. If Pi never confirms it, check the terminal and reopen the
 chat before sending again. Live chat was verified with Pi 1.5.2.
 
+### Chat dashboard
+
+Run `pi --dashboard` from your shell. From a running Pi session, `/chat dashboard`
+or the logo in the explorer controls opens the dashboard without losing a chat draft.
+The sidebar groups sessions by their original project directory. Filter by
+**Name or directory** to narrow the sidebar, cards, and counts. **All sessions**
+shows every group; **Needs attention** shows connected chats that are ready for
+input or whose last turn stopped. Its status counts still include all matching
+chats. Pulsing amber and green dots mark working and ready chats, respectively.
+Status updates even when the chat tab is in the background.
+
+- **Go to tab** on macOS switches to the existing tab in Chrome or Safari without
+  reloading it or discarding its draft. macOS may ask for Automation permission.
+  On unsupported browsers or when the tab can't be found, select it manually;
+  the dashboard never opens a replacement for a connected chat.
+- **Reopen chat** asks the running Pi session to open a fresh tab. It does not
+  start a second Pi or interrupt an ongoing turn.
+- **Resume chat** starts the saved session in its original project via Terminal
+  on macOS. On other platforms, copy the resume command, then run `/chat` in Pi.
+- **Create new chat** asks you to choose a dashboard project, including the one
+  you launched the dashboard from, even if it has no chats yet. On macOS
+  it starts a fresh Pi in that directory and opens its chat in a new tab, leaving
+  existing chats and drafts alone. On other platforms, copy the start command,
+  then run `/chat` in Pi.
+
+The dashboard lists saved sessions in Pi's default store and this Pi's custom
+store, if any, plus chats advertised by other running Pi instances using the
+same agent directory. Reload older Pi instances and reopen their chat pages to
+publish the new status and tab locator. The dashboard has its own local server:
+`/chat close` closes only the chat tab's connection, but exiting or replacing the
+Pi session that opened the dashboard (including `/reload`) closes the dashboard
+server too.
+
 ### Chat explorer
 
-Click the sidebar icon in `/chat` to open the left explorer. Click 📝 in the
-control group to start a new Pi session in the current project; this replaces the
-active session in the current Pi process and opens its browser chat. Sessions are
-grouped by project directory, with forked sessions nested under their Pi parent session
+Click the sidebar icon in a live chat to open the left explorer. To create a
+session, use **Create new chat** on the dashboard. The explorer groups sessions by
+project directory, with forked sessions nested under their Pi parent session
 when that parent is available. Click a project heading to collapse or expand its
 sessions. Type a session name or directory to filter the list; matches appear
 even in collapsed projects. Use **Collapse all** or **Expand all** to change
@@ -110,15 +145,9 @@ not message bodies.
 the current browser page. `/reload` reloads extension source changes and disconnects
 old pages; finish unsent drafts first, then open a new page.
 
-To load it in future chats, optionally install this local package yourself:
-
-```sh
-pi install /path/to/pi-chat
-```
-
-Then use `/reload` in an existing session. Installation adds the local package to
-Pi settings; it does not publish anything. Remove it with
-`pi remove /path/to/pi-chat`.
+After installing, use `/reload` in existing sessions to load the extension.
+`pi install` adds the local package to Pi settings; it does not publish anything.
+Remove it with `pi remove /path/to/pi-chat`.
 
 If you cloned the repository under its former name, you can keep the existing
 checkout and Pi installation path. To point Git at the new repository URL, run
@@ -156,7 +185,7 @@ not require clipboard access or access to Pi's private transcript selection.
   link carries it in a URL fragment; the page removes the fragment from the address
   bar/history after reading it. Do not share the link.
 - Host and Origin checks prevent cross-origin/rebinding requests. No CORS, external
-  assets, browser automation, or third-party services are used by the browser page. A CSP
+  assets, or third-party services are used by the browser pages. A CSP
   blocks external resources and embedding. Markdown parsing uses local `marked`
   and `parse5` dependencies; no CDN is contacted. Only generated Markdown HTML is
   inserted into the page; original raw HTML and comments are never inserted as
@@ -181,8 +210,14 @@ not require clipboard access or access to Pi's private transcript selection.
   **Resume in browser** is a separate, authenticated action that only launches
   already-listed sessions. Open `/chat` tabs are detected through local presence
   markers under the Pi agent directory. A private local Unix socket lets a running
-  Pi session open its own browser tab. Discovery does not share browser URLs or
-  access tokens with other sessions.
+  Pi session open its own browser tab. Live markers hold status and a random,
+  non-secret loopback tab locator, never a bearer token. The locator is not returned
+  to dashboard or chat pages. On macOS, the user-triggered **Go to tab** action uses
+  the browser's native Automation support to select an exact matching tab; it
+  never navigates or reloads that tab.
+- The dashboard uses a separate bearer token and shows local session names, first
+  message previews, project directories, and statuses. Its API doesn't expose
+  full transcripts or accept messages for Pi.
 - Selected files are sent to Pi only when you send the message. Pi receives text
   files inline with their names and images as normal image inputs.
 - Opening a local chat page does not modify Pi's MCP/browser allowlist or
@@ -237,3 +272,9 @@ several text files and screenshots and check that Pi receives all of them. Send 
 annotation batch and check that the right panel clears. Try a narrow browser
 window and check that closing the tab disconnects its link. Real keyboard
 selection support depends on browser caret browsing.
+
+For the dashboard, open two chats and leave an unsent draft in one. Run
+`/chat dashboard`, send from the other chat, and check that its dot pulses and
+then turns green. Use **Go to tab** and verify the existing draft is unchanged.
+Close that chat tab, then use **Reopen chat** from the dashboard and check that
+Pi opens a fresh tab without starting another terminal session.

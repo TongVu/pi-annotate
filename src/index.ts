@@ -2,28 +2,20 @@ import { spawn } from "node:child_process";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { startChatServer } from "./server.ts";
 import { createChatNoteStore } from "./chat-notes.ts";
 import { listPiSessions, readPiSession } from "./session-explorer.ts";
 import { createChatPresence } from "./chat-presence.ts";
-import { AUTO_CHAT_SESSION, forkChatInTerminal, resumeChatInTerminal } from "./resume-chat.ts";
+import { AUTO_CHAT_SESSION, NEW_CHAT_TARGET, forkChatInTerminal, resumeChatInTerminal, startNewChatInTerminal } from "./resume-chat.ts";
 import { registerSessionOwner, requestOwnedChat } from "./session-owner.ts";
 import { focusTerminal } from "./focus-terminal.ts";
-
-// Pi reloads the extension factory on replacement. Hand off by the fresh session
-// manager, without reusing the outgoing factory's API or event handlers.
-const replacementKey = Symbol.for("pi-chat.replacement-openers");
-const processState = globalThis as typeof globalThis & {
-  [replacementKey]?: WeakMap<ExtensionContext["sessionManager"], (ctx: ExtensionCommandContext) => Promise<unknown>>;
-};
-const replacementOpeners = processState[replacementKey] ??= new WeakMap();
+import { startDashboard } from "./dashboard.ts";
 
 // Keep the existing registry names so running Pi processes can still discover each other.
-async function ownerRegistry() {
-  const { getAgentDir } = await import("@earendil-works/pi-coding-agent");
-  return join(getAgentDir(), "pi-annotate-owners");
-}
+const ownerRegistry = (agentDir: string) => join(agentDir, "pi-annotate-owners");
+const presenceRegistry = (agentDir: string) => join(agentDir, "pi-annotate-live");
+const agentDirPath = async () => (await import("@earendil-works/pi-coding-agent")).getAgentDir();
 
 function openPage(url: string): Promise<void> {
   const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "rundll32" : "xdg-open";
@@ -40,7 +32,9 @@ export default function piChat(pi: ExtensionAPI) {
 }
 
 export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string) => Promise<void>) {
+  pi.registerFlag("dashboard", { type: "boolean", default: false, description: "Open the Pi Chat dashboard at startup" });
   let active: Awaited<ReturnType<typeof startChatServer>> | undefined;
+  let dashboard: ReturnType<typeof startDashboard> | undefined;
   let closeOwner: (() => Promise<void>) | undefined;
   let ownerGeneration = 0;
   let generation = 0;
@@ -60,15 +54,52 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
     ownerGeneration++;
     const close = closeOwner;
     closeOwner = undefined;
-    await close?.();
+    const closing = dashboard;
+    dashboard = undefined;
+    await Promise.all([close?.(), closing?.then((opened) => opened.close(), () => {})]);
   });
   pi.on("session_before_fork", stop);
   pi.on("session_before_tree", stop);
 
-  const runChatPage = async (args: string, ctx: ExtensionContext, commandContext?: ExtensionCommandContext) => {
+  const openDashboard = async (ctx: ExtensionContext, terminal = false) => {
+    const sessionDir = ctx.sessionManager.getSessionDir();
+    const project = ctx.sessionManager.getCwd();
+    const pending = dashboard ??= agentDirPath().then((agentDir) => startDashboard({
+      list: () => listPiSessions(sessionDir),
+      project,
+      presenceDir: presenceRegistry(agentDir),
+      ownerDir: ownerRegistry(agentDir),
+      ...(process.platform === "darwin" ? {
+        resume: (session) => resumeChatInTerminal(session, fileURLToPath(import.meta.url), agentDir),
+        createChat: (cwd) => startNewChatInTerminal(cwd, fileURLToPath(import.meta.url), agentDir),
+      } : {}),
+    }));
+    const opened = await pending.catch((error) => {
+      if (dashboard === pending) dashboard = undefined;
+      throw error;
+    });
+    if (dashboard !== pending) throw new Error("The Pi session changed. Run /chat dashboard again.");
+    if (terminal) ctx.ui.notify(`Local chat dashboard: ${opened.url}`, "info");
+    try { await launchPage(opened.url); }
+    catch { throw new Error("Could not launch a browser. Run /chat dashboard in Pi to get the local link."); }
+  };
+
+  const showDashboardInTerminal = async (ctx: ExtensionContext) => {
+    try {
+      await openDashboard(ctx, true);
+    } catch (error) {
+      ctx.ui.notify(`Could not open dashboard: ${error instanceof Error ? error.message : String(error)}`, "error");
+    }
+  };
+
+  const runChatPage = async (args: string, ctx: ExtensionContext) => {
     const mode = args.trim();
     if (ctx.mode !== "tui") {
       ctx.ui.notify("/chat requires Pi's terminal UI.", "warning");
+      return;
+    }
+    if (mode === "dashboard") {
+      await showDashboardInTerminal(ctx);
       return;
     }
     if (mode === "close") {
@@ -77,7 +108,7 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
       return;
     }
     if (mode && mode !== "link") {
-      ctx.ui.notify("Usage: /chat [link | close]", "warning");
+      ctx.ui.notify("Usage: /chat [link | close | dashboard]", "warning");
       return;
     }
     const branch = ctx.sessionManager.getBranch();
@@ -106,40 +137,22 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
           getSessionName: () => ctx.sessionManager.getSessionName(),
           setSessionName: (sessionName: string) => pi.setSessionName(sessionName),
           focusTerminal,
-          presence: createChatPresence(async () => {
-            const { getAgentDir } = await import("@earendil-works/pi-coding-agent");
-            return join(getAgentDir(), "pi-annotate-live");
-          }, () => {
+          openDashboard: () => openDashboard(ctx),
+          presence: createChatPresence(async () => presenceRegistry(await agentDirPath()), () => {
             const { id, cwd, name } = chatIdentity();
             return { id, cwd, name };
           }),
           explorer: {
             current: chatIdentity,
-            ...(commandContext ? { createNewSession: async () => {
-              try {
-                const result = await commandContext.newSession({
-                  withSession: async (newContext) => {
-                    const manager = newContext.sessionManager;
-                    const open = replacementOpeners.get(manager);
-                    replacementOpeners.delete(manager);
-                    if (open) await open(newContext);
-                    else newContext.ui.notify("Could not open the new browser chat. Run /chat in Pi.", "warning");
-                  },
-                });
-                if (result.cancelled) ctx.ui.notify("New chat cancelled.", "info");
-              } catch (error) {
-                if (generation === currentGeneration) ctx.ui.notify(`Could not start a new chat: ${error instanceof Error ? error.message : String(error)}`, "error");
-              }
-            } } : {}),
             list: () => listPiSessions(ctx.sessionManager.getSessionDir()),
             read: readPiSession,
             ...(process.platform === "darwin" ? {
               launch: async (session) => {
-                const outcome = await requestOwnedChat(await ownerRegistry(), session.id);
+                const agentDir = await agentDirPath();
+                const outcome = await requestOwnedChat(ownerRegistry(agentDir), session.id);
                 if (outcome === "attached" || outcome === "already-open") return outcome;
                 if (outcome === "unavailable") throw new Error("This session is open in Pi but could not open a browser tab. Run /chat in its Terminal; no second Pi was started.");
-                const { getAgentDir } = await import("@earendil-works/pi-coding-agent");
-                await resumeChatInTerminal(session, fileURLToPath(import.meta.url), getAgentDir());
+                await resumeChatInTerminal(session, fileURLToPath(import.meta.url), agentDir);
                 return "launched";
               },
               clone: async (session) => {
@@ -180,8 +193,10 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
   };
 
   pi.on("session_start", async (event, ctx) => {
-    if (event.reason === "new" && ctx.mode === "tui") {
-      replacementOpeners.set(ctx.sessionManager, (newContext) => runChatPage("", newContext, newContext));
+    if (event.reason === "startup" && pi.getFlag("dashboard") === true) {
+      if (ctx.mode === "tui") await showDashboardInTerminal(ctx);
+      // An empty launcher isn't a disconnected chat.
+      if (!ctx.sessionManager.getBranch().some(({ type }) => type === "message")) return;
     }
     if (ctx.mode === "tui" && process.platform !== "win32") {
       const owner = ++ownerGeneration;
@@ -191,7 +206,9 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
       try {
         await previousOwner?.();
         if (owner !== ownerGeneration) return;
-        const close = await registerSessionOwner(await ownerRegistry(), id, async () => {
+        const close = await registerSessionOwner(ownerRegistry(await agentDirPath()), {
+          id, cwd: ctx.sessionManager.getCwd(), name: ctx.sessionManager.getSessionName(),
+        }, async () => {
           if (owner !== ownerGeneration || ctx.sessionManager.getSessionId() !== id) return "unavailable";
           if (active) return "already-open";
           return await runChatPage("", ctx) ? "attached" : "unavailable";
@@ -203,19 +220,21 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
     const target = process.env[AUTO_CHAT_SESSION];
     if (!target || !["startup", "resume", "fork"].includes(event.reason)) return;
     delete process.env[AUTO_CHAT_SESSION];
-    if ((target === ctx.sessionManager.getSessionId() || target === "fork") && ctx.mode === "tui") await runChatPage("", ctx);
+    const fresh = target === NEW_CHAT_TARGET && event.reason === "startup";
+    if ((fresh || target === ctx.sessionManager.getSessionId() || target === "fork") && ctx.mode === "tui") await runChatPage("", ctx);
   });
 
   const complete = (prefix: string) => {
     const options = [
       { value: "link", label: "link", description: "Show the link without opening the browser" },
       { value: "close", label: "close", description: "Disconnect the current page" },
+      { value: "dashboard", label: "dashboard", description: "Open the dashboard for all chats" },
     ].filter(({ value }) => value.startsWith(prefix));
     return options.length ? options : null;
   };
   pi.registerCommand("chat", {
-    description: "Open the current Pi session as a live browser chat",
+    description: "Open a browser chat for this Pi session directly",
     getArgumentCompletions: complete,
-    handler: async (args, ctx) => { await runChatPage(args, ctx, ctx); },
+    handler: runChatPage,
   });
 }

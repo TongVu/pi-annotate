@@ -24,7 +24,7 @@
   },
   "scripts": {
     "test": "node --test test/*.test.mjs",
-    "check": "node --check src/server.ts && node --check src/annotations.ts && node --check src/markdown.ts && node --check src/chat-notes.ts && node --check web/app.js && npm test"
+    "check": "node --check src/server.ts && node --check src/annotations.ts && node --check src/markdown.ts && node --check src/chat-notes.ts && node --check src/dashboard.ts && node --check src/focus-browser.ts && node --check web/app.js && node --check web/dashboard.js && npm test"
   },
   "devDependencies": {
     "jsdom": "27.2.0"

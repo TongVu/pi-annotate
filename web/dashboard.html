@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chat Dashboard · Pi Chat</title>
+  <link rel="icon" href="/favicon.ico">
+  <link rel="stylesheet" href="/dashboard.css">
+  <script src="/dashboard.js" defer></script>
+</head>
+<body>
+  <div class="app">
+    <aside class="side" aria-label="Chat navigation">
+      <div class="brand"><img src="/logo.png" width="24" height="24" alt="">Projects</div>
+      <nav id="projects" aria-label="Projects"></nav>
+      <div class="label">Views</div>
+      <nav aria-label="Views">
+        <button class="nav-item" type="button" data-view="all" aria-current="true">All sessions</button>
+        <button class="nav-item" type="button" data-view="attention">Needs attention</button>
+      </nav>
+    </aside>
+    <main class="main">
+      <header class="top">
+        <div>
+          <h1 id="heading">All sessions</h1>
+          <p id="directory" class="directory" hidden></p>
+          <p id="summary" class="sub">Loading Pi sessions…</p>
+        </div>
+        <div class="dashboard-tools">
+          <input id="session-filter" type="search" aria-label="Filter sessions by name or directory" placeholder="Name or directory" autocomplete="off">
+          <button class="accent" id="refresh" type="button">Refresh</button>
+          <button class="accent" id="create-chat" type="button" aria-haspopup="dialog" disabled>Create new chat</button>
+        </div>
+      </header>
+      <div id="stats" class="stats" aria-label="Session counts"></div>
+      <div id="notice" class="notice" hidden>
+        <p id="message" role="status"></p>
+        <div id="manual" hidden>
+          <label for="command">Run this in Terminal, then run /chat in Pi</label>
+          <input id="command" readonly>
+          <button id="copy" class="accent" type="button">Copy</button>
+        </div>
+        <button id="dismiss" class="dismiss" type="button" aria-label="Dismiss message">×</button>
+      </div>
+      <div id="sessions"></div>
+      <footer id="legend" class="legend" aria-label="Status legend"></footer>
+    </main>
+  </div>
+  <dialog id="new-chat-dialog" aria-labelledby="new-chat-heading">
+    <form id="new-chat-form" method="dialog">
+      <h2 id="new-chat-heading">Create new chat</h2>
+      <label for="new-chat-project">Which project should the chat be in?</label>
+      <select id="new-chat-project" required autofocus></select>
+      <p id="new-chat-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button id="cancel-new-chat" type="button">Cancel</button>
+        <button class="accent" id="submit-new-chat" type="submit">Create chat</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>
