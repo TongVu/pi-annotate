@@ -48,7 +48,7 @@ test("Pi reload picks up changed local helper modules in the same process for /c
     extension = loaded.extensions[0];
     let link;
     await extension.commands.get("chat").handler("link", {
-      mode: "tui", isIdle: () => true,
+      mode: "tui", isIdle: () => true, getContextUsage: () => undefined,
       sessionManager: {
         getSessionId: () => "reload-session",
         getSessionName: () => undefined,
@@ -166,7 +166,7 @@ test("installed Pi accepts a browser prompt before the model finishes, then expo
   const modelRuntime = await ModelRuntime.create({ authPath: join(cwd, "auth.json"), modelsPath: join(cwd, "models.json") });
   modelRuntime.registerNativeProvider(faux.provider);
   const model = faux.getModel();
-  const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false } });
+  const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false, keepRecentTokens: 1 } });
   const extensionPath = fileURLToPath(new URL("../src/index.ts", import.meta.url));
   const adapter = join(cwd, "test-chat-launch.ts");
   const openLog = join(cwd, "browser-url");
@@ -237,9 +237,14 @@ test("installed Pi accepts a browser prompt before the model finishes, then expo
     const rename = (name) => fetch(`${url.origin}/api/session/name`, {
       method: "POST", headers, body: JSON.stringify({ name }),
     });
+    const compact = () => fetch(`${url.origin}/api/session/compact`, {
+      method: "POST", headers, body: "{}", signal: AbortSignal.timeout(3000),
+    });
+    assert.equal((await state()).canCompact, false);
     assert.equal((await send({ requestId: "e126ac9d-7780-4853-8de2-5d6d0a869093", text: "/literal question" })).status, 200, JSON.stringify(errors));
     const working = await state();
     assert.equal(working.busy, true);
+    assert.equal((await compact()).status, 409);
     assert.equal(working.sessionName, "Live browser chat feature");
     assert.deepEqual(working.messages.map(({ role, text }) => [role, text]), [["user", "Transformed: /literal question\n"]]);
     const renamed = await rename("Browser-renamed session");
@@ -359,10 +364,22 @@ test("installed Pi accepts a browser prompt before the model finishes, then expo
     const { sessions } = await response.json();
     assert.equal(sessions.find(({ id }) => id === sessionManager.getSessionId())?.status, "ready");
     assert.equal(sessions.find(({ id }) => id === saved[1].manager.getSessionId())?.status, "saved");
+    assert.equal(faux.state.callCount, 4);
+    const beforeCompaction = await state();
+    assert.equal(beforeCompaction.canCompact, true);
+    assert.ok(beforeCompaction.contextUsage.tokens > 0);
+    assert.equal(beforeCompaction.contextUsage.contextWindow, model.contextWindow);
+    faux.setResponses(Array.from({ length: 2 }, () => fauxAssistantMessage("Summary of the earlier conversation.")));
+    const compacted = await compact();
+    assert.equal(compacted.status, 200, await compacted.clone().text());
+    assert.match(sessionManager.getBranch().at(-1).summary, /Summary of the earlier conversation/);
+    const afterCompaction = await state();
+    assert.notEqual(afterCompaction.cursor, beforeCompaction.cursor);
+    assert.deepEqual(afterCompaction.messages, beforeCompaction.messages);
+    assert.equal(afterCompaction.contextUsage.tokens, null);
     await session.prompt("/chat close");
     assert.equal((await dashboardState()).status, 200);
     await assert.rejects(() => get("/api/response"));
-    assert.equal(faux.state.callCount, 4);
     assert.deepEqual(errors, []);
   } finally {
     finishReply();

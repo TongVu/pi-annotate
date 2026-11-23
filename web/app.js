@@ -16,6 +16,11 @@ let annotationFiles = [];
 let readingAnnotationFiles = false;
 const chatInput = $("chat-input");
 const chatFile = $("chat-file");
+const contextButton = $("chat-context");
+const contextDetails = $("chat-context-details");
+const compactButton = $("chat-compact");
+const compactDialog = $("compact-chat-dialog");
+const confirmCompact = $("confirm-chat-compact");
 const chatNote = $("chat-note");
 const chatNoteDialog = $("chat-note-dialog");
 const chatNoteInput = $("chat-note-input");
@@ -58,6 +63,8 @@ let savedSessionId;
 let savedSelection = 0;
 let liveScroll;
 let busy = false;
+let compactAvailable = false;
+let compacting = false;
 let failed = false;
 let connected = true;
 let acceptedSends = 0;
@@ -174,7 +181,7 @@ function isRetry(body) {
 }
 
 function canSend(body) {
-  return !savedSessionId && !sending && connected && (!busy || isRetry(body));
+  return !savedSessionId && !sending && !compacting && connected && (!busy || isRetry(body));
 }
 
 function composerBody() {
@@ -185,6 +192,7 @@ function updateButtons() {
   send.disabled = !annotations.length || !canSend({ annotations });
   const body = composerBody();
   $("chat-send").disabled = (!body.text && !body.attachments) || readingFiles || !canSend(body);
+  compactButton.disabled = confirmCompact.disabled = !compactAvailable || !connected || busy || sending || compacting || !!savedSessionId;
   $("chat-attach").disabled = sending || readingFiles;
   for (const button of $("chat-attachments").querySelectorAll("button")) button.disabled = sending || readingFiles;
   $("comment-attach").disabled = sending || readingAnnotationFiles;
@@ -656,6 +664,56 @@ send.addEventListener("click", async () => {
   if (!annotations.length || !canSend({ annotations })) return;
   await sendChat({ annotations });
 });
+function showContextDetails(open) {
+  contextDetails.hidden = !open;
+  contextButton.setAttribute("aria-expanded", String(open));
+}
+
+function updateContextUsage(usage) {
+  const { tokens, contextWindow, percent } = usage ?? {};
+  const known = Number.isFinite(tokens) && Number.isFinite(percent);
+  const percentage = known ? `${percent.toLocaleString(undefined, { maximumFractionDigits: 1 })}%` : "";
+  const label = known ? `Context usage: ${percentage}` : "Context usage";
+  contextButton.title = label;
+  contextButton.setAttribute("aria-label", label);
+  $("chat-context-ring").setAttribute("stroke-dasharray", `${known ? Math.min(100, Math.max(0, percent)) : 0} 100`);
+  $("chat-context-usage").textContent = known
+    ? `Estimated ${tokens.toLocaleString()} of ${contextWindow.toLocaleString()} tokens used (${percentage}).`
+    : contextWindow ? `Model limit: ${contextWindow.toLocaleString()} tokens. Usage is unavailable until the next reply.`
+    : "Context usage is unavailable.";
+}
+
+contextButton.addEventListener("click", () => showContextDetails(contextDetails.hidden));
+document.addEventListener("pointerdown", (event) => {
+  if (!contextDetails.hidden && !contextDetails.contains(event.target) && !contextButton.contains(event.target)) showContextDetails(false);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !contextDetails.hidden) showContextDetails(false);
+});
+compactButton.addEventListener("click", () => {
+  showContextDetails(false);
+  compactDialog.showModal();
+});
+$("cancel-chat-compact").addEventListener("click", () => compactDialog.close());
+confirmCompact.addEventListener("click", async () => {
+  if (!compactDialog.open || confirmCompact.disabled) return;
+  compactDialog.close();
+  compacting = true;
+  status("Compacting chat…");
+  updateChatState();
+  updateButtons();
+  try {
+    await api("/api/session/compact", {});
+    status("Chat compacted.");
+  } catch (error) {
+    status(error.message || "Could not compact this chat.", true);
+  } finally {
+    compacting = false;
+    updateChatState();
+    updateButtons();
+  }
+});
+
 function markCurrentDot(dot) {
   if (currentDot === dot) return;
   currentDot?.removeAttribute("aria-current");
@@ -757,7 +815,7 @@ function updateFaviconStatus(state) {
 }
 
 function updateChatState() {
-  const state = !connected ? "disconnected" : sending || busy ? "working" : failed ? "stopped" : "ready";
+  const state = !connected ? "disconnected" : sending || busy || compacting ? "working" : failed ? "stopped" : "ready";
   const indicator = $("chat-state");
   if (indicator.dataset.state === state) return;
   indicator.dataset.state = state;
@@ -890,7 +948,9 @@ function updateChat(data) {
   cursor = data.cursor;
   busy = data.busy;
   failed = data.failed;
+  compactAvailable = data.canCompact === true;
   connected = true;
+  updateContextUsage(data.contextUsage);
   updateChatState();
   updateButtons();
 }
@@ -1335,7 +1395,7 @@ function startChat(data) {
   chatNote.hidden = false;
   loadChatNote(data.sessionId);
   $("page-intro").hidden = true;
-  document.querySelector(".chat-composer .actions").prepend($("chat-state"), $("status"));
+  $("chat-state").after($("status"));
   $("conversation").setAttribute("aria-label", "Conversation");
   $("conversation-label").hidden = true;
   for (const id of ["chat-rail", "turns", "chat-form", "chat-state", "explorer-toggle"]) $(id).hidden = false;
@@ -1367,6 +1427,7 @@ function startChat(data) {
     } catch (error) {
       const wasConnected = connected;
       connected = false;
+      updateContextUsage();
       if (wasConnected) renderSessionList();
       updateChatState();
       updateButtons();

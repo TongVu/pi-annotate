@@ -47,6 +47,8 @@ fullscreen terminal modes work.
    pulses amber while Pi is working and green when it's ready. Replies aren't streamed
    token by token. If Pi needs an approval or other interactive input, use the terminal.
 
+Click the **Context usage** ring in the composer to see Pi's estimated token usage and the model's context limit. Click **Compact chat** when Pi is idle and confirm to summarize older context without removing messages from the transcript. After compaction, Pi reports usage again after its next reply.
+
 Click the live chat title to rename the session.
 Click **🕹️** beside the live chat name to switch to the terminal tab running
 that chat. It does not start Pi, open a new tab, or send text to the terminal.

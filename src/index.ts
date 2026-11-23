@@ -163,6 +163,10 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
           },
           getBranch: () => ctx.sessionManager.getBranch(),
           isIdle: () => ctx.isIdle(),
+          getContextUsage: () => ctx.getContextUsage(),
+          onCompact: () => new Promise<void>((resolve, reject) => {
+            ctx.compact({ onComplete: () => resolve(), onError: reject });
+          }),
           onSend: (content: Parameters<ExtensionAPI["sendUserMessage"]>[0]) => new Promise<void>((resolve) => {
             if (Array.isArray(content) && content.some((block) => block.type === "image")) {
               if (pi.getSettings().images?.blockImages) throw new Error("Images are disabled in Pi's settings.");

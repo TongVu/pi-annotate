@@ -21,6 +21,7 @@ function fixture(t, { dashboard = false, launchPage = async () => {} } = {}) {
   const ctx = {
     mode: "tui",
     isIdle: () => true,
+    getContextUsage: () => undefined,
     sessionManager: {
       getBranch: () => [],
       getSessionDir: () => "/tmp/pi-chat-extension-tests",

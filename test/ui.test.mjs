@@ -48,6 +48,75 @@ async function fixture(t, { chatFetch } = {}) {
 }
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+test("composer shows live context usage and compacts only after confirmation while idle", async (t) => {
+  const reply = { id: "a1", role: "assistant", ...renderMarkdown("An earlier reply.") };
+  let busy = false;
+  let usage = { tokens: 20000, contextWindow: 80000, percent: 25 };
+  let posts = 0;
+  const finish = Promise.withResolvers();
+  const json = (data, code = 200) => ({ ok: code === 200, status: code, json: async () => data });
+  const f = await fixture(t, { chatFetch: async (path, body) => {
+    if (path === "/api/response" || path.startsWith("/api/response?")) {
+      return json({ mode: "chat", protocol: 2, cursor: "a1", messages: path.includes("?") ? [] : [reply], busy, contextUsage: usage, canCompact: true });
+    }
+    assert.equal(path, "/api/session/compact");
+    assert.deepEqual(body, {});
+    if (++posts === 2) return json({ error: "Nothing to compact" }, 400);
+    await finish.promise;
+    return json({ ok: true });
+  } });
+  const context = f.$("chat-context");
+  const details = f.$("chat-context-details");
+  const compact = f.$("chat-compact");
+  const dialog = f.$("compact-chat-dialog");
+  const confirm = f.$("confirm-chat-compact");
+  assert.equal(context.getAttribute("aria-label"), "Context usage: 25%");
+  assert.equal(f.$("chat-context-ring").getAttribute("stroke-dasharray"), "25 100");
+  context.click();
+  assert.equal(details.hidden, false);
+  assert.match(details.textContent, /Estimated .* tokens used \(25%\)/);
+  context.dispatchEvent(new f.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  assert.equal(details.hidden, true);
+  compact.click();
+  assert.equal(dialog.open, true);
+  assert.equal(posts, 0);
+  f.$("cancel-chat-compact").click();
+  assert.equal(dialog.open, false);
+  assert.equal(posts, 0);
+  compact.click();
+  busy = true;
+  await f.poll();
+  assert.equal(compact.disabled, true);
+  assert.equal(confirm.disabled, true);
+  confirm.click();
+  assert.equal(posts, 0);
+  busy = false;
+  await f.poll();
+  f.$("chat-input").value = "Keep this draft";
+  confirm.click();
+  assert.equal(posts, 1);
+  assert.equal(compact.disabled, true);
+  assert.equal(f.$("chat-send").disabled, true);
+  assert.match(f.$("status").textContent, /Compacting chat/);
+  finish.resolve();
+  await tick();
+  assert.equal(f.$("status").textContent, "Chat compacted.");
+  assert.equal(f.$("chat-input").value, "Keep this draft");
+  assert.equal(f.$("chat-send").disabled, false);
+  usage = { tokens: null, contextWindow: 80000, percent: null };
+  await f.poll();
+  context.click();
+  assert.match(details.textContent, /Model limit: .* tokens\. Usage is unavailable/);
+  assert.equal(f.$("chat-context-ring").getAttribute("stroke-dasharray"), "0 100");
+  assert.ok(f.$("response").querySelector('[data-response-id="a1"]'));
+  compact.click();
+  confirm.click();
+  await tick();
+  assert.equal(f.$("status").textContent, "Nothing to compact");
+  assert.equal(f.$("status").classList.contains("error"), true);
+  assert.equal(compact.disabled, false);
+});
+
 test("chat dots jump to user turns; failed questions are kept, accepted questions clear, and new replies are annotatable", async (t) => {
   const user = { id: "u1", role: "user", ...renderMarkdown("A **question** <b>posted as text</b>") };
   const assistant = (id, text) => ({ id, role: "assistant", ...renderMarkdown(text) });

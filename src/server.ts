@@ -222,7 +222,7 @@ function explorerRoutes({ current, list, read, launch, clone }, presence) {
   };
 }
 
-function chatRoutes({ noteStore, getSessionId, getSessionName, setSessionName, getBranch, isIdle, onSend }) {
+function chatRoutes({ noteStore, getSessionId, getSessionName, setSessionName, getBranch, isIdle, getContextUsage, onCompact, onSend }) {
   const rendered = new Map();
   const requests = new Map();
   let inFlight = false;
@@ -230,8 +230,9 @@ function chatRoutes({ noteStore, getSessionId, getSessionName, setSessionName, g
     if (!rendered.has(entry.id)) rendered.set(entry.id, renderChatEntry(entry));
     return rendered.get(entry.id);
   };
+  const isBusy = () => inFlight || !isIdle();
   const status = (branch?) => {
-    if (inFlight || !isIdle()) return "working";
+    if (isBusy()) return "working";
     const last = (branch ?? getBranch()).findLast((entry) => entry.type === "message" && ["user", "assistant"].includes(entry.message.role));
     return ["error", "aborted"].includes(last?.message.stopReason) ? "error" : "ready";
   };
@@ -246,7 +247,24 @@ function chatRoutes({ noteStore, getSessionId, getSessionName, setSessionName, g
       }
       const messages = branch.slice(index + 1).map(render).filter(Boolean);
       const state = status(branch);
-      reply(200, { mode: "chat", protocol: 2, annotationImages: true, sessionId: getSessionId?.(), sessionName: getSessionName?.(), cursor: branch.at(-1)?.id ?? null, messages, busy: state === "working", failed: state === "error" });
+      reply(200, { mode: "chat", protocol: 2, annotationImages: true, sessionId: getSessionId?.(), sessionName: getSessionName?.(), cursor: branch.at(-1)?.id ?? null, messages, busy: state === "working", failed: state === "error", contextUsage: getContextUsage?.(), canCompact: typeof onCompact === "function" && branch.some((entry) => entry.type === "message" && entry.message.role === "user") });
+    },
+    async compact(reply) {
+      if (typeof onCompact !== "function") {
+        reply(501, { error: "Compaction is unavailable for this chat." });
+        return false;
+      }
+      if (isBusy()) {
+        reply(409, { error: "Pi is busy. Wait for it to finish and retry." });
+        return false;
+      }
+      inFlight = true;
+      try {
+        await onCompact();
+        return true;
+      } finally {
+        inFlight = false;
+      }
     },
     image(id, index) {
       return readChatImage(getBranch(), id, index);
@@ -286,7 +304,7 @@ function chatRoutes({ noteStore, getSessionId, getSessionName, setSessionName, g
         return;
       }
       if (!attempt) {
-        if (inFlight || !isIdle()) {
+        if (isBusy()) {
           reply(409, { error: "Pi is busy. Wait for it to finish and retry." });
           return;
         }
@@ -433,13 +451,14 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
       }
       const disconnect = live && req.url === "/api/close";
       const renameSession = live && req.url === "/api/session/name";
+      const compactSession = live && req.url === "/api/session/compact";
       const localAction = req.url === "/api/session/focus-terminal" ? { name: "Switch to Terminal", run: chat.focusTerminal }
         : req.url === "/api/dashboard/open" ? { name: "Open dashboard", run: chat.openDashboard } : undefined;
       const renderNote = live && req.url === "/api/markdown";
       const saveNote = live && req.url === "/api/note";
       const openSession = explorer && req.url === "/api/session/open";
       const cloneSession = explorer && req.url === "/api/session/clone";
-      if (req.method === "POST" && (disconnect || renameSession || localAction || renderNote || saveNote || openSession || cloneSession || req.url === "/api/chat")) {
+      if (req.method === "POST" && (disconnect || renameSession || compactSession || localAction || renderNote || saveNote || openSession || cloneSession || req.url === "/api/chat")) {
         if (req.headers.origin !== origin || req.headers["content-type"] !== "application/json") {
           reply(403, { error: "Expected a same-origin JSON request." });
           return;
@@ -456,8 +475,15 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
           reply(200, { ok: true });
           return;
         }
-        const raw = await readBody(req, renderNote || saveNote ? NOTE_BODY_LIMIT : openSession || renameSession || localAction || cloneSession ? 4096 : CHAT_BODY_LIMIT);
+        const raw = await readBody(req, renderNote || saveNote ? NOTE_BODY_LIMIT : openSession || renameSession || compactSession || localAction || cloneSession ? 4096 : CHAT_BODY_LIMIT);
         const body = JSON.parse(raw.toString("utf8"));
+        if (compactSession) {
+          if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length) {
+            throw new Error("Compact chat does not accept a target.");
+          }
+          if (checkCurrent() && await live.compact(reply) && checkCurrent()) reply(200, { ok: true });
+          return;
+        }
         if (localAction) {
           if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length) {
             throw new Error(`${localAction.name} does not accept a target.`);

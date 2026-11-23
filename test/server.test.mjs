@@ -114,6 +114,45 @@ test("busy Pi refuses annotation sends without consuming them", async (t) => {
   assert.equal(f.sent.length, 1);
 });
 
+test("compaction requires the current authenticated chat and excludes concurrent sends and compactions", async (t) => {
+  const started = Promise.withResolvers();
+  const finish = Promise.withResolvers();
+  let current = true;
+  let idle = false;
+  let calls = 0;
+  const usage = { tokens: 1200, contextWindow: 8000, percent: 15 };
+  const user = { id: "user-1", type: "message", message: { role: "user", content: "Earlier question" } };
+  const f = await fixture(t, { isCurrent: () => current, chat: {
+    getBranch: () => [user],
+    getContextUsage: () => usage,
+    isIdle: () => idle,
+    onCompact: async () => { calls++; started.resolve(); await finish.promise; },
+  } });
+  const state = async () => (await fetch(`${f.base}/api/response`, { headers: f.headers })).json();
+  const compact = (body = {}, extra = {}) => fetch(`${f.base}/api/session/compact`, {
+    method: "POST", headers: { ...f.headers, ...extra }, body: JSON.stringify(body),
+  });
+  assert.deepEqual((await state()).contextUsage, usage);
+  assert.equal((await state()).canCompact, true);
+  assert.equal((await compact({}, { Authorization: "" })).status, 401);
+  assert.equal((await compact({}, { Origin: "" })).status, 403);
+  assert.equal((await compact({ id: "another-chat" })).status, 400);
+  assert.equal((await compact()).status, 409);
+  assert.equal(calls, 0);
+  idle = true;
+  const request = compact();
+  await started.promise;
+  assert.equal((await state()).busy, true);
+  assert.equal((await compact()).status, 409);
+  assert.equal((await f.post({ requestId: f.body.requestId, text: "Try sending" })).status, 409);
+  finish.resolve();
+  assert.equal((await request).status, 200);
+  assert.equal((await state()).busy, false);
+  current = false;
+  assert.equal((await compact()).status, 410);
+  assert.equal(calls, 1);
+});
+
 test("chat note API persists per session across servers and flushes on disconnect", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "pi-chat-notes-api-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
