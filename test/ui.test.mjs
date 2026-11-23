@@ -12,6 +12,7 @@ async function fixture(t, { chatFetch } = {}) {
   const $ = (id) => window.document.getElementById(id);
   window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
   window.HTMLDialogElement.prototype.close = function () { this.open = false; this.dispatchEvent(new window.Event("close")); };
+  window.Range.prototype.getBoundingClientRect = () => ({ left: 100, top: 150, bottom: 170 });
   const polls = [];
   if (chatFetch) window.setTimeout = (fn) => polls.push(fn);
   window.fetch = async (path, opts) => {
@@ -46,7 +47,7 @@ async function fixture(t, { chatFetch } = {}) {
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 test("chat dots jump to user turns; failed questions are kept, accepted questions clear, and new replies are annotatable", async (t) => {
-  const user = { id: "u1", role: "user", text: "A question <b>posted as text</b>" };
+  const user = { id: "u1", role: "user", ...renderMarkdown("A **question** <b>posted as text</b>") };
   const assistant = (id, text) => ({ id, role: "assistant", ...renderMarkdown(text) });
   const chatResponse = (cursor, messages, busy = false) => ({ mode: "chat", protocol: 2, cursor, messages, busy });
   const json = (data, status = 200) => ({ ok: status === 200, status, json: async () => data });
@@ -54,7 +55,10 @@ test("chat dots jump to user turns; failed questions are kept, accepted question
   const accept = Promise.withResolvers();
   const f = await fixture(t, { chatFetch: async (path, body) => {
     if (path === "/api/response") return json(chatResponse("a1", [user, assistant("a1", "**Old** reply")]));
-    if (path === "/api/response?after=a1") return json(chatResponse("a2", [{ id: "u2", role: "user", text: "Why old?" }, assistant("a2", "**New** reply")]));
+    if (path === "/api/response?after=a1") {
+      const questions = renderMarkdown("Questions about assistant response a1:\n\n### 1\n> Old\n\nWhy `old`?");
+      return json(chatResponse("a2", [{ id: "u2", role: "user", ...questions }, assistant("a2", "**New** reply")]));
+    }
     assert.equal(path, "/api/chat");
     posts.push(body);
     if (posts.length === 1) return json({ error: "Pi is busy" }, 409);
@@ -74,6 +78,8 @@ test("chat dots jump to user turns; failed questions are kept, accepted question
   assert.equal(firstUser.textContent, user.text);
   assert.equal(firstUser.getAttribute("aria-label"), "Your message");
   assert.equal(firstUser.querySelector("b"), null);
+  assert.equal(firstUser.querySelector("strong").textContent, "question");
+  assert.equal(firstUser.querySelector("[data-response-id]"), null);
   firstUser.getBoundingClientRect = () => ({ top: 300 });
   f.$("response").getBoundingClientRect = () => ({ top: 50 });
   f.$("response").scrollTop = 20;
@@ -92,6 +98,7 @@ test("chat dots jump to user turns; failed questions are kept, accepted question
   assert.equal(f.window.document.getElementById("message-preview"), null);
   const oldReply = f.$("response").querySelector('[data-response-id="a1"]');
   f.select(0, 3, oldReply);
+  f.$("annotate-selection").click();
   f.add("Why old?");
   f.$("send").click();
   await tick();
@@ -111,7 +118,11 @@ test("chat dots jump to user turns; failed questions are kept, accepted question
   const transcript = f.$("response");
   Object.defineProperties(transcript, { scrollHeight: { value: 1000 }, clientHeight: { value: 400 } });
   firstUser.getBoundingClientRect = () => ({ top: 62 - transcript.scrollTop });
-  transcript.querySelectorAll(".user-turn")[1].getBoundingClientRect = () => ({ top: 500 - transcript.scrollTop });
+  const sentQuestions = transcript.querySelectorAll(".user-turn")[1];
+  assert.equal(sentQuestions.querySelector("h3").textContent, "1");
+  assert.equal(sentQuestions.querySelector("blockquote").textContent.trim(), "Old");
+  assert.equal(sentQuestions.querySelector("code").textContent, "old");
+  sentQuestions.getBoundingClientRect = () => ({ top: 500 - transcript.scrollTop });
   for (const [scrollTop, dot] of [[120, f.$("turns").firstElementChild], [450, f.$("turns").lastElementChild]]) {
     transcript.scrollTop = scrollTop;
     transcript.dispatchEvent(new f.window.Event("scroll"));
@@ -121,12 +132,59 @@ test("chat dots jump to user turns; failed questions are kept, accepted question
   assert.equal(transcript.querySelector('[data-response-id="a1"]'), oldReply);
   const newReply = f.$("response").querySelector('[data-response-id="a2"]');
   f.select(0, 3, newReply);
+  f.$("annotate-selection").click();
   assert.equal(f.$("selected-quote").textContent, "New");
   f.add("Why new?");
   f.$("send").click();
   await tick();
   assert.notEqual(posts[2].requestId, posts[1].requestId);
   assert.equal(posts[2].annotations[0].responseId, "a2");
+});
+
+test("selecting a reply offers an annotation without blocking copy or opening the dialog", async (t) => {
+  const f = await fixture(t, { chatFetch: async () => ({ ok: true, json: async () => ({
+    mode: "chat", protocol: 2, cursor: "a1", busy: false,
+    messages: [{ id: "u1", role: "user", ...renderMarkdown("Your prompt") }, { id: "a1", role: "assistant", ...renderMarkdown("Read **this passage**.") }],
+  }) }) });
+  const transcript = f.$("response");
+  const reply = transcript.querySelector('[data-response-id="a1"]');
+  const action = f.$("annotate-selection");
+  const dialog = f.$("comment-dialog");
+  const selection = f.window.getSelection();
+  assert.equal(action.hidden, true);
+  f.select(0, 4, transcript.querySelector(".user-turn"));
+  assert.equal(action.hidden, true, "user messages are not annotatable");
+  f.select(5, 17, reply);
+  assert.equal(action.hidden, false);
+  assert.equal(action.style.left, "100px");
+  assert.equal(dialog.open, false);
+  assert.equal(selection.toString(), "this passage");
+  const copy = new f.window.Event("copy", { bubbles: true, cancelable: true });
+  reply.dispatchEvent(copy);
+  assert.equal(copy.defaultPrevented, false);
+  assert.equal(selection.toString(), "this passage");
+  f.$("chat-input").dispatchEvent(new f.window.MouseEvent("pointerdown", { bubbles: true }));
+  assert.equal(action.hidden, true);
+  assert.equal(dialog.open, false);
+  f.window.document.dispatchEvent(new f.window.Event("selectionchange"));
+  assert.equal(action.hidden, true, "clicking away dismisses even if the selection is still present");
+  f.select(5, 17, reply);
+  selection.removeAllRanges();
+  f.window.document.dispatchEvent(new f.window.Event("selectionchange"));
+  assert.equal(action.hidden, true, "clearing the selection also dismisses the action");
+  f.select(5, 17, reply);
+  f.window.document.dispatchEvent(new f.window.KeyboardEvent("keyup", { key: "Escape" }));
+  assert.equal(action.hidden, true);
+  f.window.document.dispatchEvent(new f.window.KeyboardEvent("keyup", { key: "Shift" }));
+  assert.equal(action.hidden, false, "keyboard selection can offer the action");
+  const down = new f.window.MouseEvent("mousedown", { bubbles: true, cancelable: true });
+  action.dispatchEvent(down);
+  assert.equal(down.defaultPrevented, true, "pressing the action keeps the selection intact until activation");
+  action.click();
+  assert.equal(action.hidden, true);
+  assert.equal(dialog.open, true);
+  assert.equal(f.$("selected-quote").textContent, "this passage");
+  assert.equal(f.window.document.activeElement, f.$("comment"));
 });
 
 test("sent images fetch a separate thumbnail and open a larger preview", async (t) => {
@@ -206,7 +264,7 @@ test("chat tab follows the Pi session name and moves chat controls out of the he
 });
 
 test("the sticky session pill renames the Pi session and updates the browser tab", async (t) => {
-  let sessionName = "Live browser chat feature";
+  let sessionName = "Live browser chat feature with a long name that can be truncated in the sticky session pill";
   let renamed;
   let oldServer = true;
   const f = await fixture(t, { chatFetch: async (path, body) => {
@@ -222,9 +280,17 @@ test("the sticky session pill renames the Pi session and updates the browser tab
     return { ok: true, json: async () => ({ mode: "chat", protocol: 2, sessionName, cursor: null, messages: [], busy: false }) };
   } });
   const pill = f.$("session-title-pill");
+  const title = f.$("session-title-text");
   assert.equal(pill.hidden, false);
-  assert.equal(f.$("session-title-text").textContent, sessionName);
+  assert.equal(title.textContent, sessionName);
   assert.equal(f.window.document.title, `👾 ${sessionName}`);
+  const preview = () => f.$("message-preview");
+  title.dispatchEvent(new f.window.MouseEvent("mouseenter"));
+  assert.equal(title.title, "");
+  assert.equal(preview().classList.contains("message-preview"), true);
+  assert.equal(preview().textContent, sessionName);
+  title.dispatchEvent(new f.window.MouseEvent("mouseleave"));
+  assert.equal(preview(), null);
   f.$("rename-session").click();
   const input = f.$("rename-session-input");
   input.value = "Personal repository cleanup";
@@ -235,9 +301,14 @@ test("the sticky session pill renames the Pi session and updates the browser tab
   submitRename();
   await tick();
   assert.equal(renamed, input.value);
-  assert.equal(f.$("session-title-text").textContent, renamed);
+  assert.equal(title.textContent, renamed);
   assert.equal(f.window.document.title, `👾 ${renamed}`);
   assert.equal(f.$("status").textContent, "Chat renamed.");
+  title.focus();
+  assert.equal(preview().textContent, renamed);
+  assert.equal(title.getAttribute("aria-describedby"), preview().id);
+  title.blur();
+  assert.equal(preview(), null);
 });
 
 test("explorer groups chat branches and filters chats, then opens a saved transcript without losing the live draft", async (t) => {
@@ -580,6 +651,7 @@ test("sending either draft leaves the other one unsent", async (t) => {
   const write = (text) => { input.value = text; input.dispatchEvent(new f.window.Event("input")); };
   write("Ordinary message");
   f.select(0, 4, f.$("response").querySelector('[data-response-id="a1"]'));
+  f.$("annotate-selection").click();
   f.add("Question about the quote");
   f.$("chat-send").click();
   await tick();
@@ -714,6 +786,7 @@ test("live annotations can paste and pick images, edit them, and retry without t
   assert.equal(f.$("comment-attach").parentElement, f.$("save-annotation").parentElement, "paperclip sits beside Add annotation");
   f.$("chat-input").value = "Leave this draft alone";
   f.select(9, 16, f.$("response").querySelector("[data-response-id]"));
+  f.$("annotate-selection").click();
   const pasted = waitForCount(1);
   const event = new w.Event("paste", { cancelable: true });
   Object.defineProperty(event, "clipboardData", { value: { files: [picture("pasted.png")] } });

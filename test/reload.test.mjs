@@ -180,7 +180,7 @@ test("installed Pi accepts a browser prompt before the model finishes, then expo
     const working = await state();
     assert.equal(working.busy, true);
     assert.equal(working.sessionName, "Live browser chat feature");
-    assert.deepEqual(working.messages.map(({ role, text }) => [role, text]), [["user", "Transformed: /literal question"]]);
+    assert.deepEqual(working.messages.map(({ role, text }) => [role, text]), [["user", "Transformed: /literal question\n"]]);
     const renamed = await rename("Browser-renamed session");
     assert.equal(renamed.status, 200);
     assert.deepEqual(await renamed.json(), { sessionName: "Browser-renamed session" });
@@ -219,7 +219,7 @@ test("installed Pi accepts a browser prompt before the model finishes, then expo
     await session.waitForIdle();
     const followUp = await state(`?after=${finished.cursor}`);
     assert.deepEqual(followUp.messages.map(({ role }) => role), ["user", "assistant"]);
-    assert.match(followUp.messages[0].text, /> answer\n\nExplain\.\n\nAttached: Image 1\./);
+    assert.match(followUp.messages[0].html, /<blockquote>\s*<p>answer<\/p>\s*<\/blockquote>\s*<p>Explain\.<\/p>\s*<p>Attached: Image 1\.<\/p>/);
     assert.equal(followUp.messages[0].imageCount, 1);
     assert.match(followUp.messages[1].text, /more detail/);
     assert.equal(faux.state.callCount, 2);

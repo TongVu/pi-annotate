@@ -7,6 +7,7 @@ const turnRail = $("turns");
 const turns = [];
 let currentDot;
 const dialog = $("comment-dialog");
+const selectionAction = $("annotate-selection");
 const comment = $("comment");
 const send = $("send");
 let annotations = [];
@@ -58,6 +59,7 @@ let liveScroll;
 let busy = false;
 let connected = true;
 let lastAttempt;
+let selectedPassage;
 let pending;
 let sending = false;
 let editing = -1;
@@ -388,35 +390,63 @@ function showComment(selection) {
   comment.focus();
 }
 
-function selectPassage() {
-  if (sending || dialog.open) return;
+function hideSelectionAction() {
+  selectionAction.hidden = true;
+  selectedPassage = undefined;
+}
+
+function showSelectionAction() {
+  if (sending || dialog.open || savedSessionId) return hideSelectionAction();
   const selection = window.getSelection();
-  if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+  if (!selection || selection.isCollapsed || !selection.rangeCount) return hideSelectionAction();
   const range = selection.getRangeAt(0);
   const startElement = range.startContainer.nodeType === Node.ELEMENT_NODE ? range.startContainer : range.startContainer.parentElement;
   const passage = startElement?.closest("[data-response-id]");
-  if (!passage || !responseElement.contains(passage) || !passage.contains(range.startContainer) || !passage.contains(range.endContainer)) return;
+  if (!passage || !responseElement.contains(passage) || !passage.contains(range.endContainer)) return hideSelectionAction();
   const before = range.cloneRange();
   before.selectNodeContents(passage);
   before.setEnd(range.startContainer, range.startOffset);
-  let start = before.toString().length;
-  let quote = range.toString();
-  const leading = quote.length - quote.trimStart().length;
-  start += leading;
-  quote = quote.trim();
-  if (!quote) return;
+  const text = range.toString();
+  const quote = text.trim();
+  if (!quote) return hideSelectionAction();
+  const start = before.toString().length + text.length - text.trimStart().length;
+  selectedPassage = { start, end: start + quote.length, quote, responseId: passage.dataset.responseId };
+  selectionAction.hidden = false;
+  const rect = range.getBoundingClientRect();
+  const { offsetWidth: width, offsetHeight: height } = selectionAction;
+  const gap = 8;
+  const above = rect.top - height - gap;
+  selectionAction.style.left = `${Math.max(gap, Math.min(rect.left, window.innerWidth - width - gap))}px`;
+  selectionAction.style.top = `${Math.max(gap, Math.min(above >= gap ? above : rect.bottom + gap, window.innerHeight - height - gap))}px`;
+}
+
+// Leave native selection and copy alone. Clicking the action uses the captured quote.
+responseElement.addEventListener("mouseup", (event) => {
+  if (event.button === 0) showSelectionAction();
+});
+document.addEventListener("keyup", (event) => {
+  if (event.key === "Shift") showSelectionAction();
+  else if (event.key === "Escape") hideSelectionAction();
+});
+document.addEventListener("selectionchange", () => {
+  if (!selectionAction.hidden && document.activeElement !== selectionAction) showSelectionAction();
+});
+document.addEventListener("pointerdown", (event) => {
+  if (event.button === 0 && !selectionAction.contains(event.target)) hideSelectionAction();
+});
+responseElement.addEventListener("scroll", hideSelectionAction, { passive: true });
+window.addEventListener("resize", hideSelectionAction);
+selectionAction.addEventListener("mousedown", (event) => event.preventDefault());
+selectionAction.addEventListener("click", () => {
+  const passage = selectedPassage;
+  hideSelectionAction();
+  if (!passage || sending || dialog.open || savedSessionId) return;
   if (annotations.length >= 50) {
     status("Maximum 50 annotations per batch.", true);
     return;
   }
   editing = -1;
-  showComment({ start, end: start + quote.length, quote, responseId: passage.dataset.responseId });
-}
-
-// Native browser selection, not a clipboard read. Keyboard selection is supported too.
-responseElement.addEventListener("mouseup", selectPassage);
-responseElement.addEventListener("keyup", (event) => {
-  if (event.key === "Shift") selectPassage();
+  showComment(passage);
 });
 $("comment-close").addEventListener("click", () => dialog.close());
 dialog.addEventListener("close", () => {
@@ -723,15 +753,21 @@ function renderTurn(message, session) {
     const label = document.createElement("h2");
     label.textContent = "Pi";
     turn.append(label);
-    // Same restricted Markdown renderer and DOM-text check as the live transcript.
-    content.innerHTML = message.html;
-    if (content.textContent !== message.text) content.textContent = "This reply could not be rendered safely. See Pi in the terminal.";
-    else if (!session) content.dataset.responseId = message.id;
   } else {
     turn.setAttribute("aria-label", "Your message");
+  }
+  // The server renders restricted Markdown for both roles. Only live Pi replies
+  // with matching DOM text can provide annotation offsets.
+  if (typeof message.html === "string") content.innerHTML = message.html;
+  if (typeof message.html === "string" && content.textContent === message.text) {
+    if (assistant && !session) content.dataset.responseId = message.id;
+  } else if (assistant) {
+    content.textContent = "This reply could not be rendered safely. See Pi in the terminal.";
+  } else {
+    content.className = "plain-message";
     content.textContent = message.text;
   }
-  if (message.text || assistant) turn.append(content);
+  if (message.text || message.html || assistant) turn.append(content);
   if (!assistant) appendTranscriptImages(turn, message, session);
   return turn;
 }
@@ -747,14 +783,16 @@ function hideMessagePreview() {
 }
 function bindMessageTooltip(target, text) {
   target.removeAttribute("title");
-  target.dataset.tooltip = text;
-  target.addEventListener("mouseenter", () => showMessagePreview(target, text));
+  if (text !== undefined) target.dataset.tooltip = text;
+  const show = () => showMessagePreview(target, text ?? target.textContent);
+  target.addEventListener("mouseenter", show);
   target.addEventListener("mouseleave", hideMessagePreview);
-  target.addEventListener("focus", () => showMessagePreview(target, text));
+  target.addEventListener("focus", show);
   target.addEventListener("blur", hideMessagePreview);
 }
 
 document.querySelectorAll('#chat-explorer [title], #explorer-toggle[title]').forEach((target) => bindMessageTooltip(target, target.title));
+bindMessageTooltip(sessionTitleText);
 
 function showMessagePreview(dot, text) {
   hideMessagePreview();
@@ -790,7 +828,7 @@ function updateChat(data) {
   for (const message of data.messages) {
     const turn = renderTurn(message);
     if (message.role === "user") {
-      const preview = message.text.trim().replace(/\s+/g, " ") || "Image attachment";
+      const preview = message.text.trim().replace(/\s+/g, " ") || (message.imageCount ? "Image attachment" : "Your message");
       const dot = document.createElement("button");
       dot.type = "button";
       dot.setAttribute("aria-label", `Jump to your message: ${preview}`);
@@ -1146,6 +1184,7 @@ function clearSavedTranscript() {
 }
 
 function setSavedView(saved) {
+  hideSelectionAction();
   $("saved-conversation").hidden = !saved;
   for (const id of ["conversation", "turns", "right-panel"]) $(id).hidden = saved;
   if (window.matchMedia?.("(max-width: 760px)").matches) setExplorerOpen(false);

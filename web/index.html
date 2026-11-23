@@ -57,12 +57,13 @@
       <div class="label" id="conversation-label">ASSISTANT RESPONSE <span>· Rendered Markdown</span></div>
       <div id="response" tabindex="0">
         <div id="session-title-pill" class="session-title-pill" hidden>
-          <span id="session-title-text"></span>
+          <span id="session-title-text" tabindex="0"></span>
           <button id="rename-session" type="button" class="secondary" aria-label="Rename chat" title="Rename chat">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 4 4 4M4 20l4-.8L19 8a2.8 2.8 0 0 0-4-4L4 15z"/></svg>
           </button>
         </div>
       </div>
+      <button id="annotate-selection" type="button" aria-haspopup="dialog" hidden>Add annotation</button>
       <form id="chat-form" hidden>
         <div class="chat-composer">
           <button id="chat-expand" type="button" class="secondary composer-icon" aria-label="Expand message composer" aria-controls="chat-input" aria-expanded="false" title="Expand message composer">
@@ -131,7 +132,7 @@
       </section>
       <section id="annotations-panel" aria-label="Annotations">
         <div id="annotation-heading" class="annotation-heading"><h2>Your annotations</h2></div>
-        <p id="empty">Highlight words in the response to ask about them.</p>
+        <p id="empty">Select text in a reply and click Add annotation to ask about it.</p>
         <ol id="annotations"></ol>
       </section>
     </aside>

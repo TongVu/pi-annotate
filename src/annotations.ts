@@ -1,6 +1,10 @@
 export const MAX_ANNOTATIONS = 50;
 export const MAX_COMMENT = 8000;
 
+// Pi appends these lines to the prompt for model coordinate mapping. Keep them
+// in the session, but not in the browser transcript when a thumbnail is available.
+const imageResizeNotes = /(?:^|\n\n)(?:\[Image: original \d+x\d+, displayed at \d+x\d+\. Multiply coordinates by \d+\.\d{2} to map to original image\.\](?:\n|$))+$/;
+
 function messageText(content) {
   if (typeof content === "string") return content;
   // Exclude thinking, tool calls and image data.
@@ -20,7 +24,7 @@ export function visibleChatMessage(entry) {
   let text = messageText(content);
   if (role === "assistant" && !text.trim()) return undefined;
   const imageCount = userImageBlocks(entry).length;
-  if (imageCount) return { id: entry.id, role, text, imageCount };
+  if (imageCount) return { id: entry.id, role, text: text.replace(imageResizeNotes, ""), imageCount };
   if (role === "user" && Array.isArray(content) && content.some((block) => block.type === "image")) {
     text = text.trim() ? `${text}\n\n[Image attached]` : "[Image attached]";
   }

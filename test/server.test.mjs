@@ -172,7 +172,7 @@ test("chat protects the active transcript and validates quotes from each assista
   const text = (value) => ({ type: "text", text: value });
   const branch = [
     entry("system", "system", "System prompt"),
-    entry("user", "user", [text("First question"), { type: "image", data: "image data" }]),
+    entry("user", "user", [text("**First** question\n\n<b>literal HTML</b>"), { type: "image", data: "image data" }]),
     entry("a1", "assistant", [text("**One**"), { type: "thinking", thinking: "Private reasoning" }]),
     entry("tool", "toolResult", [text("Tool output")]),
     entry("a2", "assistant", [text("Two")]),
@@ -201,6 +201,8 @@ test("chat protects the active transcript and validates quotes from each assista
   assert.equal(state.cursor, "a2");
   assert.deepEqual(state.messages.map((message) => message.id), ["user", "a1", "a2"]);
   assert.doesNotMatch(JSON.stringify(state), /System prompt|image data|Private reasoning|Tool output/);
+  assert.match(state.messages[0].html, /<strong>First<\/strong> question/);
+  assert.match(state.messages[0].html, /&lt;b&gt;literal HTML&lt;\/b&gt;/);
   assert.match(state.messages[1].html, /<strong>One<\/strong>/);
   assert.equal((await fetch(`${f.base}/api/image?id=missing&index=0`, { headers: f.headers })).status, 404);
   assert.equal((await fetch(`${f.base}/api/image?id=a1&index=0`, { headers: f.headers })).status, 404);
@@ -236,10 +238,35 @@ test("chat protects the active transcript and validates quotes from each assista
   assert.equal(prompts.length, 1);
   assert.match(prompts[0], /response a1:\n[\s\S]*> One[\s\S]*response a2:\n[\s\S]*> Two/);
 
-  branch.push(entry("a3", "assistant", [text("New reply")]));
+  branch.push(entry("u2", "user", [text(prompts[0])]), entry("a3", "assistant", [text("New reply")]));
   const delta = await (await read("?after=a2")).json();
-  assert.deepEqual(delta.messages.map((message) => message.id), ["a3"]);
+  assert.deepEqual(delta.messages.map((message) => message.id), ["u2", "a3"]);
+  assert.match(delta.messages[0].html, /<h3>1<\/h3>\s*<blockquote>\s*<p>One<\/p>/);
+  assert.match(delta.messages[0].html, /<p>Explain One\.<\/p>/);
   assert.equal(delta.busy, false);
+});
+
+test("chat hides Pi's trailing resize notes without hiding captions or image previews", async (t) => {
+  const note = "[Image: original 2020x1402, displayed at 2000x1388. Multiply coordinates by 1.01 to map to original image.]";
+  const image = { type: "image", mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgZGIGAAAOAAfXb+R4AAAAAElFTkSuQmCC" };
+  const user = (id, text, ...images) => ({ type: "message", id, message: { role: "user", content: [{ type: "text", text }, ...images] } });
+  const branch = [
+    user("caption", `**Look here**\n\n${note}\n${note}`, image, image),
+    user("image-only", `\n\n${note}`, image),
+    user("text-only", note),
+    user("explicit-quote", `\`\`\`\n${note}\n\`\`\`\n\n${note}`, image),
+  ];
+  const f = await fixture(t, { chat: { getBranch: () => branch } });
+  const read = (path) => fetch(f.base + path, { headers: f.headers });
+  const { messages } = await (await read("/api/response")).json();
+  assert.deepEqual(messages[0], { id: "caption", role: "user", text: "Look here\n", imageCount: 2, html: "<p><strong>Look here</strong></p>\n" });
+  assert.deepEqual(messages[1], { id: "image-only", role: "user", text: "", imageCount: 1, html: "" });
+  assert.equal(messages[2].text.trim(), note);
+  assert.equal(messages[3].text.trim(), note);
+  assert.equal(branch[0].message.content[0].text, `**Look here**\n\n${note}\n${note}`);
+  const preview = await read("/api/image?id=image-only&index=0");
+  assert.equal(preview.status, 200);
+  assert.equal(Buffer.from(await preview.arrayBuffer()).toString("base64"), image.data);
 });
 
 test("chat explorer lists limited metadata and reads only catalogued sessions with the chat token", async (t) => {

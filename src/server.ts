@@ -103,7 +103,7 @@ function annotationImagesAt(annotations) {
 
 function renderChatEntry(entry) {
   const message = visibleChatMessage(entry);
-  return message?.role === "assistant" ? { ...message, ...renderMarkdown(message.text) } : message;
+  return message && { ...message, ...renderMarkdown(message.text) };
 }
 
 function readChatImage(branch, id, index) {

@@ -73,6 +73,7 @@ h2 { font-size: 17px; margin: 0 0 16px; }
   #chat-note[data-previewing="true"] #chat-note-expand:focus-visible { opacity: 1; pointer-events: auto; }
 }
 #empty { color: var(--muted); line-height: 1.6; }
+#annotate-selection { position: fixed; z-index: 10; padding: 6px 10px; box-shadow: 0 4px 12px #0003; font-size: 13px; }
 ol { padding-left: 20px; margin: 0; }
 #annotations > li { position: relative; padding: 32px 0 20px 6px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
 blockquote { margin: 0 0 12px; padding-left: 12px; border-left: 3px solid var(--accent); color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow: auto; }
@@ -162,7 +163,9 @@ textarea { width: 100%; resize: vertical; background: var(--bg); color: var(--te
 .user-turn::before, .user-turn::after { content: ""; position: absolute; top: 100%; right: -2px; width: 18px; height: 13px; pointer-events: none; }
 .user-turn::before { background: var(--muted); clip-path: path("M0 0H18V11Q18 14 15.5 12L2 2H0Z"); }
 .user-turn::after { background: var(--bg); clip-path: polygon(3px 0, 16px 0, 16px 9.5px); }
-.user-turn > div { white-space: pre-wrap; }
+.user-turn > .plain-message { white-space: pre-wrap; }
+#response .user-turn > div > :first-child { margin-top: 0; }
+#response .user-turn > div > :last-child { margin-bottom: 0; }
 .chat-page aside { grid-area: 1 / 3 / span 2; overflow: auto; padding-top: 3px; }
 .chat-page #right-panel { display: grid; grid-area: 1 / 3 / span 2; grid-template-rows: auto minmax(0, 1fr); gap: 14px; min-height: 0; overflow: hidden; }
 .chat-page #right-panel[hidden] { display: none; }

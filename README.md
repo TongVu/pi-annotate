@@ -27,8 +27,9 @@ sessions by working directory. Both regular and fullscreen terminal modes work.
 1. Run `/chat` in the Pi session you want to use. Use `/chat link` if you prefer to
    open the link yourself. You can start from an empty session. If the session
    has a name, it appears in the browser tab.
-2. Type a message in the bottom composer, or select text in a Pi reply and add a
-   question to the right panel. Keep reusable Markdown in the right-panel note;
+2. Type a message in the bottom composer, or select text in a Pi reply and click
+   **Add annotation** to write a question. You can also copy the selected text
+   normally without opening the dialog. Keep reusable Markdown in the right-panel note;
    it saves locally per chat in Pi's data directory, survives closing and
    reopening `/chat`, and can be previewed or copied as Markdown. The dots stay
    centered on the left as you scroll; the current turn is blue.
@@ -113,7 +114,7 @@ checkout and Pi installation path. To point Git at the new repository URL, run
 - Native browser text selection, a comment dialog, and multiple annotations with
   edit/remove and batch submission as a normal Pi turn.
 - Headings, bold/italic text, lists, blockquotes, links, and code blocks rendered
-  locally from Markdown.
+  locally from Markdown in sent messages, annotation questions, and Pi replies.
 - Exact quote offsets validated against server-generated rendered text, plus the
   source response's session entry ID in each submitted annotation.
 - Independent browser message and annotation drafts, duplicate-send protection,
