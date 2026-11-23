@@ -62,8 +62,10 @@ chat before sending again. Live chat was verified with Pi 1.5.2.
 
 ### Chat explorer
 
-Click the sidebar icon in `/chat` to open the left explorer. Sessions are grouped
-by project directory, with forked sessions nested under their Pi parent session
+Click the sidebar icon in `/chat` to open the left explorer. Click 📝 in the
+control group to start a new Pi session in the current project; this replaces the
+active session in the current Pi process and opens its browser chat. Sessions are
+grouped by project directory, with forked sessions nested under their Pi parent session
 when that parent is available. Click a project heading to collapse or expand its
 sessions. Type a session name or directory to filter the list; matches appear
 even in collapsed projects. Use **Collapse all** or **Expand all** to change

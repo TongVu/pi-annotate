@@ -361,6 +361,31 @@ test("opening a saved chat requires the catalogued ID and refuses an active or p
   assert.deepEqual(launches, [saved]);
 });
 
+test("new-chat requests start a new session only after acknowledging the browser request", async (t) => {
+  const started = Promise.withResolvers();
+  const finish = Promise.withResolvers();
+  let count = 0;
+  const f = await fixture(t, { chat: {
+    getBranch: () => [], isIdle: () => true,
+    explorer: {
+      current: () => ({ id: "live", cwd: "/project" }), list: async () => [],
+      createNewSession: async () => { count++; started.resolve(); await finish.promise; },
+    },
+  } });
+  const create = (headers = f.headers) => fetch(`${f.base}/api/session/new`, { method: "POST", headers, body: "{}" });
+  const catalog = await (await fetch(`${f.base}/api/sessions`, { headers: f.headers })).json();
+  assert.equal(catalog.canCreateNewSession, true);
+  assert.equal((await create({ ...f.headers, Origin: "https://other.example" })).status, 403);
+  const accepted = await create();
+  assert.equal(accepted.status, 202);
+  assert.deepEqual(await accepted.json(), { ok: true });
+  await started.promise;
+  assert.equal((await create()).status, 409, "do not switch sessions twice while startup is pending");
+  finish.resolve();
+  for (let retry = 0; retry < 20 && count; retry++) await delay(5);
+  assert.equal(count, 1);
+});
+
 test("separate browser chat servers discover active peers and remove them on disconnect", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "pi-chat-presence-"));
   t.after(() => rm(dir, { recursive: true, force: true }));

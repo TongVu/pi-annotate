@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { startChatServer } from "./server.ts";
 import { createChatNoteStore } from "./chat-notes.ts";
 import { listPiSessions, readPiSession } from "./session-explorer.ts";
@@ -57,7 +57,7 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
   pi.on("session_before_fork", stop);
   pi.on("session_before_tree", stop);
 
-  const runChatPage = async (args: string, ctx: ExtensionContext) => {
+  const runChatPage = async (args: string, ctx: ExtensionContext, commandContext?: ExtensionCommandContext) => {
     const mode = args.trim();
     if (ctx.mode !== "tui") {
       ctx.ui.notify("/chat requires Pi's terminal UI.", "warning");
@@ -106,6 +106,16 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
           }),
           explorer: {
             current: chatIdentity,
+            ...(commandContext ? { createNewSession: async () => {
+              try {
+                const result = await commandContext.newSession({
+                  withSession: async (newContext) => { await runChatPage("", newContext, newContext); },
+                });
+                if (result.cancelled && ctx.sessionManager.getSessionId() === sessionId) ctx.ui.notify("New chat cancelled.", "info");
+              } catch (error) {
+                if (ctx.sessionManager.getSessionId() === sessionId) ctx.ui.notify(`Could not start a new chat: ${error instanceof Error ? error.message : String(error)}`, "error");
+              }
+            } } : {}),
             list: () => listPiSessions(ctx.sessionManager.getSessionDir()),
             read: readPiSession,
             ...(process.platform === "darwin" ? {
@@ -188,6 +198,6 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
   pi.registerCommand("chat", {
     description: "Open the current Pi session as a live browser chat",
     getArgumentCompletions: complete,
-    handler: async (args, ctx) => { await runChatPage(args, ctx); },
+    handler: async (args, ctx) => { await runChatPage(args, ctx, ctx); },
   });
 }

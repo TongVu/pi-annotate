@@ -69,9 +69,9 @@ test("chat dots jump to user turns; failed questions are kept, accepted question
   assert.equal(f.$("send").parentElement.id, "annotation-heading");
   assert.equal(f.$("send").title, "Send questions");
   assert.equal(f.$("send").getAttribute("aria-label"), "Send 0 questions");
-  assert.equal(f.$("send").textContent, "0");
+  assert.equal(f.$("count").textContent, "0");
   assert.equal(f.$("send").classList.contains("chat-question-send"), true);
-  assert.ok(f.$("send").querySelector("svg"));
+  assert.equal(f.$("send").querySelector(".send-icon").textContent, "🚀");
   const currentDot = () => f.$("turns").querySelector('[aria-current="location"]');
   assert.equal(currentDot(), f.$("turns").firstElementChild);
   const firstUser = f.$("response").querySelector(".user-turn");
@@ -230,6 +230,10 @@ test("status icon distinguishes ready, working, stopped and disconnected", async
   assert.match(favicon(), /fill="#dc4141"/);
   assert.match(f.window.document.title, /^🏗️ /);
   busy = false;
+  await f.poll();
+  assert.equal(indicator.dataset.state, "ready");
+  assert.equal(f.window.document.title, "✓ Ready · Pi Chat");
+  assert.match(favicon(), /fill="#2f9b69"/);
   failed = true;
   await f.poll();
   assert.equal(indicator.dataset.state, "stopped");
@@ -240,12 +244,57 @@ test("status icon distinguishes ready, working, stopped and disconnected", async
   assert.match(f.window.document.title, /^🔌 /);
 });
 
+test("the tab shows working from send through the next fresh Pi status", async (t) => {
+  let post;
+  let response;
+  const chat = (busy = false) => ({ mode: "chat", protocol: 2, cursor: null, messages: [], busy });
+  const json = (data, status = 200) => ({ ok: status === 200, status, json: async () => data });
+  const f = await fixture(t, { chatFetch: async (path) => {
+    if (path === "/api/chat") return post.promise;
+    assert.equal(path, "/api/response");
+    return response ? response.promise : json(chat());
+  } });
+  const title = () => f.window.document.title;
+  const readyTitle = "✓ Ready · Pi Chat";
+  const workingTitle = "🏗️ Pi Chat";
+  const submit = () => f.$("chat-form").dispatchEvent(new f.window.Event("submit", { cancelable: true }));
+  const input = f.$("chat-input");
+  assert.equal(title(), readyTitle);
+  input.value = "Hello Pi";
+  post = Promise.withResolvers();
+  submit();
+  assert.equal(title(), workingTitle, "working is visible before Pi acknowledges the send");
+  await f.poll();
+  assert.equal(title(), workingTitle, "idle polls during the send do not clear working");
+  post.resolve(json({ error: "Send rejected" }, 409));
+  await tick();
+  assert.equal(title(), readyTitle);
+  assert.equal(input.value, "Hello Pi");
+
+  post = Promise.withResolvers();
+  submit();
+  response = Promise.withResolvers();
+  const stalePoll = f.poll();
+  post.resolve(json({ ok: true }));
+  await tick();
+  assert.equal(title(), workingTitle);
+  response.resolve(json(chat()));
+  await stalePoll;
+  assert.equal(title(), workingTitle, "a poll from before acknowledgement cannot clear working");
+  response = { promise: Promise.resolve(json(chat(true))) };
+  await f.poll();
+  assert.equal(title(), workingTitle);
+  response = undefined;
+  await f.poll();
+  assert.equal(title(), readyTitle);
+});
+
 test("chat tab follows the Pi session name and moves chat controls out of the header", async (t) => {
   let sessionName = "Live browser chat feature";
   const f = await fixture(t, { chatFetch: async () => ({
     ok: true, json: async () => ({ mode: "chat", protocol: 2, cursor: null, messages: [], busy: false, sessionName }),
   }) });
-  assert.equal(f.window.document.title, `👾 ${sessionName}`);
+  assert.equal(f.window.document.title, `✓ Ready · ${sessionName}`);
   assert.equal(f.$("page-intro").hidden, true);
   assert.equal(f.$("chat-state").hidden, false);
   assert.equal(f.$("chat-state").parentElement, f.$("chat-form").querySelector(".actions"));
@@ -256,11 +305,11 @@ test("chat tab follows the Pi session name and moves chat controls out of the he
 
   sessionName = "Renamed <em>chat</em>";
   await f.poll();
-  assert.equal(f.window.document.title, `👾 ${sessionName}`);
+  assert.equal(f.window.document.title, `✓ Ready · ${sessionName}`);
 
   sessionName = undefined;
   await f.poll();
-  assert.equal(f.window.document.title, "👾 Pi Chat");
+  assert.equal(f.window.document.title, "✓ Ready · Pi Chat");
 });
 
 test("the sticky session pill renames the Pi session and updates the browser tab", async (t) => {
@@ -283,7 +332,7 @@ test("the sticky session pill renames the Pi session and updates the browser tab
   const title = f.$("session-title-text");
   assert.equal(pill.hidden, false);
   assert.equal(title.textContent, sessionName);
-  assert.equal(f.window.document.title, `👾 ${sessionName}`);
+  assert.equal(f.window.document.title, `✓ Ready · ${sessionName}`);
   const preview = () => f.$("message-preview");
   title.dispatchEvent(new f.window.MouseEvent("mouseenter"));
   assert.equal(title.title, "");
@@ -302,7 +351,7 @@ test("the sticky session pill renames the Pi session and updates the browser tab
   await tick();
   assert.equal(renamed, input.value);
   assert.equal(title.textContent, renamed);
-  assert.equal(f.window.document.title, `👾 ${renamed}`);
+  assert.equal(f.window.document.title, `✓ Ready · ${renamed}`);
   assert.equal(f.$("status").textContent, "Chat renamed.");
   title.focus();
   assert.equal(preview().textContent, renamed);
@@ -319,10 +368,11 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
     if (path === "/api/activity") return { ok: true, json: async () => ({ sessions: [{ id: "a", name: "Earlier live work", cwd: "/work/alpha" }] }) };
     if (path === "/api/sessions") return { ok: true, json: async () => ({
       current: { id: "current", name: "Live chat", cwd: "/work/alpha", canClone: true },
+      canCreateNewSession: true,
       sessions: [{ id: "a", name: "Earlier live work", cwd: "/work/alpha", parentId: "current", canClone: true }, { id: "b", name: longTitle, cwd: "/work/beta" }],
     }) };
     if (path === "/api/session/resume?id=b") return { ok: true, json: async () => ({ command: "cd -- '/work/beta' && pi --session '/store/b.jsonl'" }) };
-    if (path === "/api/session/clone") return { ok: true, json: async () => ({ ok: true }) };
+    if (path === "/api/session/clone" || path === "/api/session/new") return { ok: true, json: async () => ({ ok: true }) };
     if (path === "/api/session?id=b") return { ok: true, json: async () => ({
       messages: [{ id: "r1", role: "assistant", ...renderMarkdown("**Saved reply**") }],
     }) };
@@ -363,6 +413,13 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.equal(live.textContent, "Live chat");
   assert.equal(live.dataset.currentChat, "true");
   assert.ok(live.parentElement.querySelector('.session-indicator.live[aria-label="Live session"]'));
+  const newChat = f.$("new-chat-session");
+  assert.equal(newChat.hidden, false);
+  assert.equal(newChat.textContent, "📝");
+  assert.equal(newChat.getAttribute("aria-label"), "New chat");
+  newChat.click();
+  await tick();
+  assert.ok(calls.includes("/api/session/new"));
   const clone = live.parentElement.querySelector(".session-clone");
   assert.equal(clone.textContent, "🧬");
   assert.equal(clone.getAttribute("aria-label"), "Clone chat session Live chat");
@@ -390,7 +447,7 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.ok(controls.parentElement.firstElementChild === controls, "view-mode pill replaces the old heading position");
   assert.equal(f.$("session-filter").getAttribute("aria-label"), "Search chats by name or directory");
   assert.ok(f.$("session-filter").closest(".session-search").querySelector('svg[aria-hidden="true"]'));
-  assert.deepEqual([...controls.querySelectorAll("button")].map((button) => button.getAttribute("aria-label")), ["Collapse all", "Show current chat in explorer", "Expand all", "Refresh chats"]);
+  assert.deepEqual([...controls.querySelectorAll("button")].map((button) => button.getAttribute("aria-label")), ["New chat", "Collapse all", "Show current chat in explorer", "Expand all", "Refresh chats"]);
   assert.ok(controls.querySelector('[data-action="show-current"] svg path'));
   assert.ok(controls.querySelector('[data-action="show-current"] svg circle'));
   assert.equal(controls.querySelectorAll('svg[aria-hidden="true"]').length, 4);
@@ -440,6 +497,7 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.equal(f.$("resume-command-dialog").open, true);
   assert.equal(f.$("resume-command").value, copied[0]);
   f.$("close-resume-command").click();
+  f.$("right-panel-toggle").click();
   saved.click();
   await tick();
   assert.equal(f.window.document.title, longTitle);
@@ -448,15 +506,17 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.equal(f.$("saved-response").querySelector("[data-response-id]"), null);
   assert.equal(f.$("conversation").hidden, true);
   assert.equal(f.$("right-panel").hidden, true);
+  assert.equal(f.window.document.querySelector("main").classList.contains("right-panel-collapsed"), true);
   assert.equal(f.$("chat-send").disabled, true);
   await f.poll();
   assert.equal(f.window.document.title, longTitle);
   assert.match(f.$("response").textContent, /New live message/);
 
   f.$("back-to-live").click();
-  assert.equal(f.window.document.title, "👾 Live chat");
+  assert.equal(f.window.document.title, "✓ Ready · Live chat");
   assert.equal(f.$("conversation").hidden, false);
   assert.equal(f.$("right-panel").hidden, false);
+  assert.equal(f.window.document.querySelector("main").classList.contains("right-panel-collapsed"), true);
   assert.equal(f.$("saved-conversation").hidden, true);
   assert.equal(input.value, "Unsent live draft");
   assert.equal(f.$("chat-send").disabled, false);
@@ -538,6 +598,16 @@ test("Markdown notes persist per chat, preview safely, and copy their source", a
   assert.notEqual(f.$("chat-note").parentElement, f.$("annotations-panel"));
   assert.equal(f.$("chat-note-preview-toggle").textContent.trim(), "");
   assert.equal(f.$("chat-note-copy").textContent.trim(), "");
+  const panelToggle = f.$("right-panel-toggle");
+  assert.equal(panelToggle.getAttribute("aria-expanded"), "true");
+  panelToggle.click();
+  assert.equal(panelToggle.getAttribute("aria-expanded"), "false");
+  assert.equal(panelToggle.getAttribute("aria-label"), "Expand right sidebar");
+  assert.equal(f.window.document.querySelector("main").classList.contains("right-panel-collapsed"), true);
+  assert.equal(f.$("annotations-panel").hidden, false);
+  assert.equal(note.value, "# Saved snippet", "collapsing preserves the note draft");
+  panelToggle.click();
+  assert.equal(f.window.document.querySelector("main").classList.contains("right-panel-collapsed"), false);
   const expandNote = f.$("chat-note-expand");
   assert.equal(expandNote.getAttribute("aria-controls"), "chat-note-input");
   expandNote.click();
@@ -547,9 +617,11 @@ test("Markdown notes persist per chat, preview safely, and copy their source", a
   assert.equal(f.$("chat-note").parentElement, f.$("chat-note-dialog"));
   expandNote.click();
   assert.equal(f.$("chat-note-dialog").open, false);
-  assert.equal(f.$("chat-note").parentElement, f.$("right-panel"));
+  assert.equal(f.$("chat-note").parentElement, f.$("right-panel-content"));
   assert.equal(expandNote.getAttribute("aria-expanded"), "false");
   const css = await readFile(new URL("../web/style.css", import.meta.url), "utf8");
+  assert.match(css, /main\.right-panel-collapsed #right-panel-content\s*\{\s*display:\s*none;/);
+  assert.match(css, /main\.right-panel-collapsed #right-panel\[hidden\]\s*\{\s*display:\s*none;/);
   assert.match(css, /#chat-note-dialog \{[^}]*width: 80vw; height: 80dvh/);
   assert.match(css, /#chat-note\[data-previewing="true"\] \.chat-note-box:hover #chat-note-expand/);
   assert.equal(note.value, "# Saved snippet");

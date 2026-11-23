@@ -114,13 +114,14 @@ function readChatImage(branch, id, index) {
   if (imageMimeType(bytes) === image.mimeType) return { bytes, mimeType: image.mimeType };
 }
 
-function explorerRoutes({ current, list, read, launch, clone }, presence) {
+function explorerRoutes({ current, list, read, launch, clone, createNewSession }, presence) {
   let catalog = new Map();
   let liveCloneSession;
   let saved;
   let listing;
   const opening = new Map();
   const cloning = new Map();
+  let creatingSession = false;
   const savedBranch = (id) => {
     const session = catalog.get(id);
     if (!session) return;
@@ -158,6 +159,7 @@ function explorerRoutes({ current, list, read, launch, clone }, presence) {
         current: { id: live.id, cwd: live.cwd, name: live.name, ...(liveParent ? { parentId: liveParent } : {}), ...(liveRecord && clone ? { canClone: true } : {}) },
         sessions: [...catalog.values()].filter(({ id }) => id !== live.id).map(({ id, cwd, name, parentId }) => ({ id, cwd, name, ...(parentId ? { parentId } : {}), ...(clone ? { canClone: true } : {}) })),
         ...(launch ? { canOpen: true } : {}),
+        ...(createNewSession ? { canCreateNewSession: true } : {}),
       };
     },
     noteActive(sessions) {
@@ -185,6 +187,16 @@ function explorerRoutes({ current, list, read, launch, clone }, presence) {
       } finally {
         if (opening.get(id) === Infinity) opening.delete(id);
       }
+    },
+    createSession(reply, checkCurrent, afterResponse) {
+      if (!createNewSession) return reply(404, { error: "Creating a new chat is unavailable." });
+      if (creatingSession) return reply(409, { error: "Pi is already starting a new chat." });
+      if (!checkCurrent()) return;
+      creatingSession = true;
+      afterResponse(() => {
+        Promise.resolve().then(createNewSession).catch(() => {}).finally(() => { creatingSession = false; });
+      });
+      reply(202, { ok: true });
     },
     async cloneSession(id, reply, checkCurrent) {
       const session = typeof id === "string" && (id === current().id ? liveCloneSession : catalog.get(id));
@@ -420,7 +432,8 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
       const saveNote = live && req.url === "/api/note";
       const openSession = explorer && req.url === "/api/session/open";
       const cloneSession = explorer && req.url === "/api/session/clone";
-      if (req.method === "POST" && (disconnect || renameSession || renderNote || saveNote || openSession || cloneSession || req.url === "/api/chat")) {
+      const newSession = explorer && req.url === "/api/session/new";
+      if (req.method === "POST" && (disconnect || renameSession || renderNote || saveNote || openSession || cloneSession || newSession || req.url === "/api/chat")) {
         if (req.headers.origin !== origin || req.headers["content-type"] !== "application/json") {
           reply(403, { error: "Expected a same-origin JSON request." });
           return;
@@ -437,7 +450,7 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
           reply(200, { ok: true });
           return;
         }
-        const raw = await readBody(req, renderNote || saveNote ? NOTE_BODY_LIMIT : openSession || renameSession || cloneSession ? 4096 : CHAT_BODY_LIMIT);
+        const raw = await readBody(req, renderNote || saveNote ? NOTE_BODY_LIMIT : openSession || renameSession || cloneSession || newSession ? 4096 : CHAT_BODY_LIMIT);
         const body = JSON.parse(raw.toString("utf8"));
         if (saveNote) {
           if (!checkCurrent()) return;
@@ -460,6 +473,10 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
         }
         if (cloneSession) {
           if (checkCurrent()) await explorer.cloneSession(body?.id, reply, checkCurrent);
+          return;
+        }
+        if (newSession) {
+          if (checkCurrent()) explorer.createSession(reply, checkCurrent, (run) => res.once("finish", run));
           return;
         }
         if (raw.length > CHAT_BODY_LIMIT) throw new Error("Request is too large.");

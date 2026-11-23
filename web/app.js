@@ -21,6 +21,7 @@ const chatNoteDialog = $("chat-note-dialog");
 const chatNoteInput = $("chat-note-input");
 const chatNotePreview = $("chat-note-preview");
 const chatNotePreviewToggle = $("chat-note-preview-toggle");
+const rightPanelToggle = $("right-panel-toggle");
 const chatNoteCopy = $("chat-note-copy");
 const chatNoteExpand = $("chat-note-expand");
 let chatSessionId;
@@ -45,7 +46,7 @@ let readingFiles = false;
 let cursor = null;
 const appTitle = "Pi Chat";
 let liveTitle = appTitle;
-let chatStatusEmoji = "⚪";
+let chatTitlePrefix = "⚪";
 let liveSessionName;
 let catalog;
 let catalogProblem = "";
@@ -57,7 +58,9 @@ let savedSessionId;
 let savedSelection = 0;
 let liveScroll;
 let busy = false;
+let failed = false;
 let connected = true;
+let acceptedSends = 0;
 let lastAttempt;
 let selectedPassage;
 let pending;
@@ -135,7 +138,7 @@ function loadChatNote(sessionId) {
 }
 
 function updateLiveDocumentTitle() {
-  document.title = `${chatStatusEmoji} ${liveTitle}`;
+  document.title = `${chatTitlePrefix} ${liveTitle}`;
 }
 
 function updateSessionTitle(name) {
@@ -489,6 +492,7 @@ async function sendChat(body) {
   // An unchanged retry uses the same ID if Pi accepted it but the HTTP response was lost.
   if (!isRetry(body)) lastAttempt = { ...body, id: crypto.randomUUID() };
   sending = true;
+  updateChatState();
   renderAnnotations();
   status("Sending to Pi…");
   try {
@@ -499,13 +503,14 @@ async function sendChat(body) {
       chatInput.value = "";
       setAttachments([]);
     }
-    busy = true; // The next poll reconciles this with Pi, even for a very fast reply.
-    if (connected) setChatState("working");
+    busy = true; // The next fresh poll reconciles this with Pi, even for a very fast reply.
+    acceptedSends++;
     status("Sent to Pi.");
   } catch (error) {
     status(error.message || "Could not confirm the send. Your draft is still here.", true);
   } finally {
     sending = false;
+    updateChatState();
     renderAnnotations();
   }
 }
@@ -578,6 +583,14 @@ chatNoteInput.addEventListener("input", () => {
   chatNoteSaveTimer = setTimeout(() => { void saveChatNote(); }, 350);
 });
 chatNoteInput.addEventListener("blur", () => { void saveChatNote(); });
+rightPanelToggle.addEventListener("click", () => {
+  const expanded = rightPanelToggle.getAttribute("aria-expanded") === "true";
+  document.querySelector("main").classList.toggle("right-panel-collapsed", expanded);
+  rightPanelToggle.setAttribute("aria-expanded", String(!expanded));
+  const label = `${expanded ? "Expand" : "Collapse"} right sidebar`;
+  rightPanelToggle.setAttribute("aria-label", label);
+  rightPanelToggle.title = label;
+});
 chatNotePreviewToggle.addEventListener("click", async () => {
   if (chatNotePreviewing) {
     chatNoteInput.hidden = false;
@@ -733,13 +746,14 @@ function updateFaviconStatus(state) {
   favicon.href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
-function setChatState(state) {
+function updateChatState() {
+  const state = !connected ? "disconnected" : sending || busy ? "working" : failed ? "stopped" : "ready";
   const indicator = $("chat-state");
   if (indicator.dataset.state === state) return;
   indicator.dataset.state = state;
   indicator.title = chatStates[state];
   indicator.querySelector(".chat-state-label").textContent = chatStates[state];
-  chatStatusEmoji = ({ ready: "👾", working: "🏗️", stopped: "🚫", disconnected: "🔌" })[state] ?? "🔌";
+  chatTitlePrefix = ({ ready: "✓ Ready ·", working: "🏗️", stopped: "🚫", disconnected: "🔌" })[state] ?? "🔌";
   updateFaviconStatus(state);
   if (!savedSessionId) updateLiveDocumentTitle();
 }
@@ -855,8 +869,9 @@ function updateChat(data) {
   }
   cursor = data.cursor;
   busy = data.busy;
+  failed = data.failed;
   connected = true;
-  setChatState(busy ? "working" : data.failed ? "stopped" : "ready");
+  updateChatState();
   updateButtons();
 }
 
@@ -864,6 +879,7 @@ const explorer = $("chat-explorer");
 const explorerToggle = $("explorer-toggle");
 const sessionFilter = $("session-filter");
 const refreshSessions = $("refresh-sessions");
+const newChatSession = $("new-chat-session");
 const openSavedButton = $("open-saved-chat");
 const projectControls = $("project-view-controls");
 const projectView = () => ({ mode: "normal", collapsed: new Set(), overrides: new Set() });
@@ -1132,6 +1148,7 @@ async function loadSessions() {
       catalog = await api("/api/sessions"); // Retry a dropped Safari connection once.
     }
     catalogProblem = "";
+    newChatSession.hidden = !catalog.canCreateNewSession;
     if (savedSessionId && !catalog.sessions.some(({ id }) => id === savedSessionId)) {
       savedSelection++;
       clearSavedTranscript();
@@ -1241,6 +1258,16 @@ sessionFilter.addEventListener("input", () => {
   searchProjects = projectView();
   renderSessionList();
 });
+newChatSession.addEventListener("click", async () => {
+  newChatSession.disabled = true;
+  status("Starting a new chat in this project…");
+  try {
+    await api("/api/session/new", {});
+  } catch (error) {
+    status(error.message || "Could not start a new chat.", true);
+    newChatSession.disabled = false;
+  }
+});
 projectControls.addEventListener("click", (event) => {
   const button = event.target.closest("button");
   if (button?.dataset.action === "show-current") {
@@ -1281,7 +1308,7 @@ function startChat(data) {
   send.title = "Send questions";
   send.setAttribute("aria-label", "Send 0 questions");
   send.replaceChildren();
-  send.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 15 22 11 13 2 9 22 2ZM22 2 11 13"/></svg><span id="count" class="send-count">0</span>';
+  send.innerHTML = '<span class="send-icon" aria-hidden="true">🚀</span><span id="count" class="send-count">0</span>';
   $("annotation-heading").append(send);
   responseElement.addEventListener("scroll", updateCurrentTurn, { passive: true });
   window.addEventListener("resize", updateCurrentTurn);
@@ -1295,14 +1322,17 @@ function startChat(data) {
   async function poll() {
     try {
       const wasConnected = connected;
-      updateChat(await api(cursor === null ? "/api/response" : `/api/response?after=${encodeURIComponent(cursor)}`));
+      const sendsAtPollStart = acceptedSends;
+      const data = await api(cursor === null ? "/api/response" : `/api/response?after=${encodeURIComponent(cursor)}`);
+      // A poll started before send acknowledgement may still report the previous idle state.
+      if (sendsAtPollStart === acceptedSends) updateChat(data);
       if (!wasConnected) renderSessionList();
       if (!explorer.hidden || savedSessionId) void refreshActivity();
     } catch (error) {
       const wasConnected = connected;
       connected = false;
       if (wasConnected) renderSessionList();
-      setChatState("disconnected");
+      updateChatState();
       updateButtons();
       if ([401, 410].includes(error.status)) return;
     }
