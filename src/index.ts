@@ -35,7 +35,7 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
   pi.registerFlag("dashboard", { type: "boolean", default: false, description: "Open the Pi Chat dashboard at startup" });
   let active: Awaited<ReturnType<typeof startChatServer>> | undefined;
   let dashboard: ReturnType<typeof startDashboard> | undefined;
-  let closeOwner: (() => Promise<void>) | undefined;
+  let sessionOwner: Awaited<ReturnType<typeof registerSessionOwner>> | undefined;
   let ownerGeneration = 0;
   let generation = 0;
   const chatDispatch = new AsyncLocalStorage<() => void>();
@@ -44,6 +44,8 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
     // not a concurrent terminal prompt. A transformed input is still accepted.
     if (event.message.role === "user") chatDispatch.getStore()?.();
   });
+  pi.on("agent_start", () => sessionOwner?.setWorking(true));
+  pi.on("agent_end", () => sessionOwner?.setWorking(false));
   const stop = () => {
     generation++;
     active?.close();
@@ -52,11 +54,11 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
   pi.on("session_shutdown", async () => {
     stop();
     ownerGeneration++;
-    const close = closeOwner;
-    closeOwner = undefined;
+    const owner = sessionOwner;
+    sessionOwner = undefined;
     const closing = dashboard;
     dashboard = undefined;
-    await Promise.all([close?.(), closing?.then((opened) => opened.close(), () => {})]);
+    await Promise.all([owner?.close(), closing?.then((opened) => opened.close(), () => {})]);
   });
   pi.on("session_before_fork", stop);
   pi.on("session_before_tree", stop);
@@ -235,20 +237,20 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
     if (ctx.mode === "tui" && process.platform !== "win32") {
       const owner = ++ownerGeneration;
       const id = ctx.sessionManager.getSessionId();
-      const previousOwner = closeOwner;
-      closeOwner = undefined;
+      const previousOwner = sessionOwner;
+      sessionOwner = undefined;
       try {
-        await previousOwner?.();
+        await previousOwner?.close();
         if (owner !== ownerGeneration) return;
-        const close = await registerSessionOwner(ownerRegistry(await agentDirPath()), {
+        const registered = await registerSessionOwner(ownerRegistry(await agentDirPath()), {
           id, cwd: ctx.sessionManager.getCwd(), name: ctx.sessionManager.getSessionName(),
         }, async () => {
           if (owner !== ownerGeneration || ctx.sessionManager.getSessionId() !== id) return "unavailable";
           if (active) return "already-open";
           return await runChatPage("", ctx) ? "attached" : "unavailable";
         });
-        if (owner === ownerGeneration) closeOwner = close;
-        else await close();
+        if (owner === ownerGeneration) sessionOwner = registered;
+        else await registered.close();
       } catch { /* /chat remains usable if local process discovery is unavailable. */ }
     }
     const target = process.env[AUTO_CHAT_SESSION];

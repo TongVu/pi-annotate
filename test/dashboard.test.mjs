@@ -133,11 +133,11 @@ test("dashboard reconnects a disconnected Pi owner before considering a saved-se
   let attachments = 0;
   let launches = 0;
   const dashboard = await fixture(t, { resume: async (session) => { assert.deepEqual(session, saved); launches++; } });
-  const closeOwner = await registerSessionOwner(dashboard.ownerDir, { id: "unsaved", cwd: "/work/other" }, async () => {
+  const owner = await registerSessionOwner(dashboard.ownerDir, { id: "unsaved", cwd: "/work/other" }, async () => {
     attachments++;
     return "attached";
   });
-  t.after(closeOwner);
+  t.after(owner.close);
   assert.deepEqual((await dashboard.sessions()).map(({ id, status }) => [id, status]), [["saved", "saved"], ["unsaved", "disconnected"]]);
   assert.equal((await dashboard.action("unsaved", "open")).status, 202);
   assert.equal(attachments, 1);
@@ -268,6 +268,16 @@ test("dashboard filters projects and cards by name or directory within the selec
   assert.equal(tooltip().textContent, "/work/site");
   q('.card [data-id="a"]').dispatchEvent(new dom.window.MouseEvent("mouseenter"));
   assert.equal(tooltip().textContent, "Hero copy");
+  for (const selector of ["#stats .dot.disconnected", "#legend .dot.disconnected", ".card .dot.disconnected"]) {
+    q(selector).closest(".pill").dispatchEvent(new dom.window.MouseEvent("mouseenter"));
+    assert.equal(tooltip().textContent, "Running in Terminal · No chat tab connected");
+  }
+  const disconnectedCount = () => q("#stats .dot.disconnected").closest(".stat").querySelector("b").textContent;
+  assert.equal(disconnectedCount(), "1");
+  for (const selector of ['#projects [data-id="d"]', '.card [data-id="d"]']) {
+    q(selector).dispatchEvent(new dom.window.MouseEvent("mouseenter"));
+    assert.equal(tooltip().textContent, "Draft deck · Running in Terminal · No chat tab connected");
+  }
   const time = q(".card time");
   time.dispatchEvent(new dom.window.MouseEvent("mouseenter"));
   assert.equal(tooltip().textContent, new Date(time.dateTime).toLocaleString());
@@ -275,6 +285,18 @@ test("dashboard filters projects and cards by name or directory within the selec
   assert.equal(tooltip(), null);
   assert.equal(dom.window.document.querySelectorAll("[title]").length, 0);
   q("#refresh").blur();
+  entries[3].terminalWorking = true;
+  q("#refresh").click();
+  await waitFor(() => q("#projects .dot.disconnected.terminal-working"));
+  q(".card .dot.disconnected.terminal-working").closest(".pill").dispatchEvent(new dom.window.MouseEvent("mouseenter"));
+  assert.equal(tooltip().textContent, "Working in Terminal · No chat tab connected");
+  q('#projects [data-id="d"]').focus();
+  assert.equal(tooltip().textContent, "Draft deck · Working in Terminal · No chat tab connected");
+  assert.equal(disconnectedCount(), "1");
+  assert.equal(workingCount(), "1", "a disconnected working session isn't counted as connected working");
+  delete entries[3].terminalWorking;
+  q("#refresh").click();
+  await waitFor(() => !q(".dot.disconnected.terminal-working"));
   const filter = (value) => {
     const field = q("#session-filter");
     field.value = value;

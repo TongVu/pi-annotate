@@ -416,6 +416,36 @@ test("installed Pi accepts a browser prompt before the model finishes, then expo
     await session.prompt("/chat close");
     assert.equal((await dashboardState()).status, 200);
     await assert.rejects(() => get("/api/response"));
+    if (process.platform !== "win32") {
+      const terminalState = async () => (await (await dashboardState()).json()).sessions
+        .find(({ id }) => id === sessionManager.getSessionId());
+      assert.equal((await terminalState()).status, "disconnected");
+      assert.equal((await terminalState()).terminalWorking, undefined);
+      const gate = Promise.withResolvers();
+      faux.setResponses([async () => {
+        await gate.promise;
+        return fauxAssistantMessage("Terminal reply.");
+      }]);
+      const turn = session.prompt("Work from Terminal with no chat tab");
+      try {
+        let working;
+        for (let attempt = 0; attempt < 60; attempt++) {
+          working = await terminalState();
+          if (working.terminalWorking) break;
+          await delay(25);
+        }
+        assert.equal(working.status, "disconnected");
+        assert.equal(working.terminalWorking, true);
+        assert.equal(working.action, "reopen");
+      } finally {
+        gate.resolve();
+        await turn;
+        await session.waitForIdle();
+      }
+      const idle = await terminalState();
+      assert.equal(idle.status, "disconnected");
+      assert.equal(idle.terminalWorking, undefined);
+    }
     assert.deepEqual(errors, []);
   } finally {
     finishReply();

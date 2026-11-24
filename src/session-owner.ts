@@ -7,6 +7,7 @@ import { isAbsolute, join } from "node:path";
 
 type OwnerResult = "attached" | "already-open" | "unavailable";
 type Identity = { id: string; cwd: string; name?: string };
+type OwnedSession = Identity & { working?: true };
 const prefix = (id: string) => createHash("sha256").update(id).digest("hex");
 
 function processAlive(pid: number) {
@@ -31,9 +32,23 @@ export async function registerSessionOwner(registry: string, session: Identity, 
     opening ??= Promise.resolve().then(attach).catch(() => "unavailable" as const).finally(() => { opening = undefined; });
     void opening.then((result) => socket.end(result));
   });
+  const record = { ...session, pid: process.pid, socketPath, startedAt: Date.now() };
+  const publish = async (working: boolean) => {
+    await writeFile(`${marker}.tmp`, JSON.stringify({ ...record, working }), { mode: 0o600 });
+    await rename(`${marker}.tmp`, marker);
+  };
+  let closed = false;
+  // Finish queued writes before cleanup so an update can't recreate a closed owner.
+  let writing = Promise.resolve();
+  const setWorking = (working: boolean) => {
+    if (!closed) writing = writing.then(() => publish(working)).catch(() => {});
+    return writing;
+  };
   const close = async () => {
+    closed = true;
     for (const socket of sockets) socket.destroy();
     if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
+    await writing;
     await Promise.all([rm(marker, { force: true }), rm(`${marker}.tmp`, { force: true }), rm(directory, { recursive: true, force: true })]).catch(() => {});
   };
   try {
@@ -42,10 +57,8 @@ export async function registerSessionOwner(registry: string, session: Identity, 
       server.listen(socketPath, resolve);
     });
     server.unref();
-    const record = { ...session, pid: process.pid, socketPath, startedAt: Date.now() };
-    await writeFile(`${marker}.tmp`, JSON.stringify(record), { mode: 0o600 });
-    await rename(`${marker}.tmp`, marker);
-    return close;
+    await publish(false);
+    return { close, setWorking };
   } catch (error) {
     await close();
     throw error;
@@ -68,17 +81,18 @@ function askOwner(path: string): Promise<OwnerResult> {
   });
 }
 
-export async function listOwnedSessions(registry: string): Promise<Identity[]> {
+export async function listOwnedSessions(registry: string): Promise<OwnedSession[]> {
   const names = await readdir(registry).catch(() => []);
-  const sessions = new Map<string, Identity>();
+  const sessions = new Map<string, OwnedSession>();
   for (const name of names) {
     if (!/^[a-f0-9]{64}-[a-f0-9-]{36}\.json$/.test(name)) continue;
     const path = join(registry, name);
     try {
-      const { pid, id, cwd, name: label } = JSON.parse(await readFile(path, "utf8"));
+      const { pid, id, cwd, name: label, working } = JSON.parse(await readFile(path, "utf8"));
       if (!processAlive(pid)) await rm(path, { force: true });
       else if (typeof id === "string" && typeof cwd === "string" && name.startsWith(prefix(id))) {
-        sessions.set(id, { id, cwd, name: typeof label === "string" ? label : undefined });
+        sessions.set(id, { id, cwd, name: typeof label === "string" ? label : undefined,
+          working: working === true || sessions.get(id)?.working ? true : undefined });
       }
     } catch { /* The owner may have just shut down. */ }
   }

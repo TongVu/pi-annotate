@@ -23,6 +23,7 @@ const statuses = {
   saved: "Saved",
   connected: "Connected · status unavailable",
 };
+const disconnectedHint = (terminalWorking) => `${terminalWorking ? "Working" : "Running"} in Terminal · No chat tab connected`;
 const actions = {
   focus: "Go to tab",
   "manual-tab": "Find existing tab",
@@ -52,15 +53,16 @@ function el(tag, className, text) {
   return node;
 }
 
-function dot(state) {
-  const node = el("span", `dot ${state}`);
+function dot(state, terminalWorking) {
+  const node = el("span", `dot ${state}${terminalWorking ? " terminal-working" : ""}`);
   node.setAttribute("aria-hidden", "true");
   return node;
 }
 
-function pill(state, label = statuses[state]) {
+function pill(state, label = statuses[state], terminalWorking) {
   const node = el("span", "pill");
-  node.append(dot(state), label);
+  node.append(dot(state, terminalWorking), label);
+  if (state === "disconnected") setTooltip(node, disconnectedHint(terminalWorking));
   return node;
 }
 
@@ -86,9 +88,10 @@ function actionButton(session, inSidebar = false) {
   node.dataset.place = inSidebar ? "side" : "card";
   node.disabled = session.action === "unavailable";
   node.setAttribute("aria-disabled", String(pending.has(session.id) || node.disabled));
-  node.setAttribute("aria-label", `${label}: ${session.name} (${statuses[session.status]})`);
-  setTooltip(node, session.name);
-  if (inSidebar) node.append(dot(session.status), el("span", "truncate", session.name), el("span", "meta", age(session.modified)));
+  const { status, terminalWorking } = session;
+  node.setAttribute("aria-label", `${label}: ${session.name} (${statuses[status]}${terminalWorking ? " · Working in Terminal" : ""})`);
+  setTooltip(node, status === "disconnected" ? `${session.name} · ${disconnectedHint(terminalWorking)}` : session.name);
+  if (inSidebar) node.append(dot(status, terminalWorking), el("span", "truncate", session.name), el("span", "meta", age(session.modified)));
   return node;
 }
 
@@ -119,7 +122,7 @@ function cards(cwd, items) {
   if (view !== "project") section.append(el("h2", "", projectName(cwd)), el("p", "directory", cwd || "No saved directory"));
   for (const session of items) {
     const card = el("article", "card");
-    card.append(pill(session.status), el("h3", "", session.name));
+    card.append(pill(session.status, undefined, session.terminalWorking), el("h3", "", session.name));
     if (session.preview) card.append(el("p", "", session.preview));
     const row = el("div", "row");
     const when = el("time", "", session.modified ? `Updated ${age(session.modified)}` : "");

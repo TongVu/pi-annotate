@@ -96,10 +96,11 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .open:disabled { color: var(--muted); }
 .dot { position: relative; display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex: none; }
 .dot.working { background: #d97757; }
-.dot.working::after { content: ""; position: absolute; inset: -4px; border: 2px solid #d97757; border-radius: 50%; animation: pulse 1.6s ease-out infinite; }
+.dot.working::after, .dot.disconnected.terminal-working::after { content: ""; position: absolute; inset: -4px; border: 2px solid #d97757; border-radius: 50%; animation: pulse 1.6s ease-out infinite; }
 .dot.ready { background: #3c9a6a; animation: chat-breathe 2.8s ease-in-out infinite; }
 .dot.error { background: #c2423a; box-shadow: 0 0 0 2px #c2423a30; }
-.dot.disconnected { border: 2px solid #8a887f; }
+.dot.disconnected { border: 2px solid #3c9a6a; }
+.dot.disconnected.terminal-working { border-color: #d97757; }
 .dot.saved, .dot.connected { background: #aaa89f; }
 @keyframes pulse { from { transform: scale(.6); opacity: .9; } to { transform: scale(1.8); opacity: 0; } }
 @keyframes chat-breathe { 50% { opacity: .55; transform: scale(.82); } }
@@ -120,6 +121,6 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .dot.working::after { animation: none; opacity: .35; }
+  .dot.working::after, .dot.disconnected.terminal-working::after { animation: none; opacity: .35; }
   .dot.ready { animation: none; }
 }

@@ -90,6 +90,7 @@ export async function startDashboard({ list, presenceDir, ownerDir, project, res
             preview: preview !== name ? preview : "",
             modified: session?.modified.getTime() ?? null,
             status: peer ? peer.status ?? "connected" : owner ? "disconnected" : "saved",
+            terminalWorking: !peer && owner?.working ? true : undefined,
             action: peer ? (peer.tab && canFocus(agent) ? "focus" : "manual-tab")
               : owner ? "reopen" : session?.cwd ? (resume ? "resume" : "manual-resume") : "unavailable",
           };
