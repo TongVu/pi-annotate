@@ -10,6 +10,8 @@ import { readWebAsset } from "./web-assets.ts";
 const assets = {
   "/": ["index.html", "text/html; charset=utf-8"],
   "/app.js": ["app.js", "text/javascript; charset=utf-8", "tooltips.js"],
+  "/chat/page.js": ["chat/page.js", "text/javascript; charset=utf-8"],
+  "/chat/explorer.js": ["chat/explorer.js", "text/javascript; charset=utf-8"],
   "/chat/notes.js": ["chat/notes.js", "text/javascript; charset=utf-8"],
   "/style.css": ["style.css", "text/css; charset=utf-8", "tooltips.css"],
   "/favicon.ico": ["favicon.ico", "image/x-icon"],

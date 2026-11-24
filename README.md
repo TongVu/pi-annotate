@@ -262,12 +262,11 @@ Pi 1.3.0 / Node.js 26.5.0 setup, native `.mjs` helpers stayed cached across relo
 leaving old server code paired with new browser assets. Do not change those helpers
 back to `.mjs` without verifying same-process reload behavior.
 
-The chat page starts in `web/app.js` and loads `web/chat/notes.js` as a native
-browser module. There is no frontend build. When adding a module, list its
-URL explicitly in `src/server.ts`. A chat listener started before the notes
-module was added can still serve the chat, but it cannot serve the note editor.
-Already-open tabs keep their loaded code. To restore the note editor on an
-older listener, finish any unsent drafts, run `/reload` in Pi, then reopen `/chat`.
+The chat entry point `web/app.js` loads native browser modules from `web/chat/`.
+There is no frontend build. When adding a module, list its URL explicitly in
+`src/server.ts`. Already-open tabs keep their loaded code. After updating the
+checkout, a newly opened tab from an older Pi listener may be missing module
+URLs. Finish any unsent drafts, run `/reload` in Pi, then reopen `/chat`.
 
 The native-loader regression test runs automatically inside the managed Pi
 environment. Elsewhere, set `PI_EXTENSION_LOADER` to your installed Pi's

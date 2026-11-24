@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { request } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createChatPresence } from "../src/chat-presence.ts";
@@ -54,10 +54,12 @@ test("loopback app requires token for response, serves safe static assets", asyn
     assert.equal(asset.status, 200);
     assert.match(await asset.text(), marker);
   }
-  const notes = await fetch(f.base + "/chat/notes.js");
-  assert.equal(notes.status, 200);
-  assert.match(notes.headers.get("content-type"), /^text\/javascript\b/);
-  assert.match(await notes.text(), /export function mountChatNotes/);
+  const modules = await readdir(new URL("../web/chat/", import.meta.url));
+  for (const path of modules.filter((file) => file.endsWith(".js"))) {
+    const module = await fetch(`${f.base}/chat/${path}`);
+    assert.equal(module.status, 200, path);
+    assert.match(module.headers.get("content-type"), /^text\/javascript\b/);
+  }
   assert.equal((await fetch(f.base + "/logo.png")).headers.get("content-type"), "image/png");
   assert.equal((await fetch(`${f.base}/not-a-file`, { headers: f.headers })).status, 404);
 });
