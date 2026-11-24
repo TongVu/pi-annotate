@@ -32,7 +32,7 @@ fullscreen terminal modes work.
    to open the link yourself. A named session appears by name in its browser tab.
 2. Type a message in the bottom composer, or select text in a Pi reply and click
    **Add annotation** to write a question. You can also copy the selected text
-   normally without opening the dialog. Keep reusable Markdown in the right-panel note;
+   normally without opening the dialog. Keep reusable Markdown in the left sidebar's note;
    it saves locally per chat in Pi's data directory, survives closing and
    reopening `/chat`, and can be previewed or copied as Markdown. The dots stay
    centered on the left as you scroll; the current turn is blue.
@@ -53,7 +53,8 @@ Click **👾** in the composer to view or change this chat’s model and thinkin
 Click the **Context usage** ring in the composer to see Pi's estimated token usage and the model's context limit. Click **Compact chat** when Pi is idle and confirm to summarize older context without removing messages from the transcript. After compaction, Pi reports usage again after its next reply.
 
 Click the live chat title to rename the session. Use the panel icons next to
-**🕹️** to show or hide the right sidebar and chat explorer.
+**🕹️** to show or hide notes and annotations on the left or the chat explorer on the right.
+On narrow screens, notes and annotations sit below the chat and the explorer opens from the right edge.
 Click **🕹️** to switch to the terminal tab running that chat. It does not start
 Pi, open a new tab, or send text to the terminal.
 On macOS, use Terminal.app and allow Terminal Automation if prompted. On Linux,
@@ -87,7 +88,7 @@ chat before sending again. Live chat was verified with Pi 1.5.2.
 ### Chat dashboard
 
 Run `pi --dashboard` from your shell. From a running Pi session, `/chat dashboard`
-or the logo in the explorer controls opens the dashboard without losing a chat draft.
+or the logo to the left of the chat title opens the dashboard without losing a chat draft.
 The sidebar groups sessions by their original project directory. Clones have
 separate cards with a **Cloned from** line when their parent session is available.
 Filter by
@@ -130,7 +131,7 @@ server too.
 
 ### Chat explorer
 
-Click the left-panel icon in the centered chat controls to open the explorer.
+Click the right-panel icon in the centered chat controls to open the explorer.
 To create a session, use **Create new chat** on the dashboard. The explorer groups sessions by
 project directory, with forked sessions nested under their Pi parent session
 when that parent is available. Click a project heading to collapse or expand its
@@ -286,7 +287,7 @@ Run `/chat`. Use Shift+Enter to create a newline and Enter to send. Check that t
 reply appears in the same tab. Scroll a long transcript and check that the dots
 stay centered, highlight the current turn, and jump to earlier messages. Attach
 several text files and screenshots and check that Pi receives all of them. Send an
-annotation batch and check that the right panel clears. Try a narrow browser
+annotation batch and check that the annotations list clears. Try a narrow browser
 window and check that closing the tab disconnects its link. Real keyboard
 selection support depends on browser caret browsing.
 

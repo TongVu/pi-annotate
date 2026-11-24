@@ -17,9 +17,6 @@
   <nav id="chat-explorer" aria-label="Chat explorer" hidden>
     <div class="explorer-tools">
       <div id="project-view-controls" role="group" aria-label="Chat explorer controls">
-        <button id="open-dashboard" type="button" aria-label="Open chat dashboard" title="Open chat dashboard in a new tab">
-          <img src="/logo.png" width="20" height="20" alt="">
-        </button>
         <button type="button" data-mode="collapse" aria-pressed="false" aria-label="Collapse all" title="Collapse all">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4l6 6m-5 0h5V5m10-1-6 6m0-5v5h5M4 20l6-6m-5 0h5v5m10 1-6-6m0 5v-5h5"/></svg>
         </button>
@@ -48,19 +45,22 @@
   </nav>
   <main>
     <div id="session-title-pill" class="session-title-pill" role="group" aria-label="Chat controls" hidden>
+      <button id="open-dashboard" type="button" class="secondary" aria-label="Open chat dashboard" title="Open chat dashboard in a new tab">
+        <img src="/logo.png" width="18" height="18" alt="">
+      </button>
       <button id="session-title-text" type="button" aria-haspopup="dialog"></button>
       <h2 id="saved-title" hidden></h2>
       <button id="focus-terminal" type="button" class="secondary" aria-label="Switch to Terminal" title="Switch to Terminal"><span aria-hidden="true">🕹️</span></button>
-      <button id="right-panel-toggle" type="button" class="secondary panel-toggle" aria-label="Collapse right sidebar" title="Collapse right sidebar" aria-expanded="true" aria-controls="right-panel">
+      <button id="chat-tools-toggle" type="button" class="secondary panel-toggle" aria-label="Collapse notes and annotations" title="Collapse notes and annotations" aria-expanded="true" aria-controls="chat-tools">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <rect x="3" y="4" width="18" height="16" rx="2"/>
-          <path d="M15 4v16"/>
+          <path d="M9 4v16"/>
         </svg>
       </button>
       <button id="explorer-toggle" type="button" class="secondary panel-toggle" aria-label="Toggle chat explorer" title="Toggle chat explorer" aria-expanded="false" aria-controls="chat-explorer">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <rect x="3" y="4" width="18" height="16" rx="2"/>
-          <path d="M9 4v16"/>
+          <path d="M15 4v16"/>
         </svg>
       </button>
     </div>
@@ -135,8 +135,8 @@
       <p id="saved-status" role="status"></p>
       <div id="saved-response" tabindex="0" aria-label="Saved conversation"></div>
     </section>
-    <aside id="right-panel" aria-label="Chat tools">
-      <div id="right-panel-content">
+    <aside id="chat-tools" aria-label="Chat tools">
+      <div id="chat-tools-content">
         <section id="chat-note" aria-labelledby="chat-note-title" hidden>
           <div class="chat-note-heading">
             <h2 id="chat-note-title">Markdown note</h2>

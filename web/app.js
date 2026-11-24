@@ -30,7 +30,7 @@ const chatNoteDialog = $("chat-note-dialog");
 const chatNoteInput = $("chat-note-input");
 const chatNotePreview = $("chat-note-preview");
 const chatNotePreviewToggle = $("chat-note-preview-toggle");
-const rightPanelToggle = $("right-panel-toggle");
+const chatToolsToggle = $("chat-tools-toggle");
 const chatNoteCopy = $("chat-note-copy");
 const chatNoteExpand = $("chat-note-expand");
 let chatSessionId;
@@ -501,7 +501,7 @@ $("comment-form").addEventListener("submit", (event) => {
   const next = editing >= 0 ? annotations.map((item, i) => i === editing ? annotation : item) : [...annotations, annotation];
   dialog.close();
   setAnnotations(next);
-  status("Question saved in the right panel. Send when ready.");
+  status("Question saved in Your annotations. Send when ready.");
 });
 
 async function sendChat(body) {
@@ -600,13 +600,13 @@ chatNoteInput.addEventListener("input", () => {
   chatNoteSaveTimer = setTimeout(() => { void saveChatNote(); }, 350);
 });
 chatNoteInput.addEventListener("blur", () => { void saveChatNote(); });
-rightPanelToggle.addEventListener("click", () => {
-  const expanded = rightPanelToggle.getAttribute("aria-expanded") === "true";
-  document.querySelector("main").classList.toggle("right-panel-collapsed", expanded);
-  rightPanelToggle.setAttribute("aria-expanded", String(!expanded));
-  const label = `${expanded ? "Expand" : "Collapse"} right sidebar`;
-  rightPanelToggle.setAttribute("aria-label", label);
-  setTooltip(rightPanelToggle, label);
+chatToolsToggle.addEventListener("click", () => {
+  const expanded = chatToolsToggle.getAttribute("aria-expanded") === "true";
+  document.querySelector("main").classList.toggle("chat-tools-collapsed", expanded);
+  chatToolsToggle.setAttribute("aria-expanded", String(!expanded));
+  const label = `${expanded ? "Expand" : "Collapse"} notes and annotations`;
+  chatToolsToggle.setAttribute("aria-label", label);
+  setTooltip(chatToolsToggle, label);
 });
 chatNotePreviewToggle.addEventListener("click", async () => {
   if (chatNotePreviewing) {
@@ -1324,7 +1324,7 @@ function clearSavedTranscript() {
 function setSavedView(saved) {
   hideSelectionAction();
   $("saved-conversation").hidden = $("saved-title").hidden = !saved;
-  for (const id of ["conversation", "chat-rail", "right-panel", "session-title-text", "focus-terminal", "right-panel-toggle"]) $(id).hidden = saved;
+  for (const id of ["conversation", "chat-rail", "chat-tools", "session-title-text", "focus-terminal", "chat-tools-toggle"]) $(id).hidden = saved;
   if (window.matchMedia?.("(max-width: 760px)").matches) setExplorerOpen(false);
   renderSessionList();
   updateButtons();

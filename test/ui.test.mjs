@@ -481,7 +481,7 @@ test("chat tab follows the Pi session name and moves chat controls out of the he
   assert.equal(f.window.document.title, "Pi Chat · ✓ Ready");
 });
 
-test("the explorer logo opens the dashboard without replacing the chat or its draft", async (t) => {
+test("the chat controls logo opens the dashboard with both sidebars closed and keeps the chat draft", async (t) => {
   const calls = [];
   const result = Promise.withResolvers();
   const f = await fixture(t, { chatFetch: async (path, body) => {
@@ -494,8 +494,14 @@ test("the explorer logo opens the dashboard without replacing the chat or its dr
   } });
   const button = f.$("open-dashboard");
   const original = f.window.location.href;
-  assert.equal(button.parentElement, f.$("project-view-controls"));
+  const controls = f.$("session-title-pill");
+  assert.equal(controls.firstElementChild, button);
   assert.equal(button.querySelector("img").getAttribute("src"), "/logo.png");
+  f.$("chat-tools-toggle").click();
+  assert.equal(f.$("chat-tools-toggle").getAttribute("aria-expanded"), "false");
+  assert.equal(f.$("chat-explorer").hidden, true);
+  assert.equal(controls.hidden, false);
+  assert.equal(button.hidden, false);
   f.$("chat-input").value = "Keep my draft";
   button.click();
   assert.equal(button.disabled, true);
@@ -585,7 +591,7 @@ test("clicking the live chat title opens renaming and updates the browser tab", 
   const title = f.$("session-title-text");
   const terminal = f.$("focus-terminal");
   assert.equal(pill.hidden, false);
-  assert.deepEqual([...pill.querySelectorAll("button")], [title, terminal, f.$("right-panel-toggle"), f.$("explorer-toggle")]);
+  assert.deepEqual([...pill.querySelectorAll("button")], [f.$("open-dashboard"), title, terminal, f.$("chat-tools-toggle"), f.$("explorer-toggle")]);
   assert.equal(title.getAttribute("aria-haspopup"), "dialog");
   assert.equal(title.getAttribute("aria-label"), `Rename ${sessionName}`);
   assert.equal(title.textContent, sessionName);
@@ -653,9 +659,12 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
       messages: [{ id: path.includes("?") ? "u2" : "u1", role: "user", text: path.includes("?") ? "New live message" : "Live message" }],
     }) };
   } });
-  assert.equal(f.$("right-panel").hidden, false);
+  assert.equal(f.$("chat-tools").hidden, false);
   const css = await readFile(new URL("../web/style.css", import.meta.url), "utf8");
-  assert.match(css, /\.chat-page #right-panel\[hidden\],[^{]+\{\s*display:\s*none;\s*\}/);
+  assert.match(css, /\.chat-page #chat-tools\[hidden\],[^{]+\{\s*display:\s*none;\s*\}/);
+  assert.match(css, /\.chat-page \{[^}]*\/ minmax\(0, 1fr\) var\(--explorer-width, 0px\)/);
+  assert.match(css, /#chat-explorer:not\(\[hidden\]\) \{ grid-area: 1 \/ 2;/);
+  assert.match(css, /#chat-explorer:not\(\[hidden\]\) \{ grid-area: 2 \/ 1; justify-self: end;/);
   const input = f.$("chat-input");
   input.value = "Unsent live draft";
   input.dispatchEvent(new f.window.Event("input"));
@@ -666,7 +675,8 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.equal(explorerToggle.title, "");
   assert.equal(explorerToggle.dataset.tooltip, "Toggle chat explorer");
   assert.ok(explorerToggle.querySelector('svg[aria-hidden="true"] rect'));
-  assert.ok(explorerToggle.querySelector('svg path'));
+  assert.equal(explorerToggle.getAttribute("aria-controls"), "chat-explorer");
+  assert.equal(explorerToggle.querySelector("svg path").getAttribute("d"), "M15 4v16");
   const scrolled = [];
   f.window.Element.prototype.scrollIntoView = function (options) { if (this.dataset.currentChat) scrolled.push(options); };
   explorerToggle.click();
@@ -711,7 +721,7 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.ok(controls.parentElement.firstElementChild === controls, "view-mode pill replaces the old heading position");
   assert.equal(f.$("session-filter").getAttribute("aria-label"), "Search chats by name or directory");
   assert.ok(f.$("session-filter").closest(".session-search").querySelector('svg[aria-hidden="true"]'));
-  assert.deepEqual([...controls.querySelectorAll("button")].map((button) => button.getAttribute("aria-label")), ["Open chat dashboard", "Collapse all", "Show current chat in explorer", "Expand all", "Refresh chats"]);
+  assert.deepEqual([...controls.querySelectorAll("button")].map((button) => button.getAttribute("aria-label")), ["Collapse all", "Show current chat in explorer", "Expand all", "Refresh chats"]);
   assert.ok(controls.querySelector('[data-action="show-current"] svg path'));
   assert.ok(controls.querySelector('[data-action="show-current"] svg circle'));
   assert.equal(controls.querySelectorAll('svg[aria-hidden="true"]').length, 4);
@@ -761,7 +771,7 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.equal(f.$("resume-command-dialog").open, true);
   assert.equal(f.$("resume-command").value, copied[0]);
   f.$("close-resume-command").click();
-  f.$("right-panel-toggle").click();
+  f.$("chat-tools-toggle").click();
   saved.click();
   await tick();
   assert.equal(f.window.document.title, longTitle);
@@ -769,16 +779,16 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.equal(f.$("saved-response").querySelector("strong").textContent, "Saved reply");
   assert.equal(f.$("saved-response").querySelector("[data-response-id]"), null);
   assert.equal(f.$("conversation").hidden, true);
-  assert.equal(f.$("right-panel").hidden, true);
+  assert.equal(f.$("chat-tools").hidden, true);
   assert.equal(f.$("session-title-pill").hidden, false);
   assert.equal(f.$("saved-title").textContent, longTitle);
   assert.equal(f.$("saved-title").hidden, false);
-  for (const id of ["session-title-text", "focus-terminal", "right-panel-toggle"]) assert.equal(f.$(id).hidden, true);
+  for (const id of ["session-title-text", "focus-terminal", "chat-tools-toggle"]) assert.equal(f.$(id).hidden, true);
   explorerToggle.click();
   assert.equal(f.$("chat-explorer").hidden, true);
   explorerToggle.click();
   assert.equal(f.$("chat-explorer").hidden, false);
-  assert.equal(f.window.document.querySelector("main").classList.contains("right-panel-collapsed"), true);
+  assert.equal(f.window.document.querySelector("main").classList.contains("chat-tools-collapsed"), true);
   assert.equal(f.$("chat-send").disabled, true);
   await f.poll();
   assert.equal(f.window.document.title, longTitle);
@@ -787,11 +797,11 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   f.$("back-to-live").click();
   assert.equal(f.window.document.title, "Live chat · ✓ Ready");
   assert.equal(f.$("conversation").hidden, false);
-  assert.equal(f.$("right-panel").hidden, false);
-  assert.equal(f.window.document.querySelector("main").classList.contains("right-panel-collapsed"), true);
+  assert.equal(f.$("chat-tools").hidden, false);
+  assert.equal(f.window.document.querySelector("main").classList.contains("chat-tools-collapsed"), true);
   assert.equal(f.$("saved-conversation").hidden, true);
   assert.equal(f.$("saved-title").hidden, true);
-  for (const id of ["session-title-text", "focus-terminal", "right-panel-toggle"]) assert.equal(f.$(id).hidden, false);
+  for (const id of ["session-title-text", "focus-terminal", "chat-tools-toggle"]) assert.equal(f.$(id).hidden, false);
   assert.equal(input.value, "Unsent live draft");
   assert.equal(f.$("chat-send").disabled, false);
   assert.equal(calls.some((path) => path === "/api/chat"), false);
@@ -872,16 +882,19 @@ test("Markdown notes persist per chat, preview safely, and copy their source", a
   assert.notEqual(f.$("chat-note").parentElement, f.$("annotations-panel"));
   assert.equal(f.$("chat-note-preview-toggle").textContent.trim(), "");
   assert.equal(f.$("chat-note-copy").textContent.trim(), "");
-  const panelToggle = f.$("right-panel-toggle");
+  const panelToggle = f.$("chat-tools-toggle");
+  assert.equal(panelToggle.getAttribute("aria-controls"), "chat-tools");
+  assert.equal(panelToggle.querySelector("svg path").getAttribute("d"), "M9 4v16");
   assert.equal(panelToggle.getAttribute("aria-expanded"), "true");
   panelToggle.click();
   assert.equal(panelToggle.getAttribute("aria-expanded"), "false");
-  assert.equal(panelToggle.getAttribute("aria-label"), "Expand right sidebar");
-  assert.equal(f.window.document.querySelector("main").classList.contains("right-panel-collapsed"), true);
+  assert.equal(panelToggle.getAttribute("aria-label"), "Expand notes and annotations");
+  assert.equal(panelToggle.dataset.tooltip, "Expand notes and annotations");
+  assert.equal(f.window.document.querySelector("main").classList.contains("chat-tools-collapsed"), true);
   assert.equal(f.$("annotations-panel").hidden, false);
   assert.equal(note.value, "# Saved snippet", "collapsing preserves the note draft");
   panelToggle.click();
-  assert.equal(f.window.document.querySelector("main").classList.contains("right-panel-collapsed"), false);
+  assert.equal(f.window.document.querySelector("main").classList.contains("chat-tools-collapsed"), false);
   const expandNote = f.$("chat-note-expand");
   const noteBox = f.$(expandNote.getAttribute("aria-controls"));
   const preview = f.$("chat-note-preview");
@@ -894,12 +907,15 @@ test("Markdown notes persist per chat, preview safely, and copy their source", a
   assert.equal(f.$("chat-note").parentElement, f.$("chat-note-dialog"));
   expandNote.click();
   assert.equal(f.$("chat-note-dialog").open, false);
-  assert.equal(f.$("chat-note").parentElement, f.$("right-panel-content"));
+  assert.equal(f.$("chat-note").parentElement, f.$("chat-tools-content"));
   assert.equal(expandNote.getAttribute("aria-expanded"), "false");
   const css = await readFile(new URL("../web/style.css", import.meta.url), "utf8");
-  assert.match(css, /main\.right-panel-collapsed #right-panel\s*\{\s*display:\s*none;/);
+  assert.match(css, /main\.chat-tools-collapsed #chat-tools\s*\{\s*display:\s*none;/);
+  assert.match(css, /\.chat-page main \{[^}]*grid-template-columns: \[tools\][^;]+\[rail\][^;]+\[transcript\]/);
+  assert.match(css, /\.chat-page #chat-tools \{[^}]*grid-area: 1 \/ tools \/ -1 \/ rail;/);
+  assert.match(css, /\.chat-page #chat-tools \{ grid-area: 4 \/ 1 \/ auto \/ -1;/);
   assert.match(css, /#chat-note-dialog \{[^}]*width: 80vw; height: 80dvh/);
-  assert.match(css, /#right-panel-content \{[^}]*grid-template-columns: minmax\(0, 1fr\)/);
+  assert.match(css, /#chat-tools-content \{[^}]*grid-template-columns: minmax\(0, 1fr\)/);
   assert.equal(note.value, "# Saved snippet");
   const longLine = "wide code ".repeat(200).trimEnd();
   note.value = `# Reusable\n\n**Prompt text** <script>bad()</script>\n\n\`\`\`\n${longLine}\n\`\`\`\n\n${"More text.\n\n".repeat(80)}End of note.`;
