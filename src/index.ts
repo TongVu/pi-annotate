@@ -71,6 +71,7 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
       project,
       presenceDir: presenceRegistry(agentDir),
       ownerDir: ownerRegistry(agentDir),
+      bookmarkDir: join(agentDir, "pi-chat-bookmarks"),
       focusTerminal,
       ...(process.platform === "darwin" ? {
         resume: (session) => resumeChatInTerminal(session, fileURLToPath(import.meta.url), agentDir),

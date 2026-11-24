@@ -90,7 +90,11 @@ The sidebar groups sessions by their original project directory. Filter by
 **Name or directory** to narrow the sidebar, cards, and counts. **All sessions**
 shows every group; **Needs attention** shows connected chats that are ready for
 input or whose last turn stopped. Its status counts still include all matching
-chats. Pulsing amber and green dots mark working and ready chats, respectively.
+chats. **Bookmarks** shows only the chats you’ve bookmarked, grouped by project.
+Hover over a session card or use keyboard focus to reveal its top-right bookmark
+button (always visible on touch screens). Click it again to remove the bookmark.
+Bookmarks stay visible on marked cards and survive dashboard and machine restarts.
+Pulsing amber and green dots mark working and ready chats, respectively.
 A hollow green ring marks a Pi session still running in Terminal without a connected chat tab.
 It pulses amber during a turn but stays in the **Disconnected** count. A filled gray dot
 marks a saved session that isn't running. Status updates even when the chat tab is in the background.

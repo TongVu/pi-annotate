@@ -32,12 +32,14 @@ async function fixture(t, options = {}) {
   const dir = await mkdtemp(join(tmpdir(), "pi-dashboard-"));
   const presenceDir = join(dir, "live");
   const ownerDir = join(dir, "owners");
-  const server = await startDashboard({ list: async () => [saved], presenceDir, ownerDir, ...options });
+  const bookmarkDir = join(dir, "bookmarks");
+  const settings = { list: async () => [saved], presenceDir, ownerDir, bookmarkDir, ...options };
+  const server = await startDashboard(settings);
   t.after(async () => { server.close(); await rm(dir, { recursive: true, force: true }); });
   const client = connect(server.url);
   const sessions = async () => (await (await client.request("/api/dashboard")).json()).sessions;
   const action = (id, intent) => client.request("/api/open", { id, intent });
-  return { ...client, presenceDir, ownerDir, sessions, action };
+  return { ...client, presenceDir, ownerDir, sessions, action, server, settings };
 }
 
 test("dashboard serves shared tooltips at the existing static asset URLs", async (t) => {
@@ -68,6 +70,8 @@ test("dashboard still loads sessions when an existing Pi listener serves unbundl
   const card = await waitFor(() => dom.window.document.querySelector(".card"));
   assert.equal(card.querySelector("h3").textContent, saved.name);
   assert.equal(card.querySelector("button").title, saved.name);
+  assert.equal(card.querySelector(".bookmark"), null);
+  assert.equal(dom.window.document.querySelector('[data-view="bookmarks"]').hidden, true);
   assert.equal(dom.window.document.getElementById("create-chat").disabled, false);
 });
 
@@ -169,6 +173,90 @@ test("dashboard protects session metadata and actions with a separate loopback c
   assert.equal((await dashboard.request("/api/response")).status, 404, "dashboard token does not expose a transcript route");
 });
 
+test("dashboard bookmarks survive restarts and renames and can be removed", async (t) => {
+  const dashboard = await fixture(t);
+  const path = "/api/session/bookmark";
+  const mark = { id: saved.id, bookmarked: true };
+  assert.equal((await dashboard.sessions())[0].bookmarked, false);
+  const headers = { Origin: dashboard.url.origin, "Content-Type": "application/json" };
+  const post = (extra) => fetch(dashboard.url.origin + path, { method: "POST", headers: { ...headers, ...extra }, body: JSON.stringify(mark) });
+  assert.equal((await post({})).status, 401);
+  assert.equal((await post({ Authorization: `Bearer ${dashboard.token}`, Origin: "https://example.test" })).status, 403);
+  assert.equal((await dashboard.request(path, { ...mark, bookmarked: "true" })).status, 400);
+  assert.equal((await dashboard.request(path, { ...mark, id: "unknown" })).status, 404);
+  assert.equal((await dashboard.request(path, mark)).status, 200);
+  assert.equal((await dashboard.request(path, mark)).status, 200, "setting a bookmark twice does not toggle it off");
+  dashboard.server.close();
+
+  const reopened = await startDashboard({ ...dashboard.settings, list: async () => [{ ...saved, name: "Renamed work" }] });
+  t.after(() => reopened.close());
+  const client = connect(reopened.url);
+  const sessions = async () => (await (await client.request("/api/dashboard")).json()).sessions;
+  assert.deepEqual((await sessions()).map(({ name, bookmarked }) => [name, bookmarked]), [["Renamed work", true]]);
+  assert.equal((await client.request(path, { ...mark, bookmarked: false })).status, 200);
+  assert.equal((await sessions())[0].bookmarked, false);
+});
+
+test("dashboard bookmarks toggle without opening chats and filter the grouped view", async (t) => {
+  const other = { ...saved, id: "slides", name: "Draft deck", cwd: "/work/slides" };
+  const unmarked = { ...saved, id: "unmarked", name: "Unmarked work", cwd: other.cwd };
+  const dashboard = await fixture(t, { list: async () => [saved, other, unmarked] });
+  const asset = async (path) => (await fetch(dashboard.url.origin + path)).text();
+  const dom = new JSDOM(await asset("/"), { url: dashboard.url.href, runScripts: "outside-only" });
+  t.after(() => dom.window.close());
+  const writes = [];
+  dom.window.fetch = (path, options) => {
+    assert.equal(options.headers.Authorization, `Bearer ${dashboard.token}`);
+    const body = options.body ? JSON.parse(options.body) : undefined;
+    if (body) writes.push([path, body]);
+    return dashboard.request(path, body);
+  };
+  dom.window.eval(await asset("/dashboard.js"));
+  const { document, Event, MouseEvent } = dom.window;
+  const q = (selector) => document.querySelector(selector);
+  const labels = (selector) => [...document.querySelectorAll(selector)].map((node) => node.textContent);
+  const nav = q('[data-view="bookmarks"]');
+  const button = (id) => q(`.bookmark[data-id="${id}"]`);
+  const pressed = (id) => button(id)?.getAttribute("aria-pressed");
+  const settled = (id, value) => pressed(id) === value && button(id).getAttribute("aria-disabled") === "false";
+  const search = (query) => {
+    q("#session-filter").value = query;
+    q("#session-filter").dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  await waitFor(() => button(saved.id));
+  assert.equal(nav.hidden, false);
+  nav.click();
+  assert.match(q("#sessions").textContent, /No bookmarks yet/);
+  q('[data-view="all"]').click();
+  const all = labels(".card h3");
+  assert.equal(pressed(saved.id), "false");
+  button(saved.id).focus();
+  button(saved.id).querySelector("path").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  await waitFor(() => settled(saved.id, "true"));
+  assert.equal(document.activeElement, button(saved.id));
+  button(other.id).click();
+  await waitFor(() => settled(other.id, "true"));
+  assert.deepEqual(labels(".card h3"), all);
+
+  nav.click();
+  assert.equal(q("#heading").textContent, "Bookmarks");
+  assert.deepEqual(labels(".section h2"), ["project", "slides"]);
+  assert.deepEqual(labels(".card h3"), [saved.name, other.name]);
+  assert.deepEqual(labels("#projects .session-link .truncate"), [saved.name, other.name]);
+  search("deck");
+  assert.deepEqual(labels(".card h3"), [other.name]);
+  search("/work/project");
+  assert.deepEqual(labels(".card h3"), [saved.name]);
+  search("");
+  button(saved.id).focus();
+  button(saved.id).click();
+  await waitFor(() => !button(saved.id));
+  assert.equal(document.activeElement, nav);
+  assert.deepEqual(labels(".card h3"), [other.name]);
+  assert.deepEqual(writes, [["/api/session/bookmark", { id: saved.id, bookmarked: true }],
+    ["/api/session/bookmark", { id: other.id, bookmarked: true }], ["/api/session/bookmark", { id: saved.id, bookmarked: false }]]);
+});
+
 test("dashboard creates a fresh chat only in a listed project and stays available", async (t) => {
   const cwd = join(tmpdir(), "a project's source");
   const project = join(tmpdir(), "dashboard launch project");
@@ -199,7 +287,7 @@ test("dashboard creates a fresh chat only in a listed project and stays availabl
   listed.length = 0;
   assert.equal((await create({ cwd })).status, 404, "recheck the project catalog before launching");
   const emptyDashboard = await dashboard.request("/api/dashboard");
-  assert.deepEqual(await emptyDashboard.json(), { projects: [project], sessions: [] });
+  assert.deepEqual(await emptyDashboard.json(), { projects: [project], sessions: [], supportsBookmarks: true });
   assert.equal((await create({ cwd: project })).status, 202, "the launch directory is eligible even without prior chats");
   assert.deepEqual(calls, [cwd, project]);
 });

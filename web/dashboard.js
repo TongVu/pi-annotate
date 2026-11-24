@@ -6,6 +6,7 @@ const { set: setTooltip, hide: hideTooltip } = typeof createTooltips === "functi
   ? createTooltips({ sideTargets: ".side" })
   : { set: (target, text) => { target.title = text; }, hide: () => {} };
 const filter = $("session-filter");
+const bookmarkView = document.querySelector('[data-view="bookmarks"]');
 const createChatButton = $("create-chat");
 const focusTerminalButton = $("focus-terminal");
 const newChatDialog = $("new-chat-dialog");
@@ -45,6 +46,7 @@ let creatingChat = false;
 let chosenProject;
 let activeProjectOption;
 const pending = new Set();
+const savingBookmarks = new Set();
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -116,6 +118,27 @@ function sidebar(groups) {
   }
 }
 
+function bookmarkButton(session) {
+  const button = el("button", "bookmark");
+  button.type = "button";
+  button.dataset.id = session.id;
+  button.dataset.place = "bookmark";
+  button.setAttribute("aria-label", `Bookmark: ${session.name}`);
+  button.setAttribute("aria-pressed", String(session.bookmarked));
+  button.setAttribute("aria-disabled", String(savingBookmarks.has(session.id)));
+  setTooltip(button, session.bookmarked ? "Remove bookmark" : "Add bookmark");
+  const ns = "http://www.w3.org/2000/svg";
+  const icon = document.createElementNS(ns, "svg");
+  for (const [name, value] of Object.entries({ width: 16, height: 18, viewBox: "0 0 16 18", fill: "none", stroke: "currentColor", "stroke-width": 1.5, "stroke-linejoin": "round", "aria-hidden": "true" })) {
+    icon.setAttribute(name, value);
+  }
+  const path = document.createElementNS(ns, "path");
+  path.setAttribute("d", "M3 2h10v14l-5-3.5L3 16z");
+  icon.append(path);
+  button.append(icon);
+  return button;
+}
+
 function cards(cwd, items) {
   const section = el("section", "section");
   const grid = el("div", "grid");
@@ -123,6 +146,7 @@ function cards(cwd, items) {
   for (const session of items) {
     const card = el("article", "card");
     card.append(pill(session.status, undefined, session.terminalWorking), el("h3", "", session.name));
+    if (typeof session.bookmarked === "boolean") card.append(bookmarkButton(session));
     if (session.preview) card.append(el("p", "", session.preview));
     const row = el("div", "row");
     const when = el("time", "", session.modified ? `Updated ${age(session.modified)}` : "");
@@ -144,17 +168,19 @@ function render() {
   createChatButton.disabled = !projects.length;
   if (view === "project" && !projects.includes(project) && !sessions.some(({ cwd }) => cwd === project)) view = "all";
   const query = filter.value.trim().toLowerCase();
-  const matches = sessions.filter(({ name, cwd }) => name.toLowerCase().includes(query) || cwd.toLowerCase().includes(query));
+  const matches = sessions.filter(({ name, cwd, bookmarked }) =>
+    (view !== "bookmarks" || bookmarked) && (name.toLowerCase().includes(query) || cwd.toLowerCase().includes(query)));
   const groups = new Map();
   for (const session of matches.sort((a, b) => priority.indexOf(a.status) - priority.indexOf(b.status) || b.modified - a.modified)) {
     if (!groups.has(session.cwd)) groups.set(session.cwd, []);
     groups.get(session.cwd).push(session);
   }
   for (const cwd of projects) {
-    if (!groups.has(cwd) && cwd.toLowerCase().includes(query)) groups.set(cwd, []);
+    if (view !== "bookmarks" && !groups.has(cwd) && cwd.toLowerCase().includes(query)) groups.set(cwd, []);
   }
   sidebar(groups);
-  $("heading").textContent = view === "project" ? projectName(project) : view === "attention" ? "Needs attention" : "All sessions";
+  $("heading").textContent = view === "project" ? projectName(project)
+    : view === "attention" ? "Needs attention" : view === "bookmarks" ? "Bookmarks" : "All sessions";
   $("directory").hidden = view !== "project" || !project;
   $("directory").textContent = project ?? "";
   // Needs attention filters the cards, not the status overview.
@@ -176,12 +202,13 @@ function render() {
   });
   const empty = query ? "No sessions match this filter in the current view."
     : view === "attention" ? "No ready or failed chats right now."
+    : view === "bookmarks" ? "No bookmarks yet. Use the bookmark button on a session card to add one."
     : projects.length ? "No sessions here yet. Use Create new chat to get started." : "No Pi sessions found.";
   $("sessions").replaceChildren(...(visible.length ? visible : [el("p", "sub", empty)]));
   if (focused?.id !== undefined || focused?.project !== undefined) {
     const replacement = [...document.querySelectorAll("button[data-id], button[data-project]")].find(({ dataset }) =>
       focused.id !== undefined ? dataset.id === focused.id && dataset.place === focused.place : dataset.project === focused.project);
-    replacement?.focus({ preventScroll: true });
+    (replacement ?? (view === "bookmarks" ? bookmarkView : undefined))?.focus({ preventScroll: true });
   }
 }
 
@@ -215,6 +242,7 @@ async function refresh(force = false) {
         sessions = result.sessions;
         projects = result.projects ?? [...new Set(sessions.map(({ cwd }) => cwd).filter(Boolean))];
         focusTerminalButton.hidden = result.canFocusTerminal !== true;
+        bookmarkView.hidden = result.supportsBookmarks !== true;
         render();
       }
       if (force) notice("Dashboard refreshed.");
@@ -225,6 +253,24 @@ async function refresh(force = false) {
     }
   })().finally(() => { refreshInFlight = undefined; });
   return refreshInFlight;
+}
+
+async function toggleBookmark(id) {
+  const session = sessions.find((item) => item.id === id);
+  if (!session || savingBookmarks.has(id)) return;
+  savingBookmarks.add(id);
+  render();
+  try {
+    await api("/api/session/bookmark", { id, bookmarked: !session.bookmarked });
+    // A poll already in flight might have read the state before the write.
+    await refreshInFlight;
+    await refresh();
+  } catch (error) {
+    notice(error.message, true);
+  } finally {
+    savingBookmarks.delete(id);
+    render();
+  }
 }
 
 async function openChat(id) {
@@ -361,8 +407,9 @@ $("new-chat-form").addEventListener("submit", async (event) => {
 document.addEventListener("click", (event) => {
   const button = event.target.closest("button");
   if (!button) return;
-  const { id, project: cwd, view: next } = button.dataset;
-  if (id !== undefined) void openChat(id);
+  const { id, place, project: cwd, view: next } = button.dataset;
+  if (place === "bookmark") void toggleBookmark(id);
+  else if (id !== undefined) void openChat(id);
   else if (cwd !== undefined || next) {
     view = next || "project";
     project = cwd;

@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
-import { randomBytes } from "node:crypto";
-import { isAbsolute } from "node:path";
+import { createHash, randomBytes } from "node:crypto";
+import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { isAbsolute, join } from "node:path";
 import type { SessionInfo } from "@earendil-works/pi-coding-agent";
 import { listLiveChats } from "./chat-presence.ts";
 import { canFocusBrowser, focusBrowserChat } from "./focus-browser.ts";
@@ -21,6 +22,7 @@ type Options = {
   list: () => Promise<SavedChat[]>;
   presenceDir: string;
   ownerDir: string;
+  bookmarkDir: string;
   project?: string;
   resume?: (session: SavedChat) => Promise<void>;
   createChat?: (cwd: string) => Promise<void>;
@@ -29,7 +31,10 @@ type Options = {
   focusTerminal?: () => Promise<void>;
 };
 
-export async function startDashboard({ list, presenceDir, ownerDir, project, resume, createChat, canFocus = canFocusBrowser, focus = focusBrowserChat, focusTerminal }: Options) {
+// One marker per ID keeps updates to different sessions independent across dashboards.
+const bookmarkKey = (id: string) => createHash("sha256").update(id).digest("hex");
+
+export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir, project, resume, createChat, canFocus = canFocusBrowser, focus = focusBrowserChat, focusTerminal }: Options) {
   const token = randomBytes(32).toString("hex");
   let origin: string;
   let closed = false;
@@ -77,7 +82,14 @@ export async function startDashboard({ list, presenceDir, ownerDir, project, res
       if (req.headers.authorization !== `Bearer ${token}`) return reply(401, { error: "Reopen the dashboard from Pi." });
       const agent = req.headers["user-agent"] ?? "";
       if (req.method === "GET" && ["/api/dashboard", "/api/dashboard?refresh=1"].includes(req.url ?? "")) {
-        const { saved, live, owned, projects } = await discover(req.url.endsWith("?refresh=1"));
+        const [{ saved, live, owned, projects }, markers] = await Promise.all([
+          discover(req.url.endsWith("?refresh=1")),
+          readdir(bookmarkDir).catch((error) => {
+            if (error.code === "ENOENT") return [];
+            throw error;
+          }),
+        ]);
+        const bookmarks = new Set(markers);
         const ids = new Set([...saved.keys(), ...live.keys(), ...owned.keys()]);
         const sessions = [...ids].map((id) => {
           const peer = live.get(id);
@@ -89,17 +101,19 @@ export async function startDashboard({ list, presenceDir, ownerDir, project, res
             id, name, cwd: peer?.cwd || owner?.cwd || session?.cwd || "",
             preview: preview !== name ? preview : "",
             modified: session?.modified.getTime() ?? null,
+            bookmarked: bookmarks.size > 0 && bookmarks.has(bookmarkKey(id)),
             status: peer ? peer.status ?? "connected" : owner ? "disconnected" : "saved",
             terminalWorking: !peer && owner?.working ? true : undefined,
             action: peer ? (peer.tab && canFocus(agent) ? "focus" : "manual-tab")
               : owner ? "reopen" : session?.cwd ? (resume ? "resume" : "manual-resume") : "unavailable",
           };
         });
-        return reply(200, { projects: [...projects].sort(), sessions, canFocusTerminal: focusTerminal ? true : undefined });
+        return reply(200, { projects: [...projects].sort(), sessions, supportsBookmarks: true, canFocusTerminal: focusTerminal ? true : undefined });
       }
       const newChat = req.url === "/api/session/new";
       const focusHost = req.url === "/api/focus-terminal";
-      if (req.method === "POST" && (newChat || focusHost || req.url === "/api/open")) {
+      const bookmark = req.url === "/api/session/bookmark";
+      if (req.method === "POST" && (newChat || focusHost || bookmark || req.url === "/api/open")) {
         if (req.headers.origin !== origin || req.headers["content-type"] !== "application/json") {
           return reply(403, { error: "Expected a same-origin JSON request." });
         }
@@ -109,6 +123,21 @@ export async function startDashboard({ list, presenceDir, ownerDir, project, res
           if (raw.length > 4096) return reply(413, { error: "Request is too large." });
         }
         const body = JSON.parse(raw);
+        if (bookmark) {
+          const { id, bookmarked } = body ?? {};
+          if (typeof id !== "string" || !id || typeof bookmarked !== "boolean" || Object.keys(body).length !== 2) {
+            return reply(400, { error: "Select a session and bookmark state from the dashboard." });
+          }
+          const { saved, live, owned } = await discover();
+          if (closed) return;
+          if (!saved.has(id) && !live.has(id) && !owned.has(id)) return reply(404, { error: "That session is no longer on the dashboard." });
+          const marker = join(bookmarkDir, bookmarkKey(id));
+          if (bookmarked) {
+            await mkdir(bookmarkDir, { recursive: true, mode: 0o700 });
+            await writeFile(marker, "", { mode: 0o600 });
+          } else await rm(marker, { force: true });
+          return reply(200, { bookmarked });
+        }
         if (focusHost) {
           if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length) {
             return reply(400, { error: "Switch to Terminal does not accept a target." });

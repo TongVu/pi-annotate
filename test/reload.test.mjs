@@ -136,7 +136,7 @@ test("Pi --dashboard opens the dashboard at startup without advertising the laun
       headers: { Authorization: `Bearer ${dashboard.hash.slice(1)}` }, signal: AbortSignal.timeout(3000),
     });
     assert.equal(res.status, 200);
-    assert.deepEqual(await res.json(), { projects: [cwd], sessions: [], canFocusTerminal: true });
+    assert.deepEqual(await res.json(), { projects: [cwd], sessions: [], supportsBookmarks: true, canFocusTerminal: true });
     assert.equal(faux.state.callCount, 0);
     assert.deepEqual(errors, []);
   } finally {
