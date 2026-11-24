@@ -15,6 +15,7 @@ const assets = {
   "/chat/transcript.js": ["chat/transcript.js", "text/javascript; charset=utf-8"],
   "/chat/send.js": ["chat/send.js", "text/javascript; charset=utf-8"],
   "/chat/composer.js": ["chat/composer.js", "text/javascript; charset=utf-8"],
+  "/chat/composer-controls.js": ["chat/composer-controls.js", "text/javascript; charset=utf-8"],
   "/chat/annotations.js": ["chat/annotations.js", "text/javascript; charset=utf-8"],
   "/chat/attachments.js": ["chat/attachments.js", "text/javascript; charset=utf-8"],
   "/chat/notes.js": ["chat/notes.js", "text/javascript; charset=utf-8"],

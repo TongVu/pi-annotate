@@ -4,19 +4,11 @@ import { createSendCoordinator } from "./send.js";
 import { mountAnnotationDraft } from "./annotations.js";
 import { mountAttachmentUi } from "./attachments.js";
 import { mountComposerDraft } from "./composer.js";
+import { mountComposerControls } from "./composer-controls.js";
 
 export async function mountChatPage(window, { token, tooltipFactory, loadNotes = () => import("./notes.js") }) {
-  const { document, crypto, Option } = window;
+  const { document, crypto } = window;
   const $ = (id) => document.getElementById(id);
-  const contextButton = $("chat-context");
-  const contextDetails = $("chat-context-details");
-  const modelToggle = $("chat-model-toggle");
-  const modelPanel = $("chat-model-panel");
-  const modelSelect = $("chat-model");
-  const effortSelect = $("chat-effort");
-  const compactButton = $("chat-compact");
-  const compactDialog = $("compact-chat-dialog");
-  const confirmCompact = $("confirm-chat-compact");
   const chatToolsToggle = $("chat-tools-toggle");
   const sessionTitlePill = $("session-title-pill");
   const sessionTitleText = $("session-title-text");
@@ -29,19 +21,14 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   let chatTitleStatus = "⚪";
   let liveSessionName;
   let busy = false;
-  let compactAvailable = false;
-  let compacting = false;
-  let modelSettings;
-  let modelLoading = false;
-  let modelChanging = false;
   let failed = false;
   let connected = true;
   const sender = createSendCoordinator({
     submit: (body) => api("/api/chat", body),
     requestId: () => crypto.randomUUID(),
-    isAvailable: () => !explorer.isSaved() && !compacting && !modelChanging && connected,
+    isAvailable: () => isViewingLive() && !composerControls.changing && connected,
     isBusy: () => busy,
-    onChange() { updateChatState(); updateControls(); },
+    onChange: refreshChatUi,
     onAccepted() {
       busy = true; // The next fresh poll reconciles this with Pi, even for a very fast reply.
     },
@@ -81,11 +68,15 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     return data;
   }
 
+  function refreshChatUi() {
+    updateChatState();
+    updateControls();
+  }
+
   function updateControls() {
     composer.updateControls();
     annotations.updateControls();
-    compactButton.disabled = confirmCompact.disabled = !compactAvailable || !connected || busy || sender.sending || compacting || modelChanging || explorer.isSaved();
-    updateModelControls();
+    composerControls.updateControls();
   }
 
   chatToolsToggle.addEventListener("click", () => {
@@ -95,132 +86,6 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     const label = `${expanded ? "Expand" : "Collapse"} notes and annotations`;
     chatToolsToggle.setAttribute("aria-label", label);
     setTooltip(chatToolsToggle, label);
-  });
-
-  function showContextDetails(open) {
-    contextDetails.hidden = !open;
-    contextButton.setAttribute("aria-expanded", String(open));
-  }
-
-  function updateContextUsage(usage) {
-    const { tokens, contextWindow, percent } = usage ?? {};
-    const known = Number.isFinite(tokens) && Number.isFinite(percent);
-    const percentage = known ? `${percent.toLocaleString(undefined, { maximumFractionDigits: 1 })}%` : "";
-    const label = known ? `Context usage: ${percentage}` : "Context usage";
-    setTooltip(contextButton, label);
-    contextButton.setAttribute("aria-label", label);
-    $("chat-context-ring").setAttribute("stroke-dasharray", `${known ? Math.min(100, Math.max(0, percent)) : 0} 100`);
-    $("chat-context-usage").textContent = known
-      ? `Estimated ${tokens.toLocaleString()} of ${contextWindow.toLocaleString()} tokens used (${percentage}).`
-      : contextWindow ? `Model limit: ${contextWindow.toLocaleString()} tokens. Usage is unavailable until the next reply.`
-      : "Context usage is unavailable.";
-  }
-
-  function showModelPanel(open) {
-    modelPanel.hidden = !open;
-    modelToggle.setAttribute("aria-expanded", String(open));
-  }
-
-  function updateModelControls() {
-    const locked = !connected || busy || sender.sending || compacting || modelChanging || modelLoading;
-    modelSelect.disabled = locked || !modelSettings?.models.length;
-    effortSelect.disabled = locked || (modelSettings?.efforts.length ?? 0) < 2;
-    const message = modelLoading ? "Loading Pi’s settings…" : modelChanging ? "Changing settings…"
-      : !connected ? "Disconnected from Pi." : locked ? "Wait for Pi to finish before changing settings." : "";
-    const hint = $("chat-model-status");
-    if (hint.textContent !== message) hint.textContent = message;
-  }
-
-  function renderModelSettings() {
-    const { model, models, effort, efforts } = modelSettings;
-    modelSelect.replaceChildren(...models.map(({ key, label }) => new Option(label, key)));
-    if (!models.some(({ key }) => key === model?.key)) {
-      const current = new Option(model?.label ?? "No model selected", model?.key ?? "");
-      current.disabled = true;
-      modelSelect.prepend(current);
-    }
-    modelSelect.value = model?.key ?? "";
-    effortSelect.replaceChildren(...efforts.map((level) => new Option(level === "xhigh" ? "Extra high" : level[0].toUpperCase() + level.slice(1), level)));
-    effortSelect.value = effort;
-  }
-
-  modelToggle.addEventListener("click", async () => {
-    if (!modelPanel.hidden) return showModelPanel(false);
-    showContextDetails(false);
-    showModelPanel(true);
-    if (modelLoading || modelChanging) return;
-    modelLoading = true;
-    $("chat-model-error").textContent = "";
-    updateModelControls();
-    try {
-      modelSettings = await api("/api/session/model");
-      renderModelSettings();
-    } catch (error) {
-      modelSettings = undefined;
-      modelSelect.replaceChildren();
-      effortSelect.replaceChildren();
-      $("chat-model-error").textContent = error.message;
-    } finally {
-      modelLoading = false;
-      updateModelControls();
-    }
-  });
-  for (const [field, key] of [[modelSelect, "model"], [effortSelect, "effort"]]) {
-    field.addEventListener("change", async () => {
-      if (field.disabled || !field.value) return;
-      modelChanging = true;
-      $("chat-model-error").textContent = "";
-      updateControls();
-      try {
-        modelSettings = await api("/api/session/model", { [key]: field.value });
-      } catch (error) {
-        $("chat-model-error").textContent = error.message;
-      } finally {
-        modelChanging = false;
-        renderModelSettings();
-        updateControls();
-      }
-    });
-  }
-
-  contextButton.addEventListener("click", () => {
-    showModelPanel(false);
-    showContextDetails(contextDetails.hidden);
-  });
-  document.addEventListener("pointerdown", (event) => {
-    if (!contextDetails.hidden && !contextDetails.contains(event.target) && !contextButton.contains(event.target)) showContextDetails(false);
-    if (!modelPanel.hidden && !modelPanel.contains(event.target) && !modelToggle.contains(event.target)) showModelPanel(false);
-  });
-  document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || event.defaultPrevented) return;
-    if (!contextDetails.hidden) showContextDetails(false);
-    if (!modelPanel.hidden) {
-      showModelPanel(false);
-      modelToggle.focus();
-    }
-  });
-  compactButton.addEventListener("click", () => {
-    showContextDetails(false);
-    compactDialog.showModal();
-  });
-  $("cancel-chat-compact").addEventListener("click", () => compactDialog.close());
-  confirmCompact.addEventListener("click", async () => {
-    if (!compactDialog.open || confirmCompact.disabled) return;
-    compactDialog.close();
-    compacting = true;
-    status("Compacting chat…");
-    updateChatState();
-    updateControls();
-    try {
-      await api("/api/session/compact", {});
-      status("Chat compacted.");
-    } catch (error) {
-      status(error.message || "Could not compact this chat.", true);
-    } finally {
-      compacting = false;
-      updateChatState();
-      updateControls();
-    }
   });
 
   const chatStates = {
@@ -251,7 +116,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   }
 
   function updateChatState() {
-    const state = !connected ? "disconnected" : sender.sending || busy || compacting ? "working" : failed ? "stopped" : "ready";
+    const state = !connected ? "disconnected" : sender.sending || busy || composerControls.compacting ? "working" : failed ? "stopped" : "ready";
     const indicator = $("chat-state");
     if (indicator.dataset.state === state) return;
     indicator.dataset.state = state;
@@ -275,11 +140,9 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     cursor = data.cursor;
     busy = data.busy;
     failed = data.failed;
-    compactAvailable = data.canCompact === true;
     connected = true;
-    updateContextUsage(data.contextUsage);
-    updateChatState();
-    updateControls();
+    composerControls.updateContext(data.contextUsage, data.canCompact === true);
+    refreshChatUi();
   }
 
   const focusTerminalButton = $("focus-terminal");
@@ -344,6 +207,12 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   const isViewingLive = () => !explorer.isSaved();
   const attachmentUi = mountAttachmentUi(window, setTooltip);
   const composer = mountComposerDraft(window, { sender, attachmentUi, status, setTooltip });
+  const composerControls = mountComposerControls(window, {
+    api, status, setTooltip, isViewingLive,
+    isBusy: () => busy || sender.sending,
+    isConnected: () => connected,
+    onActionChange: refreshChatUi,
+  });
   const annotations = mountAnnotationDraft(window, { sender, attachmentUi, status, setTooltip, isViewingLive });
   const transcript = mountTranscript(window, {
     fetchImage: (query) => window.fetch(`/api/image?${query}`, { headers: { Authorization: `Bearer ${token}` } }),
@@ -403,10 +272,9 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
       } catch (error) {
         const wasConnected = connected;
         connected = false;
-        updateContextUsage();
+        composerControls.updateContext();
         if (wasConnected) explorer.refreshConnection();
-        updateChatState();
-        updateControls();
+        refreshChatUi();
         if ([401, 410].includes(error.status)) return;
       }
       window.setTimeout(poll, connected ? 1000 : 3000);
