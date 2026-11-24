@@ -1,10 +1,11 @@
 import { createServer } from "node:http";
 import { randomBytes } from "node:crypto";
 import { CHAT_BODY_LIMIT } from "./chat-attachments.ts";
-import { renderMarkdown } from "./markdown.ts";
 import { createChatCatalog } from "./chat-catalog.ts";
-import { createLiveChat } from "./live-chat.ts";
 import { CHAT_NOTE_LIMIT } from "./chat-notes.ts";
+import { createLiveChat } from "./live-chat.ts";
+import { isLocalRequest, isSameOriginJson, setLocalPageHeaders } from "./loopback-http.ts";
+import { renderMarkdown } from "./markdown.ts";
 import { readWebAsset } from "./web-assets.ts";
 
 const assets = {
@@ -56,18 +57,13 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
   let expired = false;
   const publishActivity = (heartbeat) => presence?.touch?.(ttlMs, { status: live.status(), tab: origin + landing }, heartbeat);
   const server = createServer(async (req, res) => {
-    res.setHeader("Cache-Control", "no-store");
-    res.setHeader("Referrer-Policy", "no-referrer");
-    res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("Content-Security-Policy", `default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`);
+    setLocalPageHeaders(res, { embeddedImages: true });
     const reply = (status, body) => {
       res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
       res.end(JSON.stringify(body));
     };
     try {
-      if (req.headers.host !== new URL(origin).host ||
-          (req.headers.origin && req.headers.origin !== origin) ||
-          req.headers["sec-fetch-site"] === "cross-site") {
+      if (!isLocalRequest(req.headers, origin)) {
         reply(403, { error: "Only this local chat page may connect." });
         return;
       }
@@ -158,7 +154,7 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
       const openSession = explorer && req.url === "/api/session/open";
       const cloneSession = explorer && req.url === "/api/session/clone";
       if (req.method === "POST" && (disconnect || renameSession || compactSession || modelSettings || localAction || renderNote || saveNote || openSession || cloneSession || req.url === "/api/chat")) {
-        if (req.headers.origin !== origin || req.headers["content-type"] !== "application/json") {
+        if (!isSameOriginJson(req.headers, origin)) {
           reply(403, { error: "Expected a same-origin JSON request." });
           return;
         }

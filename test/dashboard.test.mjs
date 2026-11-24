@@ -46,6 +46,9 @@ test("dashboard serves shared tooltips at the existing static asset URLs", async
   const dashboard = await fixture(t);
   const page = await fetch(dashboard.url.origin);
   assert.equal(page.status, 200);
+  assert.match(page.headers.get("content-security-policy"), /img-src 'self';/);
+  const crossSite = await fetch(dashboard.url.origin, { headers: { "Sec-Fetch-Site": "cross-site" } });
+  assert.equal(crossSite.status, 403);
   const html = await page.text();
   assert.doesNotMatch(html, /\/tooltips\.(css|js)/);
   for (const [file, type, marker] of [["dashboard.js", "text/javascript", /function createTooltips/], ["dashboard.css", "text/css", /\.message-preview\s*\{/]]) {

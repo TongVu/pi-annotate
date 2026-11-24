@@ -5,6 +5,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import type { SessionInfo } from "@earendil-works/pi-coding-agent";
 import { listLiveChats } from "./chat-presence.ts";
 import { canFocusBrowser, focusBrowserChat } from "./focus-browser.ts";
+import { isLocalRequest, isSameOriginJson, setLocalPageHeaders } from "./loopback-http.ts";
 import { shellQuote } from "./resume-chat.ts";
 import { listOwnedSessions, requestOwnedChat } from "./session-owner.ts";
 import { readWebAsset } from "./web-assets.ts";
@@ -79,16 +80,13 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
     };
   }
   const server = createServer(async (req, res) => {
-    res.setHeader("Cache-Control", "no-store");
-    res.setHeader("Referrer-Policy", "no-referrer");
-    res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
+    setLocalPageHeaders(res);
     const reply = (status: number, body: unknown) => {
       if (closed || res.destroyed) return;
       res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" }).end(JSON.stringify(body));
     };
     try {
-      if (req.headers.host !== new URL(origin).host || (req.headers.origin && req.headers.origin !== origin) || req.headers["sec-fetch-site"] === "cross-site") {
+      if (!isLocalRequest(req.headers, origin)) {
         return reply(403, { error: "Only this local dashboard may connect." });
       }
       const asset = req.method === "GET" && assets.get(req.url === tabPath ? "/" : req.url ?? "");
@@ -136,7 +134,7 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
       const focusHost = req.url === "/api/focus-terminal";
       const bookmark = req.url === "/api/session/bookmark";
       if (req.method === "POST" && (newChat || focusHost || bookmark || req.url === "/api/open")) {
-        if (req.headers.origin !== origin || req.headers["content-type"] !== "application/json") {
+        if (!isSameOriginJson(req.headers, origin)) {
           return reply(403, { error: "Expected a same-origin JSON request." });
         }
         let raw = "";
