@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { JSDOM } from "jsdom";
+import { runInNewContext } from "node:vm";
+import { createHash } from "node:crypto";
 import { createChatPresence } from "../src/chat-presence.ts";
 import { startDashboard } from "../src/dashboard.ts";
 import { browserFocusArgs, dashboardFocusArgs } from "../src/focus-browser.ts";
@@ -181,7 +183,82 @@ test("dashboard reconnects a disconnected Pi owner before considering a saved-se
   assert.equal((await dashboard.action("unknown", "open")).status, 404);
   assert.equal((await dashboard.action("saved", "open")).status, 202);
   assert.equal((await dashboard.action("saved", "open")).status, 409);
+  const resumed = await registerSessionOwner(dashboard.ownerDir, { id: saved.id, cwd: saved.cwd }, async () => { attachments++; return "attached"; });
+  t.after(resumed.close);
+  assert.equal((await dashboard.action(saved.id, "open")).status, 202, "closing the first browser tab during the launch cooldown must not block reattach");
+  assert.equal(attachments, 2);
   assert.equal(launches, 1);
+});
+
+test("a denied Kitty launch gives the original manual command without retrying", async (t) => {
+  let attempts = 0;
+  const dashboard = await fixture(t, { resume: async () => { attempts++; return false; } });
+  const result = await (await dashboard.action(saved.id, "open")).json();
+  assert.match(result.message, /launch permission/);
+  assert.equal(result.command, "cd -- '/work/project' && pi --session '/private/transcripts/saved.jsonl'");
+  assert.equal(attempts, 1);
+});
+
+test("Linux Edge card click resumes, reattaches, then focuses the exact existing tab", { skip: process.platform !== "linux" }, async (t) => {
+  const agent = "Chrome/156.0 Edg/156.0";
+  const manifest = JSON.parse(await readFile(new URL("../browser-extension/manifest.json", import.meta.url)));
+  const extensionId = createHash("sha256").update(Buffer.from(manifest.key, "base64")).digest("hex").slice(0, 32)
+    .replace(/./g, (digit) => String.fromCharCode(97 + parseInt(digit, 16)));
+  let listener, focused, raised, peer, tab;
+  let launches = 0, browserTabs = 0;
+  runInNewContext(await readFile(new URL("../browser-extension/switch-tab.js", import.meta.url), "utf8"), { chrome: {
+    runtime: { onMessageExternal: { addListener: (fn) => { listener = fn; } } },
+    tabs: { query: async ({ url }) => {
+      assert.equal(url, "http://127.0.0.1/*");
+      return [{ id: 9, windowId: 10, url: dashboard.url.href }, { id: 23, windowId: 6, url: tab }];
+    }, update: async (id, options) => { assert.deepEqual(Object.keys(options), ["active"], "focus must never navigate/reload the tab"); assert.equal(options.active, true); focused = id; } },
+    windows: { update: async (id, { focused }) => { assert.ok(focused); raised = id; } },
+  } });
+  const attach = async () => {
+    const chat = await startChatServer({ chat: { getBranch: () => [], isIdle: () => true,
+      presence: createChatPresence(() => dashboard.presenceDir, () => ({ id: saved.id, cwd: saved.cwd })),
+    } });
+    t.after(chat.close);
+    peer = connect(chat.url);
+    tab = peer.url.origin + peer.url.pathname + peer.url.search;
+    assert.equal((await peer.request("/api/response")).status, 200);
+    browserTabs++;
+    return "attached";
+  };
+  const dashboard = await fixture(t, { resume: async () => {
+    launches++;
+    const owner = await registerSessionOwner(dashboard.ownerDir, saved, attach);
+    t.after(owner.close);
+    await attach();
+  } });
+  const dom = new JSDOM(await (await fetch(dashboard.url)).text(), { url: dashboard.url.href, runScripts: "outside-only" });
+  t.after(() => dom.window.close());
+  const { window } = dom;
+  window.fetch = (path, options) => fetch(dashboard.url.origin + path, { ...options, headers: { ...options.headers, Origin: dashboard.url.origin, "User-Agent": agent } });
+  window.chrome = { runtime: { sendMessage: (id, message, respond) => {
+    assert.equal(id, extensionId);
+    assert.deepEqual(Object.keys(message), ["focusTab"]);
+    assert.equal(message.focusTab, tab, "extension receives the selected locator without its token");
+    assert.equal(listener(message, { frameId: 0, url: window.location.href }, respond), true);
+  } } };
+  window.eval(await (await fetch(dashboard.url.origin + "/dashboard.js")).text());
+  const button = () => window.document.querySelector(".card .open");
+  await waitFor(() => button()?.textContent === "Resume chat");
+  button().click();
+  await waitFor(() => button()?.textContent === "Go to tab");
+  assert.deepEqual([launches, browserTabs], [1, 1]);
+  assert.equal((await peer.request("/api/close", {})).status, 200);
+  await waitFor(async () => (await dashboard.sessions())[0]?.status === "disconnected");
+  // Click the stale connected card: the server must recheck and reuse the running Pi.
+  window.document.querySelector(".card h3").click();
+  await waitFor(() => browserTabs === 2 && button()?.textContent === "Go to tab");
+  button().click();
+  await waitFor(() => raised === 6);
+  assert.equal(focused, 23);
+  assert.deepEqual([launches, browserTabs], [1, 2], "connected focus does not create a Pi or another browser tab");
+  assert.equal(listener({ focusTab: "https://example.invalid" }, { frameId: 0, url: window.location.href }, assert.fail), undefined);
+  assert.equal(listener({ focusTab: tab }, { frameId: 1, url: window.location.href }, assert.fail), undefined);
+  assert.equal(listener({ focusTab: tab }, { frameId: 0, url: "https://example.invalid" }, assert.fail), undefined);
 });
 
 test("dashboard protects session metadata and actions with a separate loopback capability", async (t) => {

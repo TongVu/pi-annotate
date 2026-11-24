@@ -102,12 +102,14 @@ account signed into Codex, not Pi's context usage, and refreshes about once a mi
   on Linux with local remote control enabled.
 - **Go to tab** on macOS switches to the existing tab in Chrome or Safari without
   reloading it or discarding its draft. macOS may ask for Automation permission.
+  On Linux, install [Pi Chat Tab Switcher](ubuntu-edge-kitty.md#dashboard-tab-switching) in Edge or Chrome for the same behavior.
   On unsupported browsers or when the tab can't be found, select it manually;
   the dashboard never opens a replacement for a connected chat.
 - **Reopen chat** asks the running Pi session to open a fresh tab. It does not
   start a second Pi or interrupt an ongoing turn.
 - **Resume chat** starts the saved session in its original project via Terminal
-  on macOS. On other platforms, copy the resume command, then run `/chat` in Pi.
+  on macOS or in a new tab in the dashboard’s Kitty window on Linux. If terminal
+  launch is unavailable, copy the resume command, then run `/chat` in Pi.
 - **Create new chat** asks you to choose a dashboard project, including the one
   you launched the dashboard from, even if it has no chats yet. On macOS
   it starts a fresh Pi in that directory and opens its chat in a new tab, leaving
@@ -222,8 +224,9 @@ not require clipboard access or access to Pi's private transcript selection.
   already-listed sessions. Open `/chat` tabs are detected through local presence
   markers under the Pi agent directory. A private local Unix socket lets a running
   Pi session open its own browser tab. Live markers hold status and a random,
-  non-secret loopback tab locator, never a bearer token. The locator is not returned
-  to dashboard or chat pages. On macOS, the user-triggered **Go to tab** action uses
+  non-secret loopback tab locator, never a bearer token. The dashboard list omits
+  locators. A Linux browser-switch request returns only the selected chat's locator
+  for the extension to match; it does not return the chat token. On macOS, the user-triggered **Go to tab** action uses
   the browser's native Automation support to select an exact matching tab; it
   never navigates or reloads that tab.
 - The dashboard uses a separate bearer token and shows local session names, first

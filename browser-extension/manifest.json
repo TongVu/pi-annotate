@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Pi Chat Tab Switcher",
+  "version": "0.1.0",
+  "description": "Focus an existing local Pi Chat tab without reloading its draft.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxMgmeDlEFf6P3Wsjaj+B2Q2qqK7vc114CpoyBRv68GxPGAda0bNJotFYGvgavBC1kPyNLeXdyun5NR8keSkbTxyXOYqpxbcXLmKUPZ8fhwghykrfvFqTnao+pYGlYjcX5458EP2OlPUtWDoQwbhzEZFYPQEOd5krt8xCbOpMJChss0Qc2jZ9fKckL5+Kcu4VlMdH/+WfsYlt8f4onzfc5gB4HwQHlExh6RIOWtsUeE2N8SM5P2qZXJX+7di6oE2mNU2r+M4klYRrd9btnUh1zjsVY3Dnp5Sy0IJ1+cM8oKS7ZXU4qlCzvrsYgylgkqzBRu3Mfbeu5sKuKxHUoebkBQIDAQAB",
+  "host_permissions": ["http://127.0.0.1/*"],
+  "externally_connectable": { "matches": ["http://127.0.0.1/*"] },
+  "background": { "service_worker": "switch-tab.js" }
+}

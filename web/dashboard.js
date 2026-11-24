@@ -30,6 +30,7 @@ const statuses = {
 const disconnectedHint = (terminalWorking) => `${terminalWorking ? "Working" : "Running"} in Terminal · No chat tab connected`;
 const actions = {
   focus: "Go to tab",
+  "browser-tab": "Go to tab",
   "manual-tab": "Find existing tab",
   reopen: "Reopen chat",
   resume: "Resume chat",
@@ -39,6 +40,7 @@ const actions = {
 const priority = ["ready", "error", "working", "connected", "disconnected", "saved"];
 const needsAttention = (session) => ["ready", "error"].includes(session.status);
 let sessions = [];
+let browserSelect = false;
 let projects = [];
 let view = "all";
 let project;
@@ -256,6 +258,7 @@ async function refresh(force = false) {
       if (key !== lastData) {
         lastData = key;
         sessions = result.sessions;
+        browserSelect = result.browserSelect === true;
         projects = result.projects ?? [...new Set(sessions.map(({ cwd }) => cwd).filter(Boolean))];
         focusTerminalButton.hidden = result.canFocusTerminal !== true;
         bookmarkView.hidden = result.supportsBookmarks !== true;
@@ -290,14 +293,30 @@ async function toggleBookmark(id) {
   }
 }
 
+async function focusBrowserTab(tab) {
+  // Stable unpacked-extension ID derived from the public key in its manifest.
+  const runtime = window.chrome?.runtime;
+  const result = runtime?.sendMessage && await new Promise((resolve) => {
+    runtime.sendMessage("gknkmicgmlfoodjnfohhgmiglekddeea", { focusTab: tab }, (response) => resolve(runtime.lastError ? undefined : response));
+  });
+  if (!result) throw new Error("Load Pi Chat Tab Switcher in this Edge or Chrome profile to select an existing chat tab. See docs/ubuntu-edge-kitty.md.");
+  if (result !== "focused" && result !== "missing") throw new Error("The browser could not activate the chat tab. Try again.");
+  return result;
+}
+
 async function openChat(id) {
   const session = sessions.find((item) => item.id === id);
   if (!session || pending.has(id)) return;
   pending.add(id);
   render();
   try {
-    const intent = ["focus", "manual-tab"].includes(session.action) ? "focus" : "open";
-    const result = await api("/api/open", { id, intent });
+    const intent = browserSelect ? "select" : ["focus", "manual-tab"].includes(session.action) ? "focus" : "open";
+    let result = await api("/api/open", { id, intent });
+    if (result.focusTab && await focusBrowserTab(result.focusTab) === "missing") {
+      // A closing chat may still be disconnecting. Recheck its owner before launching anything.
+      result = await api("/api/open", { id, intent: "select" });
+      if (result.focusTab) throw new Error("Pi still reports a connected tab. Use the same browser profile, or run /chat close in its terminal and click again.");
+    }
     if (result.command) notice(result.message || "Resume this session manually.", false, result.command);
     else $("notice").hidden = true;
   } catch (error) {
@@ -424,7 +443,11 @@ $("new-chat-form").addEventListener("submit", async (event) => {
 
 document.addEventListener("click", (event) => {
   const button = event.target.closest("button");
-  if (!button) return;
+  if (!button) {
+    const open = event.target.closest(".card")?.querySelector("button.open");
+    if (open && !open.disabled && !window.getSelection()?.toString()) void openChat(open.dataset.id);
+    return;
+  }
   const { id, place, project: cwd, view: next } = button.dataset;
   if (place === "bookmark") void toggleBookmark(id);
   else if (id !== undefined) void openChat(id);

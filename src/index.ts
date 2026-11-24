@@ -7,7 +7,7 @@ import { startChatServer } from "./server.ts";
 import { createChatNoteStore } from "./chat-notes.ts";
 import { listPiSessions, readPiSession } from "./session-explorer.ts";
 import { createChatPresence } from "./chat-presence.ts";
-import { AUTO_CHAT_SESSION, NEW_CHAT_TARGET, forkChatInTerminal, resumeChatInTerminal, startNewChatInTerminal } from "./resume-chat.ts";
+import { AUTO_CHAT_SESSION, NEW_CHAT_TARGET, forkChatInTerminal, kittyDashboardTarget, resumeInKitty, resumeChatInTerminal, startNewChatInTerminal } from "./resume-chat.ts";
 import { registerSessionOwner, requestOwnedChat } from "./session-owner.ts";
 import { focusTerminal } from "./focus-terminal.ts";
 import { listDashboardTabs, startDashboard } from "./dashboard.ts";
@@ -79,6 +79,7 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
     if (generation !== currentGeneration) throw new Error("The Pi session changed. Run /chat dashboard again.");
     const sessionDir = ctx.sessionManager.getSessionDir();
     const project = ctx.sessionManager.getCwd();
+    const kitty = process.platform === "linux" ? kittyDashboardTarget() : undefined;
     const pending = dashboard ??= startDashboard({
       list: () => listPiSessions(sessionDir),
       project,
@@ -90,6 +91,8 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
       ...(process.platform === "darwin" ? {
         resume: (session) => resumeChatInTerminal(session, fileURLToPath(import.meta.url), agentDir),
         createChat: (cwd) => startNewChatInTerminal(cwd, fileURLToPath(import.meta.url), agentDir),
+      } : kitty ? {
+        resume: (session) => resumeInKitty(session, fileURLToPath(import.meta.url), agentDir, kitty),
       } : {}),
     });
     const opened = await pending.catch((error) => {

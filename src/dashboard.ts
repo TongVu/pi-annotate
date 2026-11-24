@@ -27,7 +27,7 @@ type Options = {
   bookmarkDir: string;
   tabRegistry?: string;
   project?: string;
-  resume?: (session: SavedChat) => Promise<void>;
+  resume?: (session: SavedChat) => Promise<void | false>;
   createChat?: (cwd: string) => Promise<void>;
   canFocus?: typeof canFocusBrowser;
   focus?: typeof focusBrowserChat;
@@ -82,6 +82,8 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
       listing = list().finally(() => { listAgain = Date.now() + 10_000; });
     }
     const [sessions, peers, owners] = await Promise.all([listing, listLiveChats(presenceDir), listOwnedSessions(ownerDir)]);
+    // The startup guard is only needed until Pi registers. Its browser tab can then be closed and reopened immediately.
+    for (const { id } of owners) if (Number.isFinite(opening.get(id))) opening.delete(id);
     // The launch directory is a project even before its first session exists.
     const projects = new Set([project, ...[...sessions, ...peers, ...owners].map(({ cwd }) => cwd)]
       .filter((cwd): cwd is string => typeof cwd === "string" && isAbsolute(cwd)));
@@ -111,6 +113,7 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
       }
       if (req.headers.authorization !== `Bearer ${token}`) return reply(401, { error: "Reopen the dashboard from Pi." });
       const agent = req.headers["user-agent"] ?? "";
+      const browserSwitcher = process.platform === "linux" && /(?:Chrome|Edg)\//.test(agent);
       if (req.method === "GET" && ["/api/dashboard", "/api/dashboard?refresh=1"].includes(req.url ?? "")) {
         refreshQuota();
         const [{ saved, live, owned, projects }, markers] = await Promise.all([
@@ -138,11 +141,11 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
             bookmarked: bookmarks.size > 0 && bookmarks.has(bookmarkKey(id)),
             status: peer ? peer.status ?? "connected" : owner ? "disconnected" : "saved",
             terminalWorking: !peer && owner?.working ? true : undefined,
-            action: peer ? (peer.tab && canFocus(agent) ? "focus" : "manual-tab")
+            action: peer ? (peer.tab && canFocus(agent) ? "focus" : peer.tab && browserSwitcher ? "browser-tab" : "manual-tab")
               : owner ? "reopen" : session?.cwd ? (resume ? "resume" : "manual-resume") : "unavailable",
           };
         });
-        return reply(200, { projects: [...projects].sort(), sessions, supportsBookmarks: true, canFocusTerminal: focusTerminal ? true : undefined, codexQuotaLeft: quotaLeft });
+        return reply(200, { projects: [...projects].sort(), sessions, supportsBookmarks: true, browserSelect: browserSwitcher || undefined, canFocusTerminal: focusTerminal ? true : undefined, codexQuotaLeft: quotaLeft });
       }
       const newChat = req.url === "/api/session/new";
       const focusHost = req.url === "/api/focus-terminal";
@@ -206,17 +209,18 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
             creating = false;
           }
         }
-        if (typeof body?.id !== "string" || !["focus", "open"].includes(body?.intent) || Object.keys(body).length !== 2) {
+        if (typeof body?.id !== "string" || !["focus", "open", "select"].includes(body?.intent) || Object.keys(body).length !== 2) {
           return reply(400, { error: "Select a session from the dashboard." });
         }
         const { id, intent } = body;
         const { live, saved, owned } = await discover();
         if (closed) return;
         const peer = live.get(id);
-        if (!!peer !== (intent === "focus")) {
+        if (intent !== "select" && !!peer !== (intent === "focus")) {
           return reply(409, { error: "That chat’s connection changed. Check its updated status and try again." });
         }
         if (peer) {
+          if (peer.tab && intent === "select" && browserSwitcher) return reply(200, { focusTab: peer.tab });
           if (peer.tab && canFocus(agent) && await focus(peer.tab, agent)) return reply(200, { message: "Switched to the existing chat tab." });
           return reply(409, { error: "Could not switch to the connected tab. Select the existing tab manually; no duplicate was opened." });
         }
@@ -231,8 +235,10 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
           if (outcome === "already-open") return reply(409, { error: "Pi already has a browser link for this session. Use the existing tab or run /chat in its terminal." });
           if (outcome === "unavailable") return reply(409, { error: "Could not reach the running Pi session. Run /chat in its terminal; no second Pi was started." });
           if (!session?.cwd) return reply(404, { error: "This session is no longer running and has no saved chat to resume." });
-          if (!resume) return reply(200, { command: `cd -- ${shellQuote(session.cwd)} && pi --session ${shellQuote(session.path)}` });
-          await resume(session);
+          if (!resume || await resume(session) === false) return reply(200, {
+            command: `cd -- ${shellQuote(session.cwd)} && pi --session ${shellQuote(session.path)}`,
+            message: resume ? "Kitty did not accept the tab launch. Check launch permission or use the manual command." : undefined,
+          });
           const deadline = Date.now() + 60_000;
           opening.set(id, deadline);
           setTimeout(() => { if (opening.get(id) === deadline) opening.delete(id); }, 60_000).unref();

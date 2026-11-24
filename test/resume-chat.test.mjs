@@ -1,10 +1,41 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { terminalForkArgs, terminalNewArgs, terminalResumeArgs } from "../src/resume-chat.ts";
+import { kittyDashboardTarget, terminalForkArgs, terminalNewArgs, terminalResumeArgs } from "../src/resume-chat.ts";
+
+test("Kitty launch targets only a direct shell with a local socket and a specific window", () => {
+  const env = { KITTY_WINDOW_ID: "18", KITTY_LISTEN_ON: "unix:/run/user/1000/kitty-123" };
+  assert.deepEqual(kittyDashboardTarget(env), { socket: env.KITTY_LISTEN_ON, windowId: "18" });
+  for (const bad of [{ TMUX: "some" }, { STY: "some" }, { SSH_CONNECTION: "remote" }, { KITTY_WINDOW_ID: "0" }, { KITTY_LISTEN_ON: "tcp:localhost:1234" }]) {
+    assert.equal(kittyDashboardTarget({ ...env, ...bad }), undefined);
+  }
+});
+
+test("Kitty receives literal resume arguments and only the password file path", { skip: process.platform !== "linux" }, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "pi-chat-kitty-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, "chat's $(literal).jsonl");
+  const extension = join(root, "chat extension.ts");
+  await writeFile(path, "saved session");
+  await writeFile(join(root, "pi"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  const argsFile = join(root, "argv");
+  await writeFile(join(root, "kitty"), '#!/bin/sh\nprintf "%s\\n" "$@" > "$TEST_ARGS"\n', { mode: 0o755 });
+  const password = join(root, "pi-chat-rc-pass");
+  await writeFile(password, "test credential", { mode: 0o600 });
+  const socket = "unix:/run/user/1000/demo";
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
+    import { resumeInKitty } from ${JSON.stringify(new URL("../src/resume-chat.ts", import.meta.url).href)};
+    const [cwd, path, extension, socket] = process.argv.slice(1);
+    await resumeInKitty({ id: 'saved', cwd, path }, extension, cwd, { socket, windowId: '27' });
+  `, root, path, extension, socket], { env: { PATH: root, KITTY_CONFIG_DIRECTORY: root, TEST_ARGS: argsFile }, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual((await readFile(argsFile, "utf8")).trimEnd().split("\n"), ["@", "--to", socket, "--password-file", password, "--use-password", "always",
+    "launch", "--type=tab", "--match", "window_id:27", "--cwd", root, "--env", `PATH=${root}`, "--env", `PI_CODING_AGENT_DIR=${root}`, "--env",
+    "PI_ANNOTATE_AUTO_CHAT_SESSION=saved", "--", join(root, "pi"), "--session", path, "--extension", extension]);
+});
 
 test("Terminal resume command quotes paths, opts in to browser startup, and sends no prompt", { skip: process.platform === "win32" }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), "pi-chat-launch-"));

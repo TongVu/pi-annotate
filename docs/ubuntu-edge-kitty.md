@@ -50,6 +50,37 @@ printf 'window=%s\nsocket=%s\n' "$KITTY_WINDOW_ID" "$KITTY_LISTEN_ON"
 
 Expect a positive numeric window ID and a `unix:` address under the private runtime directory. Start Pi there. The extension uses `kitten @` (or `kitty @` if `kitten` is absent) to focus that exact window. On Wayland the correct Kitty tab can be selected without bringing the OS window in front of Edge. Check tab selection separately from foreground activation; don't change desktop sessions or keybindings to work around it.
 
+### Dashboard tab switching
+
+**Saved session:** To launch Pi in a new tab of the dashboard's Kitty window, Kitty
+must permit the `launch` command on its private local socket. With `socket-only`
+this already works. If using `allow_remote_control password`, keep the existing
+focus/wallpaper allowlist. Generate a private launch-only password instead of
+adding `launch` to the empty-password allowlist. In the Kitty config directory
+(usually `~/.config/kitty`), run once, without overwriting existing files:
+
+```sh
+(umask 077; set -Ce; openssl rand -hex 32 > pi-chat-rc-pass
+ IFS= read -r secret < pi-chat-rc-pass
+ printf 'remote_control_password "%s" launch\n' "$secret" > pi-chat-launch.conf)
+```
+
+Add `include pi-chat-launch.conf` to `kitty.conf` and reload Kitty's configuration.
+Do not share or commit either generated file. Pi Chat reads the password via Kitty's
+`--password-file` option; it does not send it to the browser. If the socket isn't
+available or Kitty denies a launch, use the manual command instead.
+
+**Connected chat:** In Edge (`edge://extensions`) or Chrome (`chrome://extensions`),
+turn on **Developer mode**, select **Load unpacked**, and choose `browser-extension/`
+from this checkout. If an earlier experimental Pi Chat Tab Switcher is installed,
+remove it first. Open `/chat dashboard` in the same profile as the chat tabs.
+The extension only matches `http://127.0.0.1` pages. It activates an existing
+chat without reloading, navigating, or opening a duplicate. No debugging port or
+browser automation setup is required. Without the extension, select the tab manually.
+
+**Browser closed, Pi still running:** No browser extension or Kitty launch permission
+is needed. The dashboard asks that Pi to open a fresh connected browser tab.
+
 ## 4. Verify with the user
 
 Use a disposable project/session. The user operates Edge; an agent can check configuration and ask for the following observations without controlling the browser.
@@ -57,14 +88,14 @@ Use a disposable project/session. The user operates Edge; an agent can check con
 1. Run `pi --dashboard` in Kitty. Confirm the dashboard opens in Edge and lists the launch project. Leave this terminal running.
 2. In a second Kitty tab start `pi` in the project and type `/chat`. In Edge send a harmless message. Confirm the reply appears in that tab and the same turn appears in Kitty. Check the model/effort picker. Select a passage and send an annotation; confirm Pi receives the quote and question.
 3. Click **🕹️ Switch to Terminal** from the chat: it should select the second Kitty tab, without starting another Pi. From the dashboard the same button should select the *dashboard's* Kitty tab. Record any Wayland foreground limitation separately.
-4. Leave an unsent draft in the chat. Select its existing Edge tab manually from the dashboard workflow; the draft should remain. After discarding the test draft, run `/chat close` in the chat's terminal. From the dashboard use **Reopen chat**: the still-running Pi should open a fresh browser tab, not start a second Pi.
+4. Leave a draft in the chat, switch to the dashboard and click the session. The original Edge tab should activate with its draft intact. Discard the test draft and close the browser tab. Click the session again: one new browser tab should connect to the same Pi, with no new Kitty tab. Finally exit the disposable Pi and click the saved session: exactly one new Kitty tab and one connected browser tab should open.
 
 ### Expected differences, not installation failures
 
-- **Go to tab / dashboard logo:** exact browser-tab focus is implemented for macOS Chrome/Safari, not Linux Edge. Select the connected chat tab manually; don't reopen it to simulate focus. The chat logo can open another dashboard tab instead of selecting an existing one.
-- **Create / resume a stopped chat:** copy the dashboard's generated command into a new Kitty shell, then type `/chat` in Pi. This is different from **Reopen chat** for a Pi that's still running. In the explorer, use the copy-resume command; one-click launch and clone there are Mac-only.
+- **Dashboard logo:** on Linux it can open another dashboard tab instead of selecting an existing one.
+- **Create new chat** still provides a copyable command. The dashboard's one-click Kitty launcher resumes saved sessions only. In the explorer, one-click launch and clone remain Mac-only.
 
-Report what passed on this desktop, what required a manual step, and what remains untested. If one-click launch or exact Edge-tab switching is required, name the missing action and propose a separate change; don't patch the extension or relax browser security as part of installation.
+Report what passed on this desktop, what required a manual step, and what remains untested. Don't relax browser security as part of installation.
 
 ## Prompt for the Ubuntu agent
 

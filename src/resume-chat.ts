@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
 import { access, stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 
@@ -62,13 +63,40 @@ async function openTerminal(args: string[]) {
   }
 }
 
-async function launchChatInTerminal(session: { id?: string; cwd: string; path: string }, extension: string, agentDir: string, operation: "resume" | "fork") {
+async function validateSavedChat(session: { cwd: string; path: string }) {
   if (!isAbsolute(session.cwd) || !await stat(session.cwd).then((entry) => entry.isDirectory(), () => false)) {
     throw new Error("The chat’s original project directory is unavailable.");
   }
   if (!isAbsolute(session.path) || !await stat(session.path).then((entry) => entry.isFile() && entry.size > 0, () => false)) {
     throw Object.assign(new Error("The saved chat file is no longer available."), { status: 404 });
   }
+}
+
+export function kittyDashboardTarget(env = process.env) {
+  if (env.TMUX || env.STY || env.SSH_CONNECTION || !/^[1-9]\d*$/.test(env.KITTY_WINDOW_ID ?? "")) return;
+  if (!env.KITTY_LISTEN_ON?.startsWith("unix:/")) return;
+  return { socket: env.KITTY_LISTEN_ON, windowId: env.KITTY_WINDOW_ID! };
+}
+
+// A negative reply is safe to fall back from. A timeout is ambiguous: never retry a launch.
+export async function resumeInKitty(session: { id: string; cwd: string; path: string }, extension: string, agentDir: string, target: NonNullable<ReturnType<typeof kittyDashboardTarget>>) {
+  await validateSavedChat(session);
+  const pi = await findPi();
+  const config = process.env.KITTY_CONFIG_DIRECTORY || join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "kitty");
+  const password = join(config, "pi-chat-rc-pass");
+  const auth = await access(password, constants.R_OK).then(() => ["--password-file", password, "--use-password", "always"], () => ["--use-password", "never"]);
+  try {
+    await promisify(execFile)("kitty", ["@", "--to", target.socket, ...auth, "launch", "--type=tab", "--match", `window_id:${target.windowId}`,
+      "--cwd", session.cwd, "--env", `PATH=${process.env.PATH}`, "--env", `PI_CODING_AGENT_DIR=${agentDir}`, "--env", `${AUTO_CHAT_SESSION}=${session.id}`,
+      "--", pi, "--session", session.path, "--extension", extension], { timeout: 10_000 });
+  } catch (error) {
+    if (error.code === "ENOENT" || /remote control is disabled|disallowed by remote_control_password|No matching tabs/i.test(error.stderr ?? "")) return false;
+    throw new Error("Could not confirm the Kitty launch. Check the dashboard’s Kitty window before trying again.");
+  }
+}
+
+async function launchChatInTerminal(session: { id?: string; cwd: string; path: string }, extension: string, agentDir: string, operation: "resume" | "fork") {
+  await validateSavedChat(session);
   const pi = await findPi();
   const args = operation === "resume"
     ? terminalResumeArgs({ ...session, id: session.id ?? "" }, pi, extension, agentDir)
