@@ -6,6 +6,9 @@ const { set: setTooltip, hide: hideTooltip } = typeof createTooltips === "functi
   ? createTooltips({ sideTargets: ".side" })
   : { set: (target, text) => { target.title = text; }, hide: () => {} };
 const filter = $("session-filter");
+const codexQuota = el("span", "codex-quota");
+setTooltip(codexQuota, "Codex account usage limit");
+codexQuota.hidden = true;
 const bookmarkView = document.querySelector('[data-view="bookmarks"]');
 const createChatButton = $("create-chat");
 const focusTerminalButton = $("focus-terminal");
@@ -245,6 +248,10 @@ async function refresh(force = false) {
     try {
       const result = await api(force ? "/api/dashboard?refresh=1" : "/api/dashboard");
       connected = true;
+      const left = result.codexQuotaLeft;
+      const quotaLabel = Number.isInteger(left) && left >= 0 && left <= 100 ? `5-hour · ${left}% left` : "";
+      if (codexQuota.textContent !== quotaLabel) codexQuota.textContent = quotaLabel;
+      codexQuota.hidden = !quotaLabel;
       const key = JSON.stringify(result) + Math.floor(Date.now() / 60_000);
       if (key !== lastData) {
         lastData = key;
@@ -258,6 +265,7 @@ async function refresh(force = false) {
     } catch {
       if (connected || !lastData) notice("Could not connect to the dashboard. If Pi was closed or reloaded, run /chat dashboard again.", true);
       connected = false;
+      codexQuota.hidden = true;
       if (!lastData) $("summary").textContent = "Dashboard unavailable";
     }
   })().finally(() => { refreshInFlight = undefined; });
@@ -427,7 +435,7 @@ document.addEventListener("click", (event) => {
     $("dashboard-scroll").scrollTop = 0;
   }
 });
-$("legend").append(...["working", "ready", "disconnected", "error", "saved"].map((state) => pill(state)));
+$("legend").append(...["working", "ready", "disconnected", "error", "saved"].map((state) => pill(state)), codexQuota);
 filter.addEventListener("input", render);
 $("refresh").addEventListener("click", () => void refresh(true));
 focusTerminalButton.addEventListener("click", async () => {

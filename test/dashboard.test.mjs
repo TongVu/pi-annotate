@@ -33,7 +33,7 @@ async function fixture(t, options = {}) {
   const presenceDir = join(dir, "live");
   const ownerDir = join(dir, "owners");
   const bookmarkDir = join(dir, "bookmarks");
-  const settings = { list: async () => [saved], presenceDir, ownerDir, bookmarkDir, ...options };
+  const settings = { list: async () => [saved], presenceDir, ownerDir, bookmarkDir, readQuota: async () => undefined, ...options };
   const server = await startDashboard(settings);
   t.after(async () => { server.close(); await rm(dir, { recursive: true, force: true }); });
   const client = connect(server.url);
@@ -76,6 +76,35 @@ test("dashboard still loads sessions when an existing Pi listener serves unbundl
   assert.equal(card.querySelector(".bookmark"), null);
   assert.equal(dom.window.document.querySelector('[data-view="bookmarks"]').hidden, true);
   assert.equal(dom.window.document.getElementById("create-chat").disabled, false);
+  assert.equal(dom.window.document.querySelector("#legend .codex-quota").hidden, true);
+});
+
+test("dashboard loads Codex quota without blocking sessions and displays it after Saved", async (t) => {
+  let reads = 0;
+  let reportQuota;
+  const result = new Promise((resolve) => { reportQuota = resolve; });
+  const dashboard = await fixture(t, { readQuota: () => { reads++; return result; } });
+  const state = async () => (await dashboard.request("/api/dashboard")).json();
+  assert.equal((await fetch(dashboard.url.origin + "/api/dashboard")).status, 401);
+  assert.equal(reads, 0);
+  const initial = await state();
+  assert.equal(initial.sessions[0].name, saved.name);
+  assert.equal(initial.codexQuotaLeft, undefined);
+  assert.equal((await state()).codexQuotaLeft, undefined);
+  assert.equal(reads, 1, "dashboard polls share the in-flight read");
+  reportQuota(0);
+  assert.equal((await state()).codexQuotaLeft, 0);
+
+  const asset = async (path) => (await fetch(dashboard.url.origin + path)).text();
+  const dom = new JSDOM(await asset("/"), { url: dashboard.url.href, runScripts: "outside-only" });
+  t.after(() => dom.window.close());
+  dom.window.fetch = (path) => dashboard.request(path);
+  dom.window.eval(await asset("/dashboard.js"));
+  const badge = dom.window.document.querySelector("#legend .codex-quota");
+  await waitFor(() => !badge.hidden);
+  assert.equal(badge.textContent, "5-hour · 0% left");
+  assert.equal(badge.previousElementSibling.textContent, "Saved");
+  assert.equal(reads, 1, "subsequent polls use the cached quota");
 });
 
 test("dashboard can focus only its own hosting terminal through an authenticated same-origin request", async (t) => {

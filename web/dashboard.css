@@ -120,7 +120,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .dot.saved, .dot.connected { background: #aaa89f; }
 @keyframes pulse { from { transform: scale(.6); opacity: .9; } to { transform: scale(1.8); opacity: 0; } }
 @keyframes chat-breathe { 50% { opacity: .55; transform: scale(.82); } }
-.legend { display: flex; gap: 8px 20px; flex-wrap: wrap; margin-inline: var(--inset); padding: 14px 0 20px; border-top: 1px solid var(--border); }
+.legend { display: flex; align-items: center; gap: 8px 20px; flex-wrap: wrap; margin-inline: var(--inset); padding: 14px 0 20px; border-top: 1px solid var(--border); }
+.codex-quota { padding: 4px 10px; border-radius: 999px; background: var(--ink); color: var(--page); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .notice { position: sticky; top: 8px; z-index: 1; padding: 12px 36px 12px 16px; margin-bottom: 16px; background: white; border: 1px solid var(--border); border-radius: 12px; }
 .notice[data-error="true"] { border-color: #c2423a; }
 .dismiss { position: absolute; top: 7px; right: 8px; border: 0; background: none; font-size: 18px; }

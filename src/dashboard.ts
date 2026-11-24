@@ -4,6 +4,7 @@ import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import type { SessionInfo } from "@earendil-works/pi-coding-agent";
 import { listLiveChats } from "./chat-presence.ts";
+import { readCodexQuota } from "./codex-quota.ts";
 import { canFocusBrowser, focusBrowserChat } from "./focus-browser.ts";
 import { isLocalRequest, isSameOriginJson, setLocalPageHeaders } from "./loopback-http.ts";
 import { shellQuote } from "./resume-chat.ts";
@@ -31,6 +32,7 @@ type Options = {
   canFocus?: typeof canFocusBrowser;
   focus?: typeof focusBrowserChat;
   focusTerminal?: () => Promise<void>;
+  readQuota?: typeof readCodexQuota;
 };
 
 // One marker per ID keeps updates to different sessions independent across dashboards.
@@ -52,7 +54,7 @@ export async function listDashboardTabs(registry: string) {
   return tabs;
 }
 
-export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir, tabRegistry, project, resume, createChat, canFocus = canFocusBrowser, focus = focusBrowserChat, focusTerminal }: Options) {
+export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir, tabRegistry, project, resume, createChat, canFocus = canFocusBrowser, focus = focusBrowserChat, focusTerminal, readQuota = readCodexQuota }: Options) {
   const token = randomBytes(32).toString("hex");
   const tabId = randomBytes(16).toString("hex");
   const tabPath = `/?dashboard=${tabId}`;
@@ -62,6 +64,17 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
   let listAgain = 0;
   const opening = new Map<string, number>();
   let creating = false;
+  let quotaLeft: number | undefined;
+  let nextQuotaRead = 0;
+  function refreshQuota() {
+    if (Date.now() < nextQuotaRead) return;
+    nextQuotaRead = Infinity;
+    // The session list should not wait for a subprocess or a network call.
+    void Promise.resolve().then(readQuota).catch(() => undefined).then((percent) => {
+      quotaLeft = percent;
+      nextQuotaRead = Date.now() + 60_000;
+    });
+  }
   async function discover(refresh = false) {
     // Pi's session index may read every session file. Poll the lightweight live markers more often.
     if (!listing || Date.now() >= listAgain || (refresh && listAgain !== Infinity)) {
@@ -99,6 +112,7 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
       if (req.headers.authorization !== `Bearer ${token}`) return reply(401, { error: "Reopen the dashboard from Pi." });
       const agent = req.headers["user-agent"] ?? "";
       if (req.method === "GET" && ["/api/dashboard", "/api/dashboard?refresh=1"].includes(req.url ?? "")) {
+        refreshQuota();
         const [{ saved, live, owned, projects }, markers] = await Promise.all([
           discover(req.url.endsWith("?refresh=1")),
           readdir(bookmarkDir).catch((error) => {
@@ -128,7 +142,7 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
               : owner ? "reopen" : session?.cwd ? (resume ? "resume" : "manual-resume") : "unavailable",
           };
         });
-        return reply(200, { projects: [...projects].sort(), sessions, supportsBookmarks: true, canFocusTerminal: focusTerminal ? true : undefined });
+        return reply(200, { projects: [...projects].sort(), sessions, supportsBookmarks: true, canFocusTerminal: focusTerminal ? true : undefined, codexQuotaLeft: quotaLeft });
       }
       const newChat = req.url === "/api/session/new";
       const focusHost = req.url === "/api/focus-terminal";

@@ -112,6 +112,9 @@ Pulsing amber and green dots mark working and ready chats, respectively.
 A hollow green ring marks a Pi session still running in Terminal without a connected chat tab.
 It pulses amber during a turn but stays in the **Disconnected** count. A filled gray dot
 marks a saved session that isn't running. Status updates even when the chat tab is in the background.
+The status legend shows **5-hour · N% left** when the local Codex CLI or the CLI
+bundled with the macOS ChatGPT app reports a five-hour quota. The badge uses the
+account signed into Codex, not Pi's context usage, and refreshes about once a minute.
 
 - **🕹️ Switch to Terminal** focuses the Pi terminal hosting the dashboard, not
   the terminal for a selected chat. It supports Terminal.app on macOS and Kitty
