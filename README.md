@@ -47,4 +47,5 @@ The browser connects to Pi on your own machine. Messages you send still go
 through the model provider configured in Pi. Don’t share the local chat link.
 
 See the [Pi Chat guide](docs/guide.md) for usage, platform differences, privacy,
-and development checks.
+and development checks. For an Ubuntu desktop, follow [Set up Pi Chat with Edge
+and Kitty](docs/ubuntu-edge-kitty.md), including a prompt for the setup agent.
