@@ -11,15 +11,17 @@
 <body>
   <div class="app">
     <aside class="side" aria-label="Chat navigation">
-      <div class="brand"><img src="/logo.png" width="24" height="24" alt="">Projects</div>
-      <div class="side-scroll">
-        <nav id="projects" aria-label="Projects"></nav>
-        <div class="label">Views</div>
+      <div class="side-views">
+        <div class="brand"><img src="/logo.png" width="24" height="24" alt="">Views</div>
         <nav aria-label="Views">
           <button class="nav-item" type="button" data-view="all" aria-current="true">All sessions</button>
           <button class="nav-item" type="button" data-view="attention">Needs attention</button>
           <button class="nav-item" type="button" data-view="bookmarks" hidden>Bookmarks</button>
         </nav>
+      </div>
+      <div class="side-scroll">
+        <div class="label">Projects</div>
+        <nav id="projects" aria-label="Projects"></nav>
       </div>
     </aside>
     <main class="main">

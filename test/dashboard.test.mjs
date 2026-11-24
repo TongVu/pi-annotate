@@ -396,8 +396,12 @@ test("dashboard filters projects and cards by name or directory within the selec
   for (const selector of ["#heading", "#summary", ".dashboard-tools", "#legend"]) {
     assert.equal(scroll.contains(q(selector)), false, `${selector} stays outside session scrolling`);
   }
-  assert.ok(q(".side-scroll").contains(q("#projects")));
-  assert.equal(q(".side-scroll").contains(q(".brand")), false);
+  const projectScroll = q(".side-scroll");
+  const views = q('.side nav[aria-label="Views"]');
+  assert.ok(projectScroll.contains(q("#projects")));
+  assert.equal(dom.window.getComputedStyle(projectScroll).overflow, "auto");
+  assert.equal(projectScroll.contains(views), false, "views stay visible when projects scroll");
+  assert.ok(views.compareDocumentPosition(projectScroll) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING);
   assert.ok(!q(".card img"), "saved message text stays inert");
   const tooltip = () => q('[role="tooltip"]');
   q("#refresh").focus();
