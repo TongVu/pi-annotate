@@ -331,7 +331,9 @@ test("dashboard filters projects and cards by name or directory within the selec
       assert.equal(init.referrerPolicy, "same-origin");
       return focus.promise;
     }
-    return { ok: true, json: async () => ({ message: "Action taken" }) };
+    return { ok: true, json: async () => JSON.parse(init.body).id === "d"
+      ? { command: "pi --session /tmp/slides.jsonl" }
+      : { message: "Opening a tab from the running Pi session." } };
   };
   dom.window.eval(`${tooltipScript}\n${script}`);
   const q = (selector) => dom.window.document.querySelector(selector);
@@ -419,8 +421,10 @@ test("dashboard filters projects and cards by name or directory within the selec
   q("#refresh").click();
   await waitFor(() => workingCount() === "1");
   assert.deepEqual(titles(), ["Pricing review", "Export failure"]);
-  q('.card button[data-id="b"]').click();
-  await waitFor(() => q("#message").textContent === "Action taken");
+  const openPricing = () => q('.card button[data-id="b"]');
+  openPricing().click();
+  await waitFor(() => openPricing().getAttribute("aria-disabled") === "false");
+  assert.equal(q("#notice").hidden, true, "successful opens do not show a notice");
   q('[data-project="/work/slides"]').click();
   filter("pricing");
   assert.deepEqual(titles(), []);
@@ -429,7 +433,9 @@ test("dashboard filters projects and cards by name or directory within the selec
   filter("");
   assert.deepEqual(titles(), ["Export failure", "Draft deck"]);
   q('.card button[data-id="d"]').click();
-  await waitFor(() => requests.length === 2);
+  await waitFor(() => !q("#notice").hidden);
+  assert.equal(q("#manual").hidden, false, "manual instructions still need a visible notice");
+  assert.equal(q("#command").value, "pi --session /tmp/slides.jsonl");
   assert.deepEqual(requests, [["/api/open", { id: "b", intent: "focus" }], ["/api/open", { id: "d", intent: "open" }]]);
   const terminal = q("#focus-terminal");
   assert.equal(terminal.hidden, false);

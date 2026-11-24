@@ -281,7 +281,8 @@ async function openChat(id) {
   try {
     const intent = ["focus", "manual-tab"].includes(session.action) ? "focus" : "open";
     const result = await api("/api/open", { id, intent });
-    notice(result.message || "Resume this session manually.", false, result.command);
+    if (result.command) notice(result.message || "Resume this session manually.", false, result.command);
+    else $("notice").hidden = true;
   } catch (error) {
     notice(error.message, true);
   } finally {
