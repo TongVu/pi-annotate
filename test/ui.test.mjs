@@ -407,17 +407,21 @@ test("the tab shows working from send through the next fresh Pi status", async (
   const workingTitle = "Pi Chat · 🏗️";
   const submit = () => f.$("chat-form").dispatchEvent(new f.window.Event("submit", { cancelable: true }));
   const input = f.$("chat-input");
+  const workingComposer = () => input.closest('.chat-composer:has(#chat-state[data-state="working"])');
   assert.equal(title(), readyTitle);
+  assert.equal(workingComposer(), null);
   input.value = "Hello Pi";
   post = Promise.withResolvers();
   submit();
   assert.equal(title(), workingTitle, "working is visible before Pi acknowledges the send");
+  assert.equal(workingComposer(), input.closest(".chat-composer"));
   await f.poll();
   assert.equal(title(), workingTitle, "idle polls during the send do not clear working");
   post.resolve(json({ error: "Send rejected" }, 409));
   await tick();
   assert.equal(title(), readyTitle);
   assert.equal(input.value, "Hello Pi");
+  assert.equal(workingComposer(), null);
 
   post = Promise.withResolvers();
   submit();
@@ -432,9 +436,11 @@ test("the tab shows working from send through the next fresh Pi status", async (
   response = { promise: Promise.resolve(json(chat(true))) };
   await f.poll();
   assert.equal(title(), workingTitle);
+  assert.ok(workingComposer());
   response = undefined;
   await f.poll();
   assert.equal(title(), readyTitle);
+  assert.equal(workingComposer(), null);
 });
 
 test("two live chats keep their session name first regardless of shared status", async (t) => {
@@ -462,7 +468,7 @@ test("chat tab follows the Pi session name and moves chat controls out of the he
   assert.equal(f.$("chat-state").hidden, false);
   assert.equal(f.$("chat-state").parentElement, f.$("chat-form").querySelector(".actions"));
   assert.equal(f.$("chat-state").nextElementSibling, f.$("status"));
-  assert.equal(f.$("explorer-toggle").parentElement, f.$("chat-rail"));
+  assert.equal(f.$("explorer-toggle").parentElement, f.$("session-title-pill"));
   assert.equal(f.$("turns").parentElement, f.$("chat-rail"));
   assert.equal(f.$("status").textContent, "");
 
@@ -579,7 +585,7 @@ test("clicking the live chat title opens renaming and updates the browser tab", 
   const title = f.$("session-title-text");
   const terminal = f.$("focus-terminal");
   assert.equal(pill.hidden, false);
-  assert.deepEqual([...pill.querySelectorAll("button")], [title, terminal]);
+  assert.deepEqual([...pill.querySelectorAll("button")], [title, terminal, f.$("right-panel-toggle"), f.$("explorer-toggle")]);
   assert.equal(title.getAttribute("aria-haspopup"), "dialog");
   assert.equal(title.getAttribute("aria-label"), `Rename ${sessionName}`);
   assert.equal(title.textContent, sessionName);
@@ -649,7 +655,7 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   } });
   assert.equal(f.$("right-panel").hidden, false);
   const css = await readFile(new URL("../web/style.css", import.meta.url), "utf8");
-  assert.match(css, /\.chat-page #right-panel\[hidden\]\s*\{\s*display:\s*none;\s*\}/);
+  assert.match(css, /\.chat-page #right-panel\[hidden\],[^{]+\{\s*display:\s*none;\s*\}/);
   const input = f.$("chat-input");
   input.value = "Unsent live draft";
   input.dispatchEvent(new f.window.Event("input"));
@@ -764,6 +770,14 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.equal(f.$("saved-response").querySelector("[data-response-id]"), null);
   assert.equal(f.$("conversation").hidden, true);
   assert.equal(f.$("right-panel").hidden, true);
+  assert.equal(f.$("session-title-pill").hidden, false);
+  assert.equal(f.$("saved-title").textContent, longTitle);
+  assert.equal(f.$("saved-title").hidden, false);
+  for (const id of ["session-title-text", "focus-terminal", "right-panel-toggle"]) assert.equal(f.$(id).hidden, true);
+  explorerToggle.click();
+  assert.equal(f.$("chat-explorer").hidden, true);
+  explorerToggle.click();
+  assert.equal(f.$("chat-explorer").hidden, false);
   assert.equal(f.window.document.querySelector("main").classList.contains("right-panel-collapsed"), true);
   assert.equal(f.$("chat-send").disabled, true);
   await f.poll();
@@ -776,6 +790,8 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.equal(f.$("right-panel").hidden, false);
   assert.equal(f.window.document.querySelector("main").classList.contains("right-panel-collapsed"), true);
   assert.equal(f.$("saved-conversation").hidden, true);
+  assert.equal(f.$("saved-title").hidden, true);
+  for (const id of ["session-title-text", "focus-terminal", "right-panel-toggle"]) assert.equal(f.$(id).hidden, false);
   assert.equal(input.value, "Unsent live draft");
   assert.equal(f.$("chat-send").disabled, false);
   assert.equal(calls.some((path) => path === "/api/chat"), false);
@@ -881,8 +897,7 @@ test("Markdown notes persist per chat, preview safely, and copy their source", a
   assert.equal(f.$("chat-note").parentElement, f.$("right-panel-content"));
   assert.equal(expandNote.getAttribute("aria-expanded"), "false");
   const css = await readFile(new URL("../web/style.css", import.meta.url), "utf8");
-  assert.match(css, /main\.right-panel-collapsed #right-panel-content\s*\{\s*display:\s*none;/);
-  assert.match(css, /main\.right-panel-collapsed #right-panel\[hidden\]\s*\{\s*display:\s*none;/);
+  assert.match(css, /main\.right-panel-collapsed #right-panel\s*\{\s*display:\s*none;/);
   assert.match(css, /#chat-note-dialog \{[^}]*width: 80vw; height: 80dvh/);
   assert.match(css, /#right-panel-content \{[^}]*grid-template-columns: minmax\(0, 1fr\)/);
   assert.equal(note.value, "# Saved snippet");

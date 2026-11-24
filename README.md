@@ -43,17 +43,19 @@ fullscreen terminal modes work.
    field or attach images with its clipboard button. Each question keeps its own
    images. These are separate sends: each leaves the other draft untouched and
    clears its own draft only after Pi accepts it. The terminal draft is untouched.
-4. New messages appear in the same tab as Pi finishes them. The dot next to 👾
-   pulses amber while Pi is working and green when it's ready. Replies aren't streamed
+4. New messages appear in the same tab as Pi finishes them. The composer border
+   and status dot pulse amber while Pi is working unless reduced motion is set.
+   The dot turns green when Pi is ready. Replies aren't streamed
    token by token. If Pi needs an approval or other interactive input, use the terminal.
 
 Click **👾** in the composer to view or change this chat’s model and thinking effort. The picker uses Pi’s model cycle and shows only the effort levels the selected model supports. Changes are available when Pi is idle and do not affect defaults for new chats.
 
 Click the **Context usage** ring in the composer to see Pi's estimated token usage and the model's context limit. Click **Compact chat** when Pi is idle and confirm to summarize older context without removing messages from the transcript. After compaction, Pi reports usage again after its next reply.
 
-Click the live chat title to rename the session.
-Click **🕹️** beside the live chat name to switch to the terminal tab running
-that chat. It does not start Pi, open a new tab, or send text to the terminal.
+Click the live chat title to rename the session. Use the panel icons next to
+**🕹️** to show or hide the right sidebar and chat explorer.
+Click **🕹️** to switch to the terminal tab running that chat. It does not start
+Pi, open a new tab, or send text to the terminal.
 On macOS, use Terminal.app and allow Terminal Automation if prompted. On Linux,
 Kitty needs a local remote-control socket. For example, in `kitty.conf`, use:
 
@@ -126,8 +128,8 @@ server too.
 
 ### Chat explorer
 
-Click the sidebar icon in a live chat to open the left explorer. To create a
-session, use **Create new chat** on the dashboard. The explorer groups sessions by
+Click the left-panel icon in the centered chat controls to open the explorer.
+To create a session, use **Create new chat** on the dashboard. The explorer groups sessions by
 project directory, with forked sessions nested under their Pi parent session
 when that parent is available. Click a project heading to collapse or expand its
 sessions. Type a session name or directory to filter the list; matches appear

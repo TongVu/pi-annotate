@@ -1323,8 +1323,8 @@ function clearSavedTranscript() {
 
 function setSavedView(saved) {
   hideSelectionAction();
-  $("saved-conversation").hidden = !saved;
-  for (const id of ["conversation", "turns", "right-panel"]) $(id).hidden = saved;
+  $("saved-conversation").hidden = $("saved-title").hidden = !saved;
+  for (const id of ["conversation", "chat-rail", "right-panel", "session-title-text", "focus-terminal", "right-panel-toggle"]) $(id).hidden = saved;
   if (window.matchMedia?.("(max-width: 760px)").matches) setExplorerOpen(false);
   renderSessionList();
   updateButtons();
@@ -1425,7 +1425,7 @@ function startChat(data) {
   $("chat-state").after($("status"));
   $("conversation").setAttribute("aria-label", "Conversation");
   $("conversation-label").hidden = true;
-  for (const id of ["chat-rail", "turns", "chat-form", "chat-state", "explorer-toggle"]) $(id).hidden = false;
+  for (const id of ["chat-rail", "turns", "chat-form", "chat-state"]) $(id).hidden = false;
   $("empty").textContent = "Highlight text in a Pi reply to ask about it.";
   send.classList.add("chat-question-send");
   setTooltip(send, "Send questions");
