@@ -13,6 +13,7 @@ const assets = {
   "/chat/page.js": ["chat/page.js", "text/javascript; charset=utf-8"],
   "/chat/explorer.js": ["chat/explorer.js", "text/javascript; charset=utf-8"],
   "/chat/transcript.js": ["chat/transcript.js", "text/javascript; charset=utf-8"],
+  "/chat/send.js": ["chat/send.js", "text/javascript; charset=utf-8"],
   "/chat/notes.js": ["chat/notes.js", "text/javascript; charset=utf-8"],
   "/style.css": ["style.css", "text/css; charset=utf-8", "tooltips.css"],
   "/favicon.ico": ["favicon.ico", "image/x-icon"],

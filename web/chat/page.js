@@ -1,5 +1,6 @@
 import { mountExplorer } from "./explorer.js";
 import { mountTranscript } from "./transcript.js";
+import { createSendCoordinator } from "./send.js";
 
 export async function mountChatPage(window, { token, tooltipFactory, loadNotes = () => import("./notes.js") }) {
   const { document, FileReader, crypto, Node, Option } = window;
@@ -51,11 +52,19 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   let modelChanging = false;
   let failed = false;
   let connected = true;
-  let acceptedSends = 0;
-  let lastAttempt;
   let selectedPassage;
   let pending;
-  let sending = false;
+  const sender = createSendCoordinator({
+    submit: (body) => api("/api/chat", body),
+    requestId: () => crypto.randomUUID(),
+    isAvailable: () => !explorer.isSaved() && !compacting && !modelChanging && connected,
+    isBusy: () => busy,
+    onChange() { updateChatState(); renderAnnotations(); },
+    onAccepted() {
+      busy = true; // The next fresh poll reconciles this with Pi, even for a very fast reply.
+    },
+    status,
+  });
   let editing = -1;
 
   function status(message, error = false) {
@@ -91,32 +100,22 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     return data;
   }
 
-  function isRetry(body) {
-    // Both drafts replace their arrays on edits; retries can compare references without serializing images.
-    return lastAttempt && lastAttempt.attachments === body.attachments &&
-      lastAttempt.annotations === body.annotations && lastAttempt.text === body.text;
-  }
-
-  function canSend(body) {
-    return !explorer.isSaved() && !sending && !compacting && !modelChanging && connected && (!busy || isRetry(body));
-  }
-
   function composerBody() {
     return { text: chatInput.value.trim(), ...(attachments.length ? { attachments } : {}) };
   }
 
   function updateButtons() {
-    send.disabled = !annotations.length || !canSend({ annotations });
+    send.disabled = !annotations.length || !sender.canSend({ annotations });
     const body = composerBody();
-    $("chat-send").disabled = (!body.text && !body.attachments) || readingFiles || !canSend(body);
-    compactButton.disabled = confirmCompact.disabled = !compactAvailable || !connected || busy || sending || compacting || modelChanging || explorer.isSaved();
+    $("chat-send").disabled = (!body.text && !body.attachments) || readingFiles || !sender.canSend(body);
+    compactButton.disabled = confirmCompact.disabled = !compactAvailable || !connected || busy || sender.sending || compacting || modelChanging || explorer.isSaved();
     updateModelControls();
-    $("chat-attach").disabled = sending || readingFiles;
-    for (const button of $("chat-attachments").querySelectorAll("button")) button.disabled = sending || readingFiles;
-    $("comment-attach").disabled = sending || readingAnnotationFiles;
-    $("save-annotation").disabled = sending || readingAnnotationFiles;
-    for (const button of $("comment-attachments").querySelectorAll("button")) button.disabled = sending || readingAnnotationFiles;
-    chatInput.readOnly = sending;
+    $("chat-attach").disabled = sender.sending || readingFiles;
+    for (const button of $("chat-attachments").querySelectorAll("button")) button.disabled = sender.sending || readingFiles;
+    $("comment-attach").disabled = sender.sending || readingAnnotationFiles;
+    $("save-annotation").disabled = sender.sending || readingAnnotationFiles;
+    for (const button of $("comment-attachments").querySelectorAll("button")) button.disabled = sender.sending || readingAnnotationFiles;
+    chatInput.readOnly = sender.sending;
   }
 
   $("close-preview").addEventListener("click", () => imagePreview.close());
@@ -170,7 +169,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
 
   function setAttachments(next) {
     // Don't retain removed files after a failed send.
-    if (lastAttempt?.attachments) lastAttempt = undefined;
+    sender.invalidateRetry("attachments");
     attachments = next;
     renderAttachmentList($("chat-attachments"), attachments, (index) => {
       setAttachments(attachments.filter((_, i) => i !== index));
@@ -202,7 +201,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   }
 
   async function attachFiles(files) {
-    if (!files.length || sending || readingFiles) return;
+    if (!files.length || sender.sending || readingFiles) return;
     readingFiles = true;
     updateButtons();
     try {
@@ -232,7 +231,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   }
 
   async function attachAnnotationImages(files) {
-    if (!annotationImagesSupported || !pending || !dialog.open || !files.length || sending || readingAnnotationFiles) return;
+    if (!annotationImagesSupported || !pending || !dialog.open || !files.length || sender.sending || readingAnnotationFiles) return;
     const draft = pending;
     readingAnnotationFiles = true;
     updateButtons();
@@ -255,7 +254,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   }
 
   function setAnnotations(next) {
-    if (lastAttempt?.annotations) lastAttempt = undefined;
+    sender.invalidateRetry("annotations");
     annotations = next;
     renderAnnotations();
   }
@@ -284,7 +283,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
         button.className = "secondary annotation-action";
         setTooltip(button, action.label);
         button.setAttribute("aria-label", action.label);
-        button.disabled = sending;
+        button.disabled = sender.sending;
         button.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${action.path}"/></svg>`;
         button.addEventListener("click", () => {
           if (action.label === "Edit annotation") {
@@ -326,7 +325,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   }
 
   function showSelectionAction() {
-    if (sending || dialog.open || explorer.isSaved()) return hideSelectionAction();
+    if (sender.sending || dialog.open || explorer.isSaved()) return hideSelectionAction();
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed || !selection.rangeCount) return hideSelectionAction();
     const range = selection.getRangeAt(0);
@@ -370,7 +369,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   selectionAction.addEventListener("click", () => {
     const passage = selectedPassage;
     hideSelectionAction();
-    if (!passage || sending || dialog.open || explorer.isSaved()) return;
+    if (!passage || sender.sending || dialog.open || explorer.isSaved()) return;
     if (annotations.length >= 50) {
       status("Maximum 50 annotations per batch.", true);
       return;
@@ -404,7 +403,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   });
   $("comment-form").addEventListener("submit", (event) => {
     event.preventDefault();
-    if (!pending || !comment.value.trim() || readingAnnotationFiles || sending) return;
+    if (!pending || !comment.value.trim() || readingAnnotationFiles || sender.sending) return;
     const annotation = { ...pending, comment: comment.value.trim() };
     if (annotationFiles.length) annotation.images = annotationFiles;
     else delete annotation.images;
@@ -413,34 +412,6 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     setAnnotations(next);
     status("Question saved in Your annotations. Send when ready.");
   });
-
-  async function sendChat(body) {
-    if (!canSend(body)) return;
-    // An unchanged retry uses the same ID if Pi accepted it but the HTTP response was lost.
-    if (!isRetry(body)) lastAttempt = { ...body, id: crypto.randomUUID() };
-    sending = true;
-    updateChatState();
-    renderAnnotations();
-    status("Sending to Pi…");
-    try {
-      await api("/api/chat", { ...body, requestId: lastAttempt.id });
-      lastAttempt = undefined;
-      if (body.annotations) annotations = [];
-      else {
-        chatInput.value = "";
-        setAttachments([]);
-      }
-      busy = true; // The next fresh poll reconciles this with Pi, even for a very fast reply.
-      acceptedSends++;
-      status("Sent to Pi.");
-    } catch (error) {
-      status(error.message || "Could not confirm the send. Your draft is still here.", true);
-    } finally {
-      sending = false;
-      updateChatState();
-      renderAnnotations();
-    }
-  }
 
   for (const [buttonId, label] of [["chat-expand", "message composer"]]) {
     const button = $(buttonId);
@@ -471,7 +442,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   });
   chatInput.addEventListener("paste", (event) => {
     const files = Array.from(event.clipboardData?.files ?? []);
-    if (!files.length || sending) return;
+    if (!files.length || sender.sending) return;
     event.preventDefault();
     void attachFiles(files);
   });
@@ -484,11 +455,15 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   $("chat-form").addEventListener("submit", (event) => {
     event.preventDefault();
     const body = composerBody();
-    if (!readingFiles && (body.text || body.attachments)) void sendChat(body);
+    if (!readingFiles && (body.text || body.attachments)) {
+      void sender.send(body, () => {
+        chatInput.value = "";
+        setAttachments([]);
+      });
+    }
   });
-  send.addEventListener("click", async () => {
-    if (!annotations.length || !canSend({ annotations })) return;
-    await sendChat({ annotations });
+  send.addEventListener("click", () => {
+    if (annotations.length) void sender.send({ annotations }, () => { annotations = []; });
   });
   function showContextDetails(open) {
     contextDetails.hidden = !open;
@@ -515,7 +490,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   }
 
   function updateModelControls() {
-    const locked = !connected || busy || sending || compacting || modelChanging || modelLoading;
+    const locked = !connected || busy || sender.sending || compacting || modelChanging || modelLoading;
     modelSelect.disabled = locked || !modelSettings?.models.length;
     effortSelect.disabled = locked || (modelSettings?.efforts.length ?? 0) < 2;
     const message = modelLoading ? "Loading Pi’s settings…" : modelChanging ? "Changing settings…"
@@ -644,7 +619,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   }
 
   function updateChatState() {
-    const state = !connected ? "disconnected" : sending || busy || compacting ? "working" : failed ? "stopped" : "ready";
+    const state = !connected ? "disconnected" : sender.sending || busy || compacting ? "working" : failed ? "stopped" : "ready";
     const indicator = $("chat-state");
     if (indicator.dataset.state === state) return;
     indicator.dataset.state = state;
@@ -793,10 +768,10 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     async function poll() {
       try {
         const wasConnected = connected;
-        const sendsAtPollStart = acceptedSends;
+        const sendsAtPollStart = sender.accepted;
         const data = await api(cursor === null ? "/api/response" : `/api/response?after=${encodeURIComponent(cursor)}`);
         // A poll started before send acknowledgement may still report the previous idle state.
-        if (sendsAtPollStart === acceptedSends) updateChat(data);
+        if (sendsAtPollStart === sender.accepted) updateChat(data);
         if (!wasConnected) explorer.refreshConnection();
         explorer.pollActivity();
       } catch (error) {
