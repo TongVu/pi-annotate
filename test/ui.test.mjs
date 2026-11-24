@@ -67,8 +67,8 @@ async function fixture(t, { chatFetch, loadNotes } = {}) {
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 test("the composer model picker shows supported efforts and only allows changes while idle", async (t) => {
-  const sol = { key: "sol", label: "Sol" };
-  const luna = { key: "luna", label: "Luna" };
+  const sol = { key: "openai/sol", label: "Sol" };
+  const luna = { key: "openai/luna", label: "Luna" };
   const models = [sol, luna];
   let current = { model: sol, models, effort: "medium", efforts: ["low", "medium", "high"] };
   let busy = true;
@@ -80,10 +80,10 @@ test("the composer model picker shows supported efforts and only allows changes 
     assert.equal(path, "/api/session/model");
     if (body) {
       changes.push(body);
-      if (body.model === "luna") {
+      if (body.model === luna.key) {
         await finish.promise;
-        current = { model: luna, models, effort: "high", efforts: ["high", "xhigh"] };
-      } else if (body.effort === "xhigh") current = { ...current, effort: body.effort };
+        current = { model: luna, models, effort: "high", efforts: ["low", "high", "xhigh", "max"] };
+      } else if (current.efforts.includes(body.effort)) current = { ...current, effort: body.effort };
       else return json({ error: "Pi is busy" }, 409);
     }
     return json(current);
@@ -91,50 +91,95 @@ test("the composer model picker shows supported efforts and only allows changes 
   const toggle = f.$("chat-model-toggle");
   const panel = f.$("chat-model-panel");
   const model = f.$("chat-model");
-  const effort = f.$("chat-effort");
-  const change = (select, value) => {
-    select.value = value;
-    select.dispatchEvent(new f.window.Event("change"));
+  const efforts = f.$("chat-effort");
+  const effort = (level) => efforts.querySelector(`button[value="${level}"]`);
+  const selectedEffort = () => efforts.querySelector('[aria-pressed="true"]')?.textContent;
+  const options = f.$("chat-model-options");
+  const noMatches = f.$("chat-model-no-matches");
+  const type = (value) => {
+    model.value = value;
+    model.dispatchEvent(new f.window.Event("input"));
+  };
+  const key = (key) => {
+    const event = new f.window.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+    model.dispatchEvent(event);
+    return event.defaultPrevented;
   };
   toggle.click();
   await tick();
   assert.equal(panel.hidden, false);
   assert.equal(model.labels[0].textContent, "👽");
   assert.equal(model.getAttribute("aria-label"), "Model");
-  assert.equal(effort.labels[0].textContent, "🧠");
-  assert.equal(effort.getAttribute("aria-label"), "Thinking effort");
-  assert.equal(model.value, "sol");
-  assert.equal(effort.value, "medium");
+  assert.equal(efforts.getAttribute("aria-label"), "Thinking effort");
+  assert.equal(model.value, "Sol");
+  assert.equal(selectedEffort(), "Medium");
   assert.equal(model.disabled, true);
-  assert.equal(effort.disabled, true);
+  assert.ok([...efforts.children].every((button) => button.disabled));
   assert.match(f.$("chat-model-status").textContent, /Wait for Pi/);
-  change(model, "luna");
+  model.click();
+  effort("high").click();
+  assert.equal(options.hidden, true);
   assert.deepEqual(changes, []);
-  model.value = "sol";
   busy = false;
   await f.poll();
   assert.equal(model.disabled, false);
-  assert.equal(effort.disabled, false);
+  assert.ok([...efforts.children].every((button) => !button.disabled));
   const draft = f.$("chat-input");
   draft.value = "Draft for the next model";
-  change(model, "luna");
+  model.focus();
+  assert.equal(model.selectionEnd, "Sol".length);
+  model.click();
+  assert.deepEqual([...options.children].map(({ textContent }) => textContent), ["Sol", "Luna"]);
+  type("missing");
+  assert.equal(noMatches.hidden, false);
+  assert.equal(key("Enter"), true, "Enter with no results must not submit the chat form");
+  assert.deepEqual(changes, []);
+  assert.equal(key("Escape"), true);
+  assert.equal(noMatches.hidden, true);
+  assert.equal(panel.hidden, false);
+  assert.equal(model.value, "Sol");
+  type("OPENAI/");
+  assert.equal(model.getAttribute("aria-expanded"), "true");
+  key("ArrowDown");
+  key("ArrowDown");
+  assert.equal(model.getAttribute("aria-activedescendant"), options.lastElementChild.id);
+  assert.equal(options.lastElementChild.getAttribute("aria-selected"), "true");
+  assert.equal(key("Enter"), true);
+  assert.equal(options.hidden, true);
   assert.equal(model.disabled, true);
   assert.equal(f.$("chat-send").disabled, true);
   finish.resolve();
   await tick();
-  assert.equal(model.value, "luna");
-  assert.equal(effort.value, "high");
-  assert.deepEqual([...effort.options].map(({ value }) => value), ["high", "xhigh"]);
+  assert.equal(model.value, "Luna");
+  assert.deepEqual([...efforts.children].map(({ textContent }) => textContent), ["Low", "High", "Extra high", "Max"]);
+  assert.equal(selectedEffort(), "High");
   assert.equal(draft.value, "Draft for the next model");
-  change(effort, "xhigh");
+  effort("max").focus();
+  effort("max").click();
+  assert.equal(effort("low").getAttribute("aria-disabled"), "true");
+  effort("low").click(); // Ignore other choices while applying a change.
   await tick();
-  assert.equal(effort.value, "xhigh");
-  change(model, "sol");
+  assert.equal(selectedEffort(), "Max");
+  assert.equal(f.window.document.activeElement, effort("max"));
+  effort("max").click(); // Selecting the active choice is a no-op.
+  effort("low").click();
   await tick();
-  assert.equal(model.value, "luna", "failed changes restore the active model");
+  assert.equal(selectedEffort(), "Low");
+  assert.equal(draft.value, "Draft for the next model");
+  model.focus();
+  type("so");
+  effort("low").focus();
+  assert.equal(options.hidden, true);
+  assert.equal(model.value, "Luna", "leaving without choosing restores the active model");
+  model.focus();
+  type("so");
+  assert.deepEqual([...options.children].map(({ textContent }) => textContent), ["Sol"]);
+  options.firstElementChild.click();
+  await tick();
+  assert.equal(model.value, "Luna", "failed changes restore the active model");
   assert.equal(f.$("chat-model-error").textContent, "Pi is busy");
-  assert.deepEqual(changes, [{ model: "luna" }, { effort: "xhigh" }, { model: "sol" }]);
-  effort.dispatchEvent(new f.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  assert.deepEqual(changes, [{ model: luna.key }, { effort: "max" }, { effort: "low" }, { model: sol.key }]);
+  effort("low").dispatchEvent(new f.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   assert.equal(panel.hidden, true);
   assert.equal(f.window.document.activeElement, toggle);
 });

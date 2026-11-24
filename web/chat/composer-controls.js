@@ -1,18 +1,22 @@
 export function mountComposerControls(window, { api, status, setTooltip, isBusy, isConnected, isViewingLive, onActionChange }) {
-  const { document, Option } = window;
+  const { document } = window;
   const $ = (id) => document.getElementById(id);
   const contextButton = $("chat-context");
   const contextDetails = $("chat-context-details");
   const modelToggle = $("chat-model-toggle");
   const modelPanel = $("chat-model-panel");
-  const modelSelect = $("chat-model");
-  const effortSelect = $("chat-effort");
+  const modelInput = $("chat-model");
+  const modelOptions = $("chat-model-options");
+  const noModelMatches = $("chat-model-no-matches");
+  const modelError = $("chat-model-error");
+  const effortGroup = $("chat-effort");
   const compactButton = $("chat-compact");
   const compactDialog = $("compact-chat-dialog");
   const confirmCompact = $("confirm-chat-compact");
   let compactAvailable = false;
   let compacting = false;
   let modelSettings;
+  let activeModelOption;
   let modelLoading = false;
   let modelChanging = false;
 
@@ -35,16 +39,60 @@ export function mountComposerControls(window, { api, status, setTooltip, isBusy,
       : "Context usage is unavailable.";
   }
 
+  function highlightModel(option) {
+    activeModelOption?.setAttribute("aria-selected", "false");
+    activeModelOption = option;
+    if (option) {
+      option.setAttribute("aria-selected", "true");
+      modelInput.setAttribute("aria-activedescendant", option.id);
+      option.scrollIntoView?.({ block: "nearest" });
+    } else modelInput.removeAttribute("aria-activedescendant");
+  }
+
+  function hideModelOptions() {
+    highlightModel(undefined);
+    modelOptions.hidden = noModelMatches.hidden = true;
+    modelInput.setAttribute("aria-expanded", "false");
+    modelInput.value = modelSettings?.model?.label ?? "";
+  }
+
+  function showModelOptions() {
+    if (modelInput.disabled || modelPanel.hidden) return;
+    const query = modelInput.value === modelSettings.model?.label ? "" : modelInput.value.trim().toLowerCase();
+    const matches = modelSettings.models.filter(({ key, label }) =>
+      label.toLowerCase().includes(query) || key.toLowerCase().includes(query));
+    highlightModel(undefined);
+    modelOptions.replaceChildren(...matches.map(({ key, label }, index) => {
+      const option = document.createElement("li");
+      option.id = `chat-model-option-${index}`;
+      option.dataset.key = key;
+      option.setAttribute("role", "option");
+      option.setAttribute("aria-selected", "false");
+      option.textContent = label;
+      return option;
+    }));
+    modelOptions.hidden = !matches.length;
+    noModelMatches.hidden = !!matches.length;
+    modelInput.setAttribute("aria-expanded", String(!!matches.length));
+  }
+
   function showModelPanel(open) {
+    if (!open) hideModelOptions();
     modelPanel.hidden = !open;
     modelToggle.setAttribute("aria-expanded", String(open));
   }
 
   function updateModelControls() {
     const connected = isConnected();
-    const locked = !connected || isBusy() || compacting || modelChanging || modelLoading;
-    modelSelect.disabled = locked || !modelSettings?.models.length;
-    effortSelect.disabled = locked || (modelSettings?.efforts.length ?? 0) < 2;
+    const unavailable = !connected || isBusy() || compacting || modelLoading;
+    const locked = unavailable || modelChanging;
+    modelInput.disabled = locked || !modelSettings?.models.length;
+    if (modelInput.disabled) hideModelOptions();
+    for (const button of effortGroup.children) {
+      button.disabled = unavailable || effortGroup.childElementCount < 2;
+      // Keep keyboard focus on the selected control while the change is in flight.
+      button.setAttribute("aria-disabled", String(button.disabled || modelChanging));
+    }
     const message = modelLoading ? "Loading Pi’s settings…" : modelChanging ? "Changing settings…"
       : !connected ? "Disconnected from Pi." : locked ? "Wait for Pi to finish before changing settings." : "";
     const hint = $("chat-model-status");
@@ -52,16 +100,22 @@ export function mountComposerControls(window, { api, status, setTooltip, isBusy,
   }
 
   function renderModelSettings() {
-    const { model, models, effort, efforts } = modelSettings;
-    modelSelect.replaceChildren(...models.map(({ key, label }) => new Option(label, key)));
-    if (!models.some(({ key }) => key === model?.key)) {
-      const current = new Option(model?.label ?? "No model selected", model?.key ?? "");
-      current.disabled = true;
-      modelSelect.prepend(current);
+    hideModelOptions();
+    const { effort, efforts = [] } = modelSettings ?? {};
+    if (effortGroup.childElementCount !== efforts.length ||
+        efforts.some((level, i) => level !== effortGroup.children[i].value)) {
+      effortGroup.replaceChildren(...efforts.map((level) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.value = level;
+        button.textContent = level === "xhigh" ? "Extra high" : level[0].toUpperCase() + level.slice(1);
+        return button;
+      }));
     }
-    modelSelect.value = model?.key ?? "";
-    effortSelect.replaceChildren(...efforts.map((level) => new Option(level === "xhigh" ? "Extra high" : level[0].toUpperCase() + level.slice(1), level)));
-    effortSelect.value = effort;
+    effortGroup.hidden = !efforts.length;
+    for (const button of effortGroup.children) {
+      button.setAttribute("aria-pressed", String(button.value === effort));
+    }
   }
 
   modelToggle.addEventListener("click", async () => {
@@ -70,38 +124,78 @@ export function mountComposerControls(window, { api, status, setTooltip, isBusy,
     showModelPanel(true);
     if (modelLoading || modelChanging) return;
     modelLoading = true;
-    $("chat-model-error").textContent = "";
+    modelError.textContent = "";
     updateModelControls();
     try {
       modelSettings = await api("/api/session/model");
       renderModelSettings();
     } catch (error) {
       modelSettings = undefined;
-      modelSelect.replaceChildren();
-      effortSelect.replaceChildren();
-      $("chat-model-error").textContent = error.message;
+      renderModelSettings();
+      modelError.textContent = error.message;
     } finally {
       modelLoading = false;
       updateModelControls();
     }
   });
-  for (const [field, key] of [[modelSelect, "model"], [effortSelect, "effort"]]) {
-    field.addEventListener("change", async () => {
-      if (field.disabled || !field.value) return;
-      modelChanging = true;
-      $("chat-model-error").textContent = "";
+  async function changeModelSettings(change) {
+    modelChanging = true;
+    modelError.textContent = "";
+    onActionChange();
+    try {
+      modelSettings = await api("/api/session/model", change);
+    } catch (error) {
+      modelError.textContent = error.message;
+    } finally {
+      modelChanging = false;
+      renderModelSettings();
       onActionChange();
-      try {
-        modelSettings = await api("/api/session/model", { [key]: field.value });
-      } catch (error) {
-        $("chat-model-error").textContent = error.message;
-      } finally {
-        modelChanging = false;
-        renderModelSettings();
-        onActionChange();
-      }
-    });
+    }
   }
+
+  function chooseModel(option) {
+    if (!option || modelInput.disabled || modelOptions.hidden) return;
+    const key = option.dataset.key;
+    hideModelOptions();
+    if (key !== modelSettings.model?.key) void changeModelSettings({ model: key });
+  }
+
+  modelInput.addEventListener("focus", () => modelInput.select());
+  modelInput.addEventListener("input", showModelOptions);
+  modelInput.addEventListener("click", () => {
+    if (!modelOptions.hidden || !noModelMatches.hidden) return;
+    modelInput.select();
+    showModelOptions();
+  });
+  modelInput.addEventListener("blur", hideModelOptions);
+  // Keep focus in the combobox when clicking a result.
+  modelOptions.addEventListener("mousedown", (event) => event.preventDefault());
+  modelOptions.addEventListener("click", (event) => chooseModel(event.target.closest('[role="option"]')));
+  modelInput.addEventListener("keydown", (event) => {
+    if (event.isComposing || modelInput.disabled) return;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (modelOptions.hidden) showModelOptions();
+      if (modelOptions.hidden) return;
+      const down = event.key === "ArrowDown";
+      const option = activeModelOption ? (down ? activeModelOption.nextElementSibling : activeModelOption.previousElementSibling) ?? activeModelOption
+        : down ? modelOptions.firstElementChild : modelOptions.lastElementChild;
+      highlightModel(option);
+    } else if (event.key === "Enter") {
+      // This input is inside the chat form; Enter must never send the draft.
+      event.preventDefault();
+      chooseModel(activeModelOption ?? (modelOptions.childElementCount === 1 ? modelOptions.firstElementChild : null));
+    } else if (event.key === "Escape" && (!modelOptions.hidden || !noModelMatches.hidden)) {
+      event.preventDefault();
+      hideModelOptions();
+      modelInput.select();
+    }
+  });
+  effortGroup.addEventListener("click", (event) => {
+    const button = event.target.closest("button");
+    if (!button || button.disabled || modelChanging || button.value === modelSettings?.effort) return;
+    void changeModelSettings({ effort: button.value });
+  });
 
   contextButton.addEventListener("click", () => {
     showModelPanel(false);
@@ -112,7 +206,7 @@ export function mountComposerControls(window, { api, status, setTooltip, isBusy,
     if (!modelPanel.hidden && !modelPanel.contains(event.target) && !modelToggle.contains(event.target)) showModelPanel(false);
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || event.defaultPrevented) return;
+    if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
     if (!contextDetails.hidden) showContextDetails(false);
     if (!modelPanel.hidden) {
       showModelPanel(false);

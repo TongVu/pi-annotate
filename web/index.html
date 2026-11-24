@@ -102,9 +102,13 @@
               <button id="chat-model-toggle" type="button" class="secondary" aria-label="Model and thinking effort" aria-controls="chat-model-panel" aria-expanded="false" title="Model &amp; thinking effort"><span aria-hidden="true">👾</span><svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m2 4 4 4 4-4"/></svg></button>
               <div id="chat-model-panel" hidden>
                 <label for="chat-model" title="Model"><span aria-hidden="true">👽</span></label>
-                <select id="chat-model" aria-label="Model" disabled></select>
-                <label for="chat-effort" title="Thinking effort"><span aria-hidden="true">🧠</span></label>
-                <select id="chat-effort" aria-label="Thinking effort" disabled></select>
+                <div class="chat-model-picker">
+                  <input id="chat-model" type="text" role="combobox" aria-label="Model" aria-autocomplete="list" aria-expanded="false" aria-controls="chat-model-options" placeholder="Search models" autocomplete="off" spellcheck="false" disabled>
+                  <ul id="chat-model-options" role="listbox" aria-label="Matching models" hidden></ul>
+                  <small id="chat-model-no-matches" role="status" hidden>No matching models.</small>
+                </div>
+                <span class="chat-model-icon" title="Thinking effort" aria-hidden="true">🧠</span>
+                <div id="chat-effort" role="group" aria-label="Thinking effort" hidden></div>
                 <p id="chat-model-status" role="status"></p>
                 <p id="chat-model-error" role="alert"></p>
               </div>
