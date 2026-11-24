@@ -38,7 +38,7 @@ h2 { font-size: 17px; margin: 0 0 16px; }
 #chat-note { min-height: 0; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
 .chat-note-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
 #chat-note-title { margin: 0; font-size: 17px; }
-.chat-note-actions { display: flex; flex: none; gap: 6px; }
+.chat-note-actions:not([hidden]) { display: flex; flex: none; gap: 6px; }
 .chat-note-actions .composer-icon { display: grid; place-items: center; flex: none; width: var(--chat-note-button-size); height: var(--chat-note-button-size); padding: 0; border-radius: 50%; }
 #chat-note-preview-toggle .note-edit-icon { display: none; }
 #chat-note-preview-toggle[aria-pressed="true"] .note-preview-icon { display: none; }

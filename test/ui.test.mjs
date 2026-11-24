@@ -1,13 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { Script } from "node:vm";
 import { JSDOM } from "jsdom";
 import { renderMarkdown } from "../src/markdown.ts";
+import { startChatPage } from "../web/app.js";
 const logo = await readFile(new URL("../web/logo.png", import.meta.url));
-const tooltipScript = await readFile(new URL("../web/tooltips.js", import.meta.url), "utf8");
-async function fixture(t, { chatFetch } = {}) {
+// The dashboard still uses the classic shared tooltip script. Test it in the window's realm.
+const tooltipScript = new Script(await readFile(new URL("../web/tooltips.js", import.meta.url), "utf8"), { filename: "web/tooltips.js" });
+async function fixture(t, { chatFetch, loadNotes } = {}) {
   const html = await readFile(new URL("../web/index.html", import.meta.url), "utf8");
-  const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
   const dom = new JSDOM(html, { url: "http://127.0.0.1:12345/?tab=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#test-token", runScripts: "outside-only" });
   t.after(() => dom.window.close());
   const { window } = dom;
@@ -15,15 +17,30 @@ async function fixture(t, { chatFetch } = {}) {
   window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
   window.HTMLDialogElement.prototype.close = function () { this.open = false; this.dispatchEvent(new window.Event("close")); };
   window.Range.prototype.getBoundingClientRect = () => ({ left: 100, top: 150, bottom: 170 });
-  const polls = [];
-  if (chatFetch) window.setTimeout = (fn) => polls.push(fn);
+  const timers = new Map();
+  let timerId = 0;
+  if (chatFetch) {
+    window.setTimeout = (fn, delay) => {
+      timers.set(++timerId, { fn, delay });
+      return timerId;
+    };
+    window.clearTimeout = (id) => timers.delete(id);
+  }
+  const runTimer = (matches) => {
+    const next = [...timers].find(([, { delay }]) => matches(delay));
+    assert.ok(next, "expected a pending timer");
+    const [id, { fn }] = next;
+    timers.delete(id);
+    return fn();
+  };
   window.fetch = async (path, opts) => {
     if (path === "/logo.png") return { ok: true, arrayBuffer: async () => logo };
     assert.equal(opts.headers.Authorization, "Bearer test-token");
     if (!chatFetch) throw new Error(`Unexpected chat request: ${path}`);
     return chatFetch(path, opts.body && JSON.parse(opts.body), opts);
   };
-  await window.eval(`(async () => { ${tooltipScript}\n${source}\n})()`);
+  tooltipScript.runInContext(dom.getInternalVMContext());
+  await startChatPage(window, { tooltipFactory: window.createTooltips, loadNotes });
   const select = (start, end, target = $("response")) => {
     const range = window.document.createRange();
     const locate = (offset) => {
@@ -45,7 +62,7 @@ async function fixture(t, { chatFetch } = {}) {
     $("comment").value = question;
     $("comment-form").dispatchEvent(new window.Event("submit", { cancelable: true }));
   };
-  return { window, $, select, add, poll: () => polls.shift()() };
+  return { window, $, select, add, poll: () => runTimer((delay) => delay >= 1000), autosave: () => runTimer((delay) => delay < 1000) };
 }
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -952,6 +969,69 @@ test("Markdown notes persist per chat, preview safely, and copy their source", a
   const isolated = await fixture(t, { chatFetch: fetchForSession("another-session") });
   await tick();
   assert.equal(isolated.$("chat-note-input").value, "", "notes are scoped to their Pi session ID");
+});
+
+test("Markdown note autosave coalesces edits and serializes writes; close includes the current draft", async (t) => {
+  const firstSave = Promise.withResolvers();
+  const saves = [];
+  const closes = [];
+  const f = await fixture(t, { chatFetch: async (path, body, { keepalive }) => {
+    const json = (data) => ({ ok: true, json: async () => data });
+    if (path === "/api/response") return json({ mode: "chat", protocol: 2, sessionId: "session-1", cursor: null, messages: [] });
+    if (path === "/api/note") {
+      if (!body) return json({ markdown: "Saved" });
+      saves.push(body.markdown);
+      if (saves.length === 1) await firstSave.promise;
+    } else if (path === "/api/close") closes.push({ body, keepalive });
+    else assert.fail(`Unexpected path: ${path}`);
+    return json({ ok: true });
+  } });
+  await tick();
+  const note = f.$("chat-note-input");
+  const edit = (markdown) => {
+    note.value = markdown;
+    note.dispatchEvent(new f.window.Event("input"));
+  };
+  edit("First keystroke");
+  edit("First draft");
+  f.autosave();
+  await tick();
+  assert.deepEqual(saves, ["First draft"]);
+  edit("Second draft");
+  f.autosave();
+  await tick();
+  assert.deepEqual(saves, ["First draft"], "wait for the preceding write");
+  firstSave.resolve();
+  await tick();
+  assert.deepEqual(saves, ["First draft", "Second draft"]);
+
+  edit("Draft not yet autosaved");
+  f.window.dispatchEvent(new f.window.Event("pagehide"));
+  assert.deepEqual(closes, [{ body: { markdown: "Draft not yet autosaved" }, keepalive: true }]);
+});
+
+test("chat stays usable and leaves saved notes untouched if an older listener cannot serve the notes module", async (t) => {
+  const posts = [];
+  const f = await fixture(t, {
+    loadNotes: async () => { throw new TypeError("Failed to fetch dynamically imported module"); },
+    chatFetch: async (path, body) => {
+      if (path === "/api/response") return { ok: true, json: async () => ({ mode: "chat", protocol: 2, sessionId: "session-1", cursor: null, messages: [] }) };
+      posts.push({ path, body });
+      return { ok: true, json: async () => ({ ok: true }) };
+    },
+  });
+  assert.equal(f.$("chat-form").hidden, false);
+  assert.equal(f.$("chat-note-box").hidden, true);
+  assert.match(f.$("chat-note-status").textContent, /\/reload/);
+  const composer = f.$("chat-input");
+  composer.value = "Message still works";
+  composer.dispatchEvent(new f.window.Event("input"));
+  f.$("chat-send").click();
+  await tick();
+  f.window.dispatchEvent(new f.window.Event("pagehide"));
+  assert.deepEqual(posts.map(({ path }) => path), ["/api/chat", "/api/close"]);
+  assert.equal(posts[0].body.text, "Message still works");
+  assert.deepEqual(posts[1].body, {});
 });
 
 test("chat composer works from an empty session and clears only its own draft", async (t) => {
