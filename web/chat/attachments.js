@@ -20,7 +20,7 @@ export function mountAttachmentUi(window, setTooltip) {
     imagePreview.showModal();
   }
 
-  function renderAttachmentList(list, files, removeFile) {
+  function renderAttachmentList(list, files, removeFile, { download = false } = {}) {
     list.hidden = !files.length;
     list.replaceChildren();
     for (const [index, file] of files.entries()) {
@@ -49,6 +49,15 @@ export function mountAttachmentUi(window, setTooltip) {
         open.append(thumb, name);
         open.addEventListener("click", () => showImagePreview(file.name, src));
         item.append(open);
+      } else if (download) {
+        remove.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3m4 0-1 15H6L5 6m5 4v7m4-7v7"/></svg>';
+        setTooltip(remove, `Remove ${file.name}`);
+        const link = document.createElement("a");
+        link.download = file.name;
+        link.href = `data:application/octet-stream;base64,${file.data}`;
+        link.setAttribute("aria-label", `Download ${file.name}`);
+        link.append(name);
+        item.append(link);
       } else {
         item.append(name);
       }

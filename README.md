@@ -77,7 +77,12 @@ text/code files or PNG, JPEG, GIF, and WebP images, with or without a message.
 Limits are 5 MiB per file, 10 MiB combined, and 128 KiB
 combined for text files. The same image limits apply across an annotation batch.
 PDFs, Office documents, and archives aren't supported.
-Images require an image-capable model and must not be blocked in Pi settings.
+Images sent to Pi require an image-capable model and must not be blocked in Pi settings.
+
+The sidebar note also accepts pasted screenshots and files via its paperclip,
+with the same types and limits as the composer. Click an image to preview it
+or a text filename to download it. Attachments are saved with the note for that
+session, not sent to Pi. **Copy note Markdown** still copies only the text.
 
 Chat submissions start a normal Pi turn with the session's model and tools. They
 aren't interpreted as slash commands. If a send can't be confirmed, the draft stays

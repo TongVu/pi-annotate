@@ -971,6 +971,101 @@ test("Markdown notes persist per chat, preview safely, and copy their source", a
   assert.equal(isolated.$("chat-note-input").value, "", "notes are scoped to their Pi session ID");
 });
 
+test("Markdown notes paste images and pick files, then reopen with saved attachments", async (t) => {
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgZGIGAAAOAAfXb+R4AAAAAElFTkSuQmCC";
+  const firstSave = Promise.withResolvers();
+  let attachments = [];
+  let rejectRemoval = true;
+  const chatFetch = async (path, body) => {
+    const json = (data, ok = true) => ({ ok, json: async () => data });
+    if (path === "/api/response") return json({ mode: "chat", protocol: 2, sessionId: "note-session", cursor: null, messages: [] });
+    if (path === "/api/note" && !body) return json({ markdown: "Notes", attachments });
+    if (path === "/api/note/attachments") {
+      if (attachments.length === 0) await firstSave.promise;
+      if (body.attachments.length < attachments.length && rejectRemoval) return json({ error: "Could not remove file." }, false);
+      attachments = body.attachments;
+      return json({ ok: true });
+    }
+    assert.fail(`Unexpected chat request: ${path}`);
+  };
+  const f = await fixture(t, { chatFetch });
+  await tick();
+  const { window: w, $ } = f;
+  const input = $("chat-note-input");
+  const file = $("chat-note-file");
+  const list = $("chat-note-attachments");
+  const waitForCount = (count) => new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => { observer.disconnect(); reject(new Error(`Expected ${count} note attachments`)); }, 1000);
+    const observer = new w.MutationObserver(() => {
+      if (list.children.length !== count) return;
+      clearTimeout(timeout);
+      observer.disconnect();
+      resolve();
+    });
+    observer.observe(list, { childList: true });
+  });
+  const textPaste = new w.Event("paste", { cancelable: true });
+  input.dispatchEvent(textPaste);
+  assert.equal(textPaste.defaultPrevented, false);
+  const pasted = waitForCount(1);
+  const imagePaste = new w.Event("paste", { cancelable: true });
+  Object.defineProperty(imagePaste, "clipboardData", { value: { files: [new w.File([Buffer.from(png, "base64")], "screenshot.png", { type: "image/png" })] } });
+  input.dispatchEvent(imagePaste);
+  assert.equal(imagePaste.defaultPrevented, true);
+  assert.equal($("chat-note-attach").disabled, true);
+  const unload = new w.Event("beforeunload", { cancelable: true });
+  w.dispatchEvent(unload);
+  assert.equal(unload.defaultPrevented, true);
+  firstSave.resolve();
+  await pasted;
+  $("chat-note-expand").click();
+  list.querySelector('[aria-label="Preview screenshot.png"]').click();
+  assert.equal($("image-preview").open, true);
+  assert.equal($("preview-image").src, `data:image/png;base64,${png}`);
+  $("close-preview").click();
+  assert.equal($("chat-note-dialog").open, true);
+
+  let pickerOpens = 0;
+  file.addEventListener("click", (event) => { pickerOpens++; event.preventDefault(); });
+  $("chat-note-attach").click();
+  assert.equal(pickerOpens, 1);
+  const picked = waitForCount(2);
+  Object.defineProperty(file, "files", { value: [new w.File(["code"], "Example.java")] });
+  file.dispatchEvent(new w.Event("change"));
+  await picked;
+  assert.equal(input.value, "Notes");
+  assert.equal($("chat-attachments").hidden, true);
+  assert.equal($("chat-send").disabled, true);
+  const settled = new w.Event("beforeunload", { cancelable: true });
+  w.dispatchEvent(settled);
+  assert.equal(settled.defaultPrevented, false);
+
+  const reopened = await fixture(t, { chatFetch });
+  await tick();
+  const saved = reopened.$("chat-note-attachments");
+  const download = saved.querySelector('[aria-label="Download Example.java"]');
+  assert.equal(download.download, "Example.java");
+  assert.equal(download.href, "data:application/octet-stream;base64,Y29kZQ==");
+  assert.equal(saved.children.length, 2);
+  const remove = saved.querySelector('[aria-label="Remove screenshot.png"]');
+  remove.click();
+  await tick();
+  assert.equal(saved.children.length, 2, "a failed save leaves the attachment intact");
+  assert.match(reopened.$("chat-note-attachments-status").textContent, /Could not remove/);
+  rejectRemoval = false;
+  remove.click();
+  await tick();
+  assert.equal(saved.querySelector("img"), null);
+  assert.deepEqual(attachments.map(({ name }) => name), ["Example.java"]);
+  const trash = saved.querySelector('[aria-label="Remove Example.java"]');
+  assert.ok(trash.querySelector('svg[aria-hidden="true"]'));
+  assert.equal(trash.textContent.trim(), "");
+  trash.click();
+  await tick();
+  assert.equal(saved.hidden, true);
+  assert.deepEqual(attachments, []);
+});
+
 test("Markdown note autosave coalesces edits and serializes writes; close includes the current draft", async (t) => {
   const firstSave = Promise.withResolvers();
   const saves = [];

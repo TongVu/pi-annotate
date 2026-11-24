@@ -87,8 +87,8 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
       }
       const url = new URL(req.url, origin);
       if (live && req.method === "GET" && url.pathname === "/api/note") {
-        const markdown = await live.readNote();
-        if (checkCurrent()) reply(200, { markdown });
+        const note = await live.readNote();
+        if (checkCurrent()) reply(200, note);
         return;
       }
       if (live && req.method === "GET" && url.pathname === "/api/activity") {
@@ -151,9 +151,10 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
         : req.url === "/api/dashboard/open" ? { name: "Open dashboard", run: chat.openDashboard && (() => chat.openDashboard(req.headers["user-agent"] ?? "")) } : undefined;
       const renderNote = live && req.url === "/api/markdown";
       const saveNote = live && req.url === "/api/note";
+      const saveNoteAttachments = live && req.url === "/api/note/attachments";
       const openSession = explorer && req.url === "/api/session/open";
       const cloneSession = explorer && req.url === "/api/session/clone";
-      if (req.method === "POST" && (disconnect || renameSession || compactSession || modelSettings || localAction || renderNote || saveNote || openSession || cloneSession || req.url === "/api/chat")) {
+      if (req.method === "POST" && (disconnect || renameSession || compactSession || modelSettings || localAction || renderNote || saveNote || saveNoteAttachments || openSession || cloneSession || req.url === "/api/chat")) {
         if (!isSameOriginJson(req.headers, origin)) {
           reply(403, { error: "Expected a same-origin JSON request." });
           return;
@@ -203,6 +204,12 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
         if (saveNote) {
           if (!checkCurrent()) return;
           await live.saveNote(body?.markdown);
+          if (checkCurrent()) reply(200, { ok: true });
+          return;
+        }
+        if (saveNoteAttachments) {
+          if (!checkCurrent()) return;
+          await live.saveNoteAttachments(body?.attachments);
           if (checkCurrent()) reply(200, { ok: true });
           return;
         }

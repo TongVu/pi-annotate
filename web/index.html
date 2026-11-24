@@ -141,6 +141,11 @@
           <div class="chat-note-heading">
             <h2 id="chat-note-title">Markdown note</h2>
             <div class="chat-note-actions">
+              <button id="chat-note-attach" type="button" class="secondary composer-icon" aria-label="Attach files to note" title="Attach text files or images to note" disabled>
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="m21.4 11-9.2 9.2a6 6 0 0 1-8.5-8.5L14.3 1.2A4 4 0 0 1 20 6.9L9.4 17.5a2 2 0 0 1-2.8-2.8l9.9-9.9"/>
+                </svg>
+              </button>
               <button id="chat-note-preview-toggle" type="button" class="secondary composer-icon" aria-label="Preview note" title="Preview Markdown note" aria-pressed="false">
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path class="note-preview-icon" d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle class="note-preview-icon" cx="12" cy="12" r="3"/>
@@ -159,9 +164,12 @@
             </div>
           </div>
           <div id="chat-note-box" class="chat-note-box">
-            <textarea id="chat-note-input" rows="4" maxlength="32000" aria-label="Reusable Markdown note" placeholder="Keep reusable text here…"></textarea>
+            <textarea id="chat-note-input" rows="4" maxlength="32000" aria-label="Reusable Markdown note" placeholder="Write a note or paste a screenshot…"></textarea>
             <div id="chat-note-preview" class="chat-note-preview" hidden></div>
           </div>
+          <input id="chat-note-file" type="file" multiple hidden>
+          <ul id="chat-note-attachments" class="attachment-list" aria-label="Files saved with the note" hidden></ul>
+          <p id="chat-note-attachments-status" role="status"></p>
           <p id="chat-note-status" role="status" aria-live="polite"></p>
         </section>
         <section id="annotations-panel" aria-label="Annotations">

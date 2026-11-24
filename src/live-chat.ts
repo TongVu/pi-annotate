@@ -17,6 +17,11 @@ export function createLiveChat({ noteStore, getSessionId, getSessionName, setSes
     const last = (branch ?? getBranch()).findLast((entry) => entry.type === "message" && ["user", "assistant"].includes(entry.message.role));
     return ["error", "aborted"].includes(last?.message.stopReason) ? "error" : "ready";
   };
+  function noteSessionId() {
+    const sessionId = getSessionId?.();
+    if (!noteStore || typeof sessionId !== "string" || !sessionId) throw new Error("Persistent note storage is unavailable.");
+    return sessionId;
+  }
   return {
     status,
     read(after, reply) {
@@ -72,14 +77,15 @@ export function createLiveChat({ noteStore, getSessionId, getSessionName, setSes
       return readChatImage(getBranch(), id, index);
     },
     async readNote() {
-      const sessionId = getSessionId?.();
-      if (!noteStore || typeof sessionId !== "string" || !sessionId) throw new Error("Persistent note storage is unavailable.");
-      return noteStore.read(sessionId);
+      const sessionId = noteSessionId();
+      const [markdown, attachments] = await Promise.all([noteStore.read(sessionId), noteStore.readAttachments(sessionId)]);
+      return { markdown, attachments };
     },
-    async saveNote(markdown) {
-      const sessionId = getSessionId?.();
-      if (!noteStore || typeof sessionId !== "string" || !sessionId) throw new Error("Persistent note storage is unavailable.");
-      await noteStore.write(sessionId, markdown);
+    saveNote(markdown) {
+      return noteStore.write(noteSessionId(), markdown);
+    },
+    saveNoteAttachments(attachments) {
+      return noteStore.writeAttachments(noteSessionId(), attachments);
     },
     rename(name, reply) {
       if (typeof name !== "string" || !name.trim() || name.trim().length > 100 || /[\u0000-\u001f\u007f]/.test(name)) {

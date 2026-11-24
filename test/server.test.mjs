@@ -181,18 +181,34 @@ test("chat note API persists per session across servers and flushes on disconnec
   const saveNote = (server, markdown) => fetch(`${server.base}/api/note`, {
     method: "POST", headers: server.headers, body: JSON.stringify({ markdown }),
   });
+  const saveAttachments = (server, attachments, headers = server.headers) => fetch(`${server.base}/api/note/attachments`, {
+    method: "POST", headers, body: JSON.stringify({ attachments }),
+  });
+  const attachments = [
+    { name: "Screenshot.png", mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgZGIGAAAOAAfXb+R4AAAAAElFTkSuQmCC" },
+    { name: "Example.txt", mimeType: "text/plain", data: "dGV4dA==" },
+  ];
   assert.equal((await fetch(`${first.base}/api/note`)).status, 401);
-  assert.deepEqual(await (await getNote(first)).json(), { markdown: "" });
+  assert.deepEqual(await (await getNote(first)).json(), { markdown: "", attachments: [] });
+  assert.equal((await saveAttachments(first, attachments, {})).status, 401);
+  assert.equal((await saveAttachments(first, attachments, { ...first.headers, Origin: "http://example.test" })).status, 403);
+  assert.equal((await saveAttachments(first, attachments)).status, 200);
   assert.equal((await saveNote(first, "# Saved across chat sessions")).status, 200);
-  assert.deepEqual(await (await getNote(first)).json(), { markdown: "# Saved across chat sessions" });
+  assert.deepEqual(await (await getNote(first)).json(), { markdown: "# Saved across chat sessions", attachments });
   const closed = await fetch(`${first.base}/api/close`, {
     method: "POST", headers: first.headers, body: JSON.stringify({ markdown: "Final note on close" }),
   });
   assert.equal(closed.status, 200);
 
   const second = await fixture(t, { chat: chat() });
-  assert.deepEqual(await (await getNote(second)).json(), { markdown: "Final note on close" });
+  assert.deepEqual(await (await getNote(second)).json(), { markdown: "Final note on close", attachments });
   assert.equal((await saveNote(second, "x".repeat(32_001))).status, 400);
+  assert.equal((await saveAttachments(second, [{ ...attachments[0], data: attachments[1].data }])).status, 400);
+  assert.deepEqual(await (await getNote(second)).json(), { markdown: "Final note on close", attachments });
+  const other = await fixture(t, { chat: { ...chat(), getSessionId: () => "another-session" } });
+  assert.deepEqual(await (await getNote(other)).json(), { markdown: "", attachments: [] });
+  assert.equal((await saveAttachments(second, [])).status, 200);
+  assert.deepEqual(await (await getNote(second)).json(), { markdown: "Final note on close", attachments: [] });
 });
 
 test("chat session rename validates names and updates Pi through the authenticated route", async (t) => {

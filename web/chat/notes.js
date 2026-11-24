@@ -1,6 +1,6 @@
 const noSession = "Session ID unavailable. Run /reload in Pi, then reopen /chat to save this note.";
 
-export function mountChatNotes(window, { sessionId, api, setTooltip }) {
+export function mountChatNotes(window, { sessionId, api, setTooltip, attachmentUi }) {
   const $ = (id) => window.document.getElementById(id);
   const note = $("chat-note");
   const dialog = $("chat-note-dialog");
@@ -10,6 +10,14 @@ export function mountChatNotes(window, { sessionId, api, setTooltip }) {
   const copy = $("chat-note-copy");
   const expand = $("chat-note-expand");
   const statusElement = $("chat-note-status");
+  const attach = $("chat-note-attach");
+  const filePicker = $("chat-note-file");
+  const fileList = $("chat-note-attachments");
+  const fileStatus = $("chat-note-attachments-status");
+  const { renderAttachmentList, readAttachment, checkAttachmentLimits } = attachmentUi;
+  let attachments = [];
+  let canAttach = false;
+  let updatingAttachments = false;
   const id = typeof sessionId === "string" && sessionId ? sessionId : undefined;
   let ready = !id;
   let saveTimer;
@@ -24,6 +32,46 @@ export function mountChatNotes(window, { sessionId, api, setTooltip }) {
 
   function updateCopy() {
     copy.disabled = !ready || !input.value.trim();
+  }
+
+  function updateAttachmentControls() {
+    attach.disabled = !canAttach || updatingAttachments;
+    for (const button of fileList.querySelectorAll("button")) button.disabled = updatingAttachments;
+  }
+
+  function renderFiles() {
+    renderAttachmentList(fileList, attachments, (index) => {
+      void updateAttachments(() => attachments.filter((_, i) => i !== index));
+    }, { download: true });
+  }
+
+  async function updateAttachments(getFiles) {
+    if (!canAttach || updatingAttachments) return;
+    updatingAttachments = true;
+    updateAttachmentControls();
+    fileStatus.classList.remove("error");
+    fileStatus.textContent = "Saving note attachments…";
+    try {
+      const next = await getFiles();
+      await api("/api/note/attachments", { attachments: next });
+      attachments = next;
+      renderFiles();
+      fileStatus.textContent = "Note attachments saved.";
+    } catch (error) {
+      fileStatus.classList.add("error");
+      fileStatus.textContent = error.message || "Could not save note attachments.";
+    } finally {
+      updatingAttachments = false;
+      updateAttachmentControls();
+    }
+  }
+
+  function attachFiles(files) {
+    if (!files.length) return;
+    void updateAttachments(async () => {
+      checkAttachmentLimits(files, attachments);
+      return [...attachments, ...await Promise.all(files.map(readAttachment))];
+    });
   }
 
   async function load() {
@@ -46,6 +94,12 @@ export function mountChatNotes(window, { sessionId, api, setTooltip }) {
         markdown = legacyNote;
       }
       input.value = markdown;
+      if (Array.isArray(saved.attachments)) {
+        canAttach = true;
+        attachments = saved.attachments;
+        renderFiles();
+        updateAttachmentControls();
+      }
       try { window.localStorage.removeItem(legacyKey); } catch { /* Migration can be retried next time. */ }
       status("");
     } catch (error) {
@@ -119,6 +173,18 @@ export function mountChatNotes(window, { sessionId, api, setTooltip }) {
     saveTimer = window.setTimeout(() => { void save(); }, 350);
   });
   input.addEventListener("blur", () => { void save(); });
+  input.addEventListener("paste", (event) => {
+    const files = Array.from(event.clipboardData?.files ?? []);
+    if (!files.length || !canAttach) return;
+    event.preventDefault();
+    attachFiles(files);
+  });
+  attach.addEventListener("click", () => filePicker.click());
+  filePicker.addEventListener("change", () => {
+    const files = Array.from(filePicker.files);
+    filePicker.value = "";
+    attachFiles(files);
+  });
 
   previewToggle.addEventListener("click", async () => {
     if (previewing) {
@@ -159,5 +225,5 @@ export function mountChatNotes(window, { sessionId, api, setTooltip }) {
 
   note.hidden = false;
   void load();
-  return { markdownForClose };
+  return { markdownForClose, hasPendingAttachments: () => updatingAttachments };
 }

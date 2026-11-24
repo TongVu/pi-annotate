@@ -16,6 +16,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   const renameSessionInput = $("rename-session-input");
   const saveSessionName = $("save-session-name");
   let cursor = null;
+  let notes;
   const appTitle = "Pi Chat";
   let liveTitle = appTitle;
   let chatTitleStatus = "⚪";
@@ -238,7 +239,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     if (data.protocol !== 2) throw new Error("Pi's chat server is outdated. Run /reload, then /chat in Pi.");
     document.body.classList.add("chat-page");
     sessionTitlePill.hidden = false;
-    const notes = mountChatNotes?.(window, { sessionId: data.sessionId, api, setTooltip });
+    notes = mountChatNotes?.(window, { sessionId: data.sessionId, api, setTooltip, attachmentUi });
     if (!notes) {
       // A listener started before this asset was added may still serve the entry script from disk.
       const note = $("chat-note");
@@ -283,7 +284,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   }
 
   window.addEventListener("beforeunload", (event) => {
-    if (composer.hasDraft() || annotations.hasDraft()) {
+    if (composer.hasDraft() || annotations.hasDraft() || notes?.hasPendingAttachments()) {
       event.preventDefault();
       event.returnValue = "";
     }
