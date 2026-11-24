@@ -64,7 +64,7 @@ function dot(state, terminalWorking) {
 function pill(state, label = statuses[state], terminalWorking) {
   const node = el("span", "pill");
   node.append(dot(state, terminalWorking), label);
-  if (state === "disconnected") setTooltip(node, disconnectedHint(terminalWorking));
+  if (state === "disconnected") setTooltip(node, terminalWorking === undefined ? "No chat tab connected" : disconnectedHint(terminalWorking));
   return node;
 }
 
@@ -145,7 +145,7 @@ function cards(cwd, items, namesById) {
   if (view !== "project") section.append(el("h2", "", projectName(cwd)), el("p", "directory", cwd || "No saved directory"));
   for (const session of items) {
     const card = el("article", "card");
-    card.append(pill(session.status, undefined, session.terminalWorking), el("h3", "", session.name));
+    card.append(pill(session.status, undefined, Boolean(session.terminalWorking)), el("h3", "", session.name));
     const parent = namesById.get(session.parentId);
     if (parent) {
       const lineage = el("p", "clone-lineage");

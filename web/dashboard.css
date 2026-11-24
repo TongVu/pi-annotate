@@ -113,6 +113,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .dot.ready { background: #3c9a6a; animation: chat-breathe 2.8s ease-in-out infinite; }
 .dot.error { background: #c2423a; box-shadow: 0 0 0 2px #c2423a30; }
 .dot.disconnected { border: 2px solid #3c9a6a; }
+:is(#stats, #legend) .dot.disconnected { border-color: #75756e; }
 .dot.disconnected.terminal-working { border-color: #d97757; }
 .dot.saved, .dot.connected { background: #aaa89f; }
 @keyframes pulse { from { transform: scale(.6); opacity: .9; } to { transform: scale(1.8); opacity: 0; } }

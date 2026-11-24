@@ -362,6 +362,7 @@ test("dashboard browser focus accepts only local dashboard locators", () => {
 test("dashboard filters projects and cards by name or directory within the selected view", async (t) => {
   const html = await readFile(new URL("../web/dashboard.html", import.meta.url), "utf8");
   const script = await readFile(new URL("../web/dashboard.js", import.meta.url), "utf8");
+  const css = await readFile(new URL("../web/dashboard.css", import.meta.url), "utf8");
   const requests = [];
   const focus = Promise.withResolvers();
   const session = (id, name, cwd, status, action) => ({ id, name, cwd, status, action, modified: Date.now(), preview: "<img src=x>" });
@@ -383,6 +384,9 @@ test("dashboard filters projects and cards by name or directory within the selec
   };
   dom.window.eval(`${tooltipScript}\n${script}`);
   const q = (selector) => dom.window.document.querySelector(selector);
+  const style = dom.window.document.createElement("style");
+  style.textContent = css;
+  dom.window.document.head.append(style);
   const titles = () => [...dom.window.document.querySelectorAll(".card h3")].map((node) => node.textContent);
   const workingCount = () => q("#stats .dot.working").closest(".stat").querySelector("b").textContent;
   await waitFor(() => q(".card"));
@@ -404,10 +408,15 @@ test("dashboard filters projects and cards by name or directory within the selec
   assert.equal(tooltip().textContent, "/work/site");
   q('.card [data-id="a"]').dispatchEvent(new dom.window.MouseEvent("mouseenter"));
   assert.equal(tooltip().textContent, "Hero copy");
-  for (const selector of ["#stats .dot.disconnected", "#legend .dot.disconnected", ".card .dot.disconnected"]) {
+  const ringColor = (selector) => dom.window.getComputedStyle(q(selector)).borderTopColor;
+  for (const selector of ["#stats .dot.disconnected", "#legend .dot.disconnected"]) {
     q(selector).closest(".pill").dispatchEvent(new dom.window.MouseEvent("mouseenter"));
-    assert.equal(tooltip().textContent, "Running in Terminal · No chat tab connected");
+    assert.equal(tooltip().textContent, "No chat tab connected");
+    assert.equal(ringColor(selector), "rgb(117, 117, 110)");
   }
+  q(".card .dot.disconnected").closest(".pill").dispatchEvent(new dom.window.MouseEvent("mouseenter"));
+  assert.equal(tooltip().textContent, "Running in Terminal · No chat tab connected");
+  assert.equal(ringColor(".card .dot.disconnected"), "rgb(60, 154, 106)");
   const disconnectedCount = () => q("#stats .dot.disconnected").closest(".stat").querySelector("b").textContent;
   assert.equal(disconnectedCount(), "1");
   for (const selector of ['#projects [data-id="d"]', '.card [data-id="d"]']) {
@@ -426,6 +435,8 @@ test("dashboard filters projects and cards by name or directory within the selec
   await waitFor(() => q("#projects .dot.disconnected.terminal-working"));
   q(".card .dot.disconnected.terminal-working").closest(".pill").dispatchEvent(new dom.window.MouseEvent("mouseenter"));
   assert.equal(tooltip().textContent, "Working in Terminal · No chat tab connected");
+  assert.equal(ringColor(".card .dot.disconnected.terminal-working"), "rgb(217, 119, 87)");
+  assert.equal(ringColor("#stats .dot.disconnected"), "rgb(117, 117, 110)");
   q('#projects [data-id="d"]').focus();
   assert.equal(tooltip().textContent, "Draft deck · Working in Terminal · No chat tab connected");
   assert.equal(disconnectedCount(), "1");
