@@ -1,12 +1,10 @@
 import { mountExplorer } from "./explorer.js";
+import { mountTranscript } from "./transcript.js";
 
 export async function mountChatPage(window, { token, tooltipFactory, loadNotes = () => import("./notes.js") }) {
-  const { document, FileReader, crypto, Node, Option, IntersectionObserver, URL, URLSearchParams } = window;
+  const { document, FileReader, crypto, Node, Option } = window;
   const $ = (id) => document.getElementById(id);
   const responseElement = $("response");
-  const turnRail = $("turns");
-  const turns = [];
-  let currentDot;
   const dialog = $("comment-dialog");
   const selectionAction = $("annotate-selection");
   const comment = $("comment");
@@ -45,7 +43,6 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   let liveTitle = appTitle;
   let chatTitleStatus = "⚪";
   let liveSessionName;
-  let liveScroll;
   let busy = false;
   let compactAvailable = false;
   let compacting = false;
@@ -619,79 +616,6 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     }
   });
 
-  function markCurrentDot(dot) {
-    if (currentDot === dot) return;
-    currentDot?.removeAttribute("aria-current");
-    currentDot = dot;
-    dot.setAttribute("aria-current", "location");
-    const rail = turnRail.getBoundingClientRect();
-    const position = dot.getBoundingClientRect();
-    if (position.top < rail.top) turnRail.scrollTop += position.top - rail.top;
-    else if (position.bottom > rail.bottom) turnRail.scrollTop += position.bottom - rail.bottom;
-  }
-
-  function updateCurrentTurn() {
-    if (!turns.length) return;
-    const atEnd = responseElement.scrollHeight - responseElement.scrollTop - responseElement.clientHeight <= 2;
-    const readingLine = responseElement.getBoundingClientRect().top + 24;
-    const current = atEnd ? turns.at(-1) : turns.findLast(({ turn }) => turn.getBoundingClientRect().top <= readingLine) ?? turns[0];
-    markCurrentDot(current.dot);
-  }
-
-  const imageLoaders = new WeakMap();
-  function observeImages(root) {
-    return typeof IntersectionObserver === "function" ? new IntersectionObserver((entries, observer) => {
-      for (const { target, isIntersecting } of entries) {
-        if (!isIntersecting) continue;
-        observer.unobserve(target);
-        if (target.isConnected) void imageLoaders.get(target)().catch(() => {}); // The preview button can retry.
-      }
-    }, { root, rootMargin: "120px" }) : null;
-  }
-  const transcriptImageObserver = observeImages(responseElement);
-  const savedResponse = $("saved-response");
-  const savedImageObserver = observeImages(savedResponse);
-
-  function appendTranscriptImages(turn, { id, imageCount }, session) {
-    if (!imageCount) return;
-    const images = document.createElement("div");
-    images.className = "transcript-images";
-    for (let index = 0; index < imageCount; index++) {
-      const name = `Image ${index + 1}`; // Pi's stored image blocks have no filename.
-      const open = document.createElement("button");
-      open.type = "button";
-      open.className = "secondary attachment-preview";
-      open.setAttribute("aria-label", `Preview ${name}`);
-      const thumbnail = document.createElement("img");
-      thumbnail.alt = "";
-      open.append(thumbnail, name);
-      const query = new URLSearchParams({ id, index });
-      if (session) query.set("session", session);
-      const observer = session ? savedImageObserver : transcriptImageObserver;
-      let pendingImage;
-      const load = () => pendingImage ??= (async () => {
-        const result = await window.fetch(`/api/image?${query}`, { headers: { Authorization: `Bearer ${token}` } });
-        if (!result.ok) throw new Error("Could not load this image from Pi.");
-        const blob = await result.blob();
-        if (!open.isConnected) throw new Error("Image is no longer in view.");
-        const src = URL.createObjectURL(blob);
-        thumbnail.src = src;
-        return src;
-      })().catch((error) => { pendingImage = undefined; throw error; });
-      imageLoaders.set(open, load);
-      open.addEventListener("click", async () => {
-        try {
-          const src = await load();
-          if (open.isConnected && (session || !explorer.isSaved())) showImagePreview(name, src);
-        } catch { if (open.isConnected) status("Could not load this image from Pi.", true); }
-      });
-      images.append(open);
-      if (observer) observer.observe(open);
-      else void load().catch(() => {});
-    }
-    turn.append(images);
-  }
-
   const chatStates = {
     working: "Pi is working…",
     ready: "Pi is ready for the next task.",
@@ -731,35 +655,6 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     if (!explorer.isSaved()) updateLiveDocumentTitle();
   }
 
-  function renderTurn(message, session) {
-    const turn = document.createElement("section");
-    const assistant = message.role === "assistant";
-    turn.className = `chat-turn ${assistant ? "assistant-turn" : "user-turn"}`;
-    const content = document.createElement("div");
-    if (assistant) {
-      const label = document.createElement("h2");
-      label.textContent = "Pi";
-      turn.append(label);
-    } else {
-      turn.setAttribute("aria-label", "Your message");
-    }
-    // The server renders restricted Markdown for both roles. Only live Pi replies
-    // with matching DOM text can provide annotation offsets.
-    if (typeof message.html === "string") content.innerHTML = message.html;
-    if (typeof message.html === "string" && content.textContent === message.text) {
-      if (assistant && !session) content.dataset.responseId = message.id;
-    } else if (assistant) {
-      content.textContent = "This reply could not be rendered safely. See Pi in the terminal.";
-    } else {
-      content.className = "plain-message";
-      content.textContent = message.text;
-    }
-    if (message.text || message.html || assistant) turn.append(content);
-    if (!assistant) appendTranscriptImages(turn, message, session);
-    return turn;
-  }
-
-  const nearChatEnd = () => responseElement.scrollHeight - responseElement.scrollTop - responseElement.clientHeight < 80;
   // An older running Pi server may serve this file without the shared prefix.
   const { set: setTooltip, hide: hideMessagePreview } = tooltipFactory
     ? tooltipFactory({ sideTargets: "#turns, #chat-explorer" })
@@ -769,34 +664,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     if (data.mode !== "chat" || !Array.isArray(data.messages)) throw new Error("Chat data is unavailable. Reopen from Pi.");
     const sessionName = data.sessionName?.trim();
     updateSessionTitle(sessionName);
-    const follow = !cursor || nearChatEnd();
-    const fragment = document.createDocumentFragment();
-    const dots = document.createDocumentFragment();
-    for (const message of data.messages) {
-      const turn = renderTurn(message);
-      if (message.role === "user") {
-        const preview = message.text.trim().replace(/\s+/g, " ") || (message.imageCount ? "Image attachment" : "Your message");
-        const dot = document.createElement("button");
-        dot.type = "button";
-        dot.setAttribute("aria-label", `Jump to your message: ${preview}`);
-        setTooltip(dot, preview);
-        dot.addEventListener("click", () => {
-          responseElement.scrollTop += turn.getBoundingClientRect().top - responseElement.getBoundingClientRect().top;
-          markCurrentDot(dot);
-        });
-        turns.push({ turn, dot });
-        dots.append(dot);
-      }
-      fragment.append(turn);
-    }
-    responseElement.append(fragment);
-    turnRail.append(dots);
-    if (data.messages.length && !explorer.isSaved()) {
-      if (follow && !dialog.open && window.getSelection()?.isCollapsed !== false) {
-        responseElement.scrollTop = responseElement.scrollHeight;
-      }
-      updateCurrentTurn();
-    }
+    transcript.appendLive(data.messages, { initial: !cursor });
     cursor = data.cursor;
     busy = data.busy;
     failed = data.failed;
@@ -854,12 +722,6 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     }
   });
 
-  function clearSavedTranscript() {
-    savedImageObserver?.disconnect();
-    for (const image of savedResponse.querySelectorAll("img[src^='blob:']")) URL.revokeObjectURL(image.src);
-    savedResponse.replaceChildren();
-  }
-
   const dashboardButton = $("open-dashboard");
   dashboardButton.addEventListener("click", async () => {
     hideMessagePreview();
@@ -872,27 +734,16 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
       dashboardButton.disabled = false;
     }
   });
+  const transcript = mountTranscript(window, {
+    fetchImage: (query) => window.fetch(`/api/image?${query}`, { headers: { Authorization: `Bearer ${token}` } }),
+    isViewingLive: () => !explorer.isSaved(),
+    isCommentOpen: () => dialog.open,
+    setTooltip, showImagePreview, status,
+  });
   const explorer = mountExplorer(window, {
     api, status, setTooltip, hideMessagePreview,
     isConnected: () => connected,
-    transcript: {
-      clearSaved: clearSavedTranscript,
-      focusSaved: () => savedResponse.focus({ preventScroll: true }),
-      renderSaved(messages, id) {
-        const fragment = document.createDocumentFragment();
-        for (const message of messages) fragment.append(renderTurn(message, id));
-        savedResponse.append(fragment);
-        savedResponse.scrollTop = savedResponse.scrollHeight;
-      },
-      rememberLiveScroll() { liveScroll = { follow: nearChatEnd(), top: responseElement.scrollTop }; },
-      restoreLiveScroll() {
-        if (liveScroll) {
-          responseElement.scrollTop = liveScroll.follow ? responseElement.scrollHeight : liveScroll.top;
-          liveScroll = undefined;
-        }
-        updateCurrentTurn();
-      },
-    },
+    transcript,
     onViewChange() {
       hideSelectionAction();
       updateButtons();
@@ -931,8 +782,6 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     send.replaceChildren();
     send.innerHTML = '<span class="send-icon" aria-hidden="true">🚀</span><span id="count" class="send-count">0</span>';
     $("annotation-heading").append(send);
-    responseElement.addEventListener("scroll", updateCurrentTurn, { passive: true });
-    window.addEventListener("resize", updateCurrentTurn);
     window.addEventListener("pagehide", () => {
       // A closing tab can't wait for a reply. If the request is dropped, the idle timer reaps it.
       const markdown = notes?.markdownForClose();
