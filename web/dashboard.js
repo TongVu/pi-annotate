@@ -1,5 +1,5 @@
 const token = location.hash.slice(1);
-history.replaceState(null, "", location.pathname);
+history.replaceState(null, "", location.pathname + location.search);
 const $ = (id) => document.getElementById(id);
 // An older running Pi server may serve this file without the shared prefix.
 const { set: setTooltip, hide: hideTooltip } = typeof createTooltips === "function"

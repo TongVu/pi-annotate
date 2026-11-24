@@ -23,6 +23,7 @@ type Options = {
   presenceDir: string;
   ownerDir: string;
   bookmarkDir: string;
+  tabRegistry?: string;
   project?: string;
   resume?: (session: SavedChat) => Promise<void>;
   createChat?: (cwd: string) => Promise<void>;
@@ -34,8 +35,26 @@ type Options = {
 // One marker per ID keeps updates to different sessions independent across dashboards.
 const bookmarkKey = (id: string) => createHash("sha256").update(id).digest("hex");
 
-export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir, project, resume, createChat, canFocus = canFocusBrowser, focus = focusBrowserChat, focusTerminal }: Options) {
+export async function listDashboardTabs(registry: string) {
+  const tabs: string[] = [];
+  for (const name of await readdir(registry).catch(() => [])) {
+    const match = /^([1-9]\d*)-([1-9]\d{0,4})-([a-f0-9]{32})$/.exec(name);
+    if (!match) continue;
+    const [, pid, port, id] = match;
+    try { process.kill(Number(pid), 0); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") await rm(join(registry, name), { force: true }).catch(() => {});
+      continue;
+    }
+    tabs.push(`http://127.0.0.1:${port}/?dashboard=${id}`);
+  }
+  return tabs;
+}
+
+export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir, tabRegistry, project, resume, createChat, canFocus = canFocusBrowser, focus = focusBrowserChat, focusTerminal }: Options) {
   const token = randomBytes(32).toString("hex");
+  const tabId = randomBytes(16).toString("hex");
+  const tabPath = `/?dashboard=${tabId}`;
   let origin: string;
   let closed = false;
   let listing: Promise<SavedChat[]> | undefined;
@@ -72,7 +91,7 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
       if (req.headers.host !== new URL(origin).host || (req.headers.origin && req.headers.origin !== origin) || req.headers["sec-fetch-site"] === "cross-site") {
         return reply(403, { error: "Only this local dashboard may connect." });
       }
-      const asset = req.method === "GET" && assets.get(req.url ?? "");
+      const asset = req.method === "GET" && assets.get(req.url === tabPath ? "/" : req.url ?? "");
       if (asset) {
         const [file, type, prefix] = asset;
         const data = await readWebAsset(file, prefix);
@@ -221,14 +240,22 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
     server.once("error", reject);
     server.listen(0, "127.0.0.1", resolve);
   });
-  origin = `http://127.0.0.1:${(server.address() as import("node:net").AddressInfo).port}`;
+  const { port } = server.address() as import("node:net").AddressInfo;
+  origin = `http://127.0.0.1:${port}`;
+  // Publish only the tab locator, never the dashboard's bearer token.
+  const marker = tabRegistry && join(tabRegistry, `${process.pid}-${port}-${tabId}`);
+  if (tabRegistry && marker) {
+    await mkdir(tabRegistry, { recursive: true, mode: 0o700 })
+      .then(() => writeFile(marker, "", { mode: 0o600 })).catch(() => {});
+  }
   return {
-    url: `${origin}/#${token}`,
-    close() {
+    url: `${origin}${tabPath}#${token}`,
+    async close() {
       if (closed) return;
       closed = true;
       server.close();
       server.closeAllConnections();
+      if (marker) await rm(marker, { force: true }).catch(() => {});
     },
   };
 }

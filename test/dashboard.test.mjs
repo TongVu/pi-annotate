@@ -7,7 +7,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { JSDOM } from "jsdom";
 import { createChatPresence } from "../src/chat-presence.ts";
 import { startDashboard } from "../src/dashboard.ts";
-import { browserFocusArgs } from "../src/focus-browser.ts";
+import { browserFocusArgs, dashboardFocusArgs } from "../src/focus-browser.ts";
 import { startChatServer } from "../src/server.ts";
 import { registerSessionOwner } from "../src/session-owner.ts";
 
@@ -188,6 +188,8 @@ test("dashboard clone cards show their parent without nesting or depending on th
   dom.window.fetch = (path) => dashboard.request(path);
   dom.window.eval(await asset("/dashboard.js"));
   const { document, Event } = dom.window;
+  assert.match(dom.window.location.search, /^\?dashboard=[a-f0-9]{32}$/);
+  assert.equal(dom.window.location.hash, "", "the locator stays visible but the token does not");
   const lineage = await waitFor(() => document.querySelector(".clone-lineage"));
   assert.equal(lineage.previousElementSibling.textContent, clone.name);
   assert.equal(lineage.textContent, `⑂ Cloned from ${parent.name}`);
@@ -340,6 +342,18 @@ test("browser focus is scoped to an exact local tab locator and never asks the b
   assert.equal(browserFocusArgs(tab, "Firefox/140.0"), undefined);
   assert.equal(browserFocusArgs(`${tab}#secret`, "Chrome/156.0"), undefined);
   assert.equal(browserFocusArgs(tab.replace("127.0.0.1", "example.test"), "Chrome/156.0"), undefined);
+});
+
+test("dashboard browser focus accepts only local dashboard locators", () => {
+  const first = "http://127.0.0.1:12345/?dashboard=" + "a".repeat(32);
+  const second = "http://127.0.0.1:12346/?dashboard=" + "b".repeat(32);
+  const candidates = [first, `${first}#secret`, first.replace("dashboard", "tab"), first.replace("127.0.0.1", "example.test"), second];
+  const chrome = dashboardFocusArgs(candidates, "Chrome/156.0 Safari/537.36");
+  assert.deepEqual(chrome.slice(2), [first, second]);
+  assert.match(chrome[1], /tabURL is locator or tabURL starts with \(locator & "#"\)/);
+  assert.match(chrome[1], /set active tab index of w to i/);
+  assert.match(dashboardFocusArgs(candidates, "Version/19 Safari/605.1.15")[1], /set current tab of w to t/);
+  assert.equal(dashboardFocusArgs(candidates, "Firefox/140.0"), undefined);
 });
 
 test("dashboard filters projects and cards by name or directory within the selected view", async (t) => {

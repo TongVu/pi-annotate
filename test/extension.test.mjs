@@ -1,9 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { registerChatExtension } from "../src/index.ts";
 import { AUTO_CHAT_SESSION, NEW_CHAT_TARGET } from "../src/resume-chat.ts";
 
-function fixture(t, { dashboard = false, launchPage = async () => {} } = {}) {
+function fixture(t, { dashboard = false, launchPage = async () => {}, ...dashboardOptions } = {}) {
   const handlers = new Map();
   const commands = new Map();
   const flags = new Map();
@@ -16,7 +19,7 @@ function fixture(t, { dashboard = false, launchPage = async () => {} } = {}) {
     setSessionName: () => {},
     getSettings: () => ({}),
     sendUserMessage: () => {},
-  }, launchPage);
+  }, launchPage, dashboardOptions);
   t.after(() => handlers.get("session_shutdown")());
   const ctx = {
     mode: "tui",
@@ -50,6 +53,59 @@ test("/chat is the sole registered browser command and opens a live session", as
   assert.equal((await response.json()).mode, "chat");
   await f.run("close");
   await assert.rejects(() => fetch(url.origin));
+});
+
+test("the chat button opens a dashboard only when no existing tab can be focused", async (t) => {
+  const agentDir = await mkdtemp(join(tmpdir(), "pi-chat-dashboard-tabs-"));
+  t.after(() => rm(agentDir, { recursive: true, force: true }));
+  const agent = "Chrome/156.0 Safari/537.36";
+  const openTabs = new Set();
+  let launches = 0;
+  const launchPage = async (url, browser) => {
+    assert.equal(browser, agent);
+    assert.equal((await fetch(url)).status, 200, "the locator URL serves the dashboard page");
+    launches++;
+    openTabs.add(url.split("#")[0]);
+  };
+  const probes = [];
+  const focusDashboard = async (tabs, browser) => {
+    assert.equal(browser, agent);
+    probes.push(tabs);
+    return tabs.some((tab) => openTabs.has(tab));
+  };
+  const connect = async () => {
+    const f = fixture(t, { launchPage, focusDashboard, getAgentDir: async () => agentDir });
+    await f.run();
+    const chat = openedUrl(f.notices);
+    return {
+      close: () => f.handlers.get("session_shutdown")(),
+      open: async () => {
+        const response = await fetch(`${chat.origin}/api/dashboard/open`, {
+          method: "POST", body: "{}", headers: { Authorization: `Bearer ${chat.hash.slice(1)}`,
+            Origin: chat.origin, "Content-Type": "application/json", "User-Agent": agent },
+        });
+        assert.equal(response.status, 200, await response.text());
+      },
+    };
+  };
+  const first = await connect();
+  await first.open();
+  assert.equal(openTabs.size, 1);
+  assert.deepEqual(probes, []);
+  const [firstTab] = openTabs;
+  const second = await connect();
+  await second.open();
+  assert.deepEqual(probes, [[firstTab]], "the other Pi discovers the locator without its bearer token");
+  assert.equal(launches, 1, "focusing does not launch another tab");
+  openTabs.clear();
+  await second.open();
+  assert.equal(openTabs.size, 1, "a closed tab is replaced");
+  const [secondTab] = openTabs;
+  assert.notEqual(secondTab, firstTab);
+  await first.close();
+  await second.open();
+  assert.deepEqual(probes.at(-1), [secondTab], "a shutdown dashboard is no longer a candidate");
+  assert.equal(launches, 2);
 });
 
 test("--dashboard does not launch a browser from non-interactive Pi", async (t) => {

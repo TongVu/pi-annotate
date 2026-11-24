@@ -89,6 +89,10 @@ chat before sending again. Live chat was verified with Pi 1.5.2.
 
 Run `pi --dashboard` from your shell. From a running Pi session, `/chat dashboard`
 or the logo to the left of the chat title opens the dashboard without losing a chat draft.
+On macOS, the logo switches to an existing dashboard tab in Chrome or Safari,
+including one opened by another Pi using the same agent directory. If no tab
+is found, or tab switching is unavailable, the logo opens a new tab. macOS may
+ask for browser Automation permission.
 The sidebar groups sessions by their original project directory. Clones have
 separate cards with a **Cloned from** line when their parent session is available.
 Filter by

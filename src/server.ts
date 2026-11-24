@@ -479,7 +479,7 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
       const renameSession = live && req.url === "/api/session/name";
       const compactSession = live && req.url === "/api/session/compact";
       const localAction = req.url === "/api/session/focus-terminal" ? { name: "Switch to Terminal", run: chat.focusTerminal }
-        : req.url === "/api/dashboard/open" ? { name: "Open dashboard", run: chat.openDashboard } : undefined;
+        : req.url === "/api/dashboard/open" ? { name: "Open dashboard", run: chat.openDashboard && (() => chat.openDashboard(req.headers["user-agent"] ?? "")) } : undefined;
       const renderNote = live && req.url === "/api/markdown";
       const saveNote = live && req.url === "/api/note";
       const openSession = explorer && req.url === "/api/session/open";
