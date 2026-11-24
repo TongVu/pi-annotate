@@ -186,7 +186,7 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
                 const agentDir = await agentDirPath();
                 const outcome = await requestOwnedChat(ownerRegistry(agentDir), session.id);
                 if (outcome === "attached" || outcome === "already-open") return outcome;
-                if (outcome === "unavailable") throw new Error("This session is open in Pi but could not open a browser tab. Run /chat in its Terminal; no second Pi was started.");
+                if (outcome !== "missing") throw new Error("This session is open in Pi but could not open a browser tab. Run /chat in its Terminal; no second Pi was started.");
                 await resumeChatInTerminal(session, fileURLToPath(import.meta.url), agentDir);
                 return "launched";
               },

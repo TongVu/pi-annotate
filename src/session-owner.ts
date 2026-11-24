@@ -99,7 +99,7 @@ export async function listOwnedSessions(registry: string): Promise<OwnedSession[
   return [...sessions.values()];
 }
 
-export async function requestOwnedChat(registry: string, id: string): Promise<OwnerResult | "missing"> {
+export async function requestOwnedChat(registry: string, id: string): Promise<OwnerResult | "missing" | "suspended"> {
   const filenamePrefix = `${prefix(id)}-`;
   const owners = [];
   try {
@@ -121,7 +121,15 @@ export async function requestOwnedChat(registry: string, id: string): Promise<Ow
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") return "unavailable";
   }
-  // Prefer the original owner if duplicate Pi processes already exist from before discovery was enabled.
+  // A suspended job keeps its listening socket. Even connecting to it can queue a
+  // browser launch for later, so check before sending and never retry after a timeout.
   owners.sort((a, b) => a.startedAt - b.startedAt);
-  return owners.length ? askOwner(owners[0].socketPath) : "missing";
+  for (const owner of owners) {
+    if (process.platform === "linux") {
+      const status = await readFile(`/proc/${owner.pid}/status`, "utf8").catch(() => "");
+      if (/^State:\s+[Tt]\b/m.test(status)) continue;
+    }
+    return askOwner(owner.socketPath);
+  }
+  return owners.length ? "suspended" : "missing";
 }

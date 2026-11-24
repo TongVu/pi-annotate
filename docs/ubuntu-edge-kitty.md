@@ -79,7 +79,11 @@ chat without reloading, navigating, or opening a duplicate. No debugging port or
 browser automation setup is required. Without the extension, select the tab manually.
 
 **Browser closed, Pi still running:** No browser extension or Kitty launch permission
-is needed. The dashboard asks that Pi to open a fresh connected browser tab.
+is needed. The dashboard asks that Pi to open a fresh connected browser tab. If the
+same session is open in multiple Pi processes, it skips suspended jobs. If the
+only owner is suspended (for example after Ctrl+Z), use `jobs` in its shell and
+`fg %N` with the Pi job number, then click again; the dashboard does not wake it
+or start a duplicate.
 
 ## 4. Verify with the user
 

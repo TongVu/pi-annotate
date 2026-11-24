@@ -233,6 +233,7 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
           if (closed) return;
           if (outcome === "attached") return reply(202, { message: "Opening a tab from the running Pi session." });
           if (outcome === "already-open") return reply(409, { error: "Pi already has a browser link for this session. Use the existing tab or run /chat in its terminal." });
+          if (outcome === "suspended") return reply(409, { error: "Pi is suspended in its terminal. Use jobs to find the Pi job, bring it to the foreground with fg, then click again. No second Pi was started." });
           if (outcome === "unavailable") return reply(409, { error: "Could not reach the running Pi session. Run /chat in its terminal; no second Pi was started." });
           if (!session?.cwd) return reply(404, { error: "This session is no longer running and has no saved chat to resume." });
           if (!resume || await resume(session) === false) return reply(200, {

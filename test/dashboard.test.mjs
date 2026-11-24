@@ -7,6 +7,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { JSDOM } from "jsdom";
 import { runInNewContext } from "node:vm";
 import { createHash } from "node:crypto";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { createChatPresence } from "../src/chat-presence.ts";
 import { startDashboard } from "../src/dashboard.ts";
 import { browserFocusArgs, dashboardFocusArgs } from "../src/focus-browser.ts";
@@ -188,6 +190,35 @@ test("dashboard reconnects a disconnected Pi owner before considering a saved-se
   assert.equal((await dashboard.action(saved.id, "open")).status, 202, "closing the first browser tab during the launch cooldown must not block reattach");
   assert.equal(attachments, 2);
   assert.equal(launches, 1);
+});
+
+test("Linux reconnect skips a suspended older owner without waking it or starting another Pi", { skip: process.platform !== "linux" }, async (t) => {
+  let launches = 0, attaches = 0;
+  const dashboard = await fixture(t, { resume: async () => { launches++; } });
+  const child = spawn(process.execPath, ["--input-type=module", "-e", `
+    import { registerSessionOwner } from ${JSON.stringify(new URL("../src/session-owner.ts", import.meta.url).href)};
+    await registerSessionOwner(process.argv[1], { id: 'saved', cwd: '/work/project' }, async () => 'attached');
+    process.kill(process.pid, 'SIGSTOP');
+    setInterval(() => {}, 60000);
+  `, dashboard.ownerDir], { env: { ...process.env, TMPDIR: join(dashboard.ownerDir, "..") } });
+  const exited = once(child, "exit");
+  t.after(async () => { child.kill("SIGKILL"); await exited; });
+  const paused = async () => /^State:\s+T\b/m.test(await readFile(`/proc/${child.pid}/status`, "utf8"));
+  await waitFor(paused);
+  const running = await registerSessionOwner(dashboard.ownerDir, saved, async () => { attaches++; return "attached"; });
+  try {
+    const response = await dashboard.action(saved.id, "select");
+    assert.equal(response.status, 202, await response.text());
+    assert.equal(attaches, 1);
+  } finally { await running.close(); }
+  const onlyPaused = await dashboard.action(saved.id, "open");
+  assert.equal(onlyPaused.status, 409);
+  assert.match(await onlyPaused.text(), /suspended/);
+  assert.equal(await paused(), true);
+  child.kill("SIGCONT");
+  await waitFor(async () => !await paused());
+  assert.equal((await dashboard.action(saved.id, "open")).status, 202, "resuming the original job makes it eligible again");
+  assert.equal(launches, 0);
 });
 
 test("a denied Kitty launch gives the original manual command without retrying", async (t) => {
