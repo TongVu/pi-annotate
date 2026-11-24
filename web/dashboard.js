@@ -139,13 +139,21 @@ function bookmarkButton(session) {
   return button;
 }
 
-function cards(cwd, items) {
+function cards(cwd, items, namesById) {
   const section = el("section", "section");
   const grid = el("div", "grid");
   if (view !== "project") section.append(el("h2", "", projectName(cwd)), el("p", "directory", cwd || "No saved directory"));
   for (const session of items) {
     const card = el("article", "card");
     card.append(pill(session.status, undefined, session.terminalWorking), el("h3", "", session.name));
+    const parent = namesById.get(session.parentId);
+    if (parent) {
+      const lineage = el("p", "clone-lineage");
+      const icon = el("span", "", "⑂");
+      icon.setAttribute("aria-hidden", "true");
+      lineage.append(icon, ` Cloned from ${parent}`);
+      card.append(lineage);
+    }
     if (typeof session.bookmarked === "boolean") card.append(bookmarkButton(session));
     if (session.preview) card.append(el("p", "", session.preview));
     const row = el("div", "row");
@@ -196,9 +204,10 @@ function render() {
     stat.append(pill(state, state === "error" ? "Errors" : statuses[state]), el("b", "", counts[state]));
     return stat;
   }));
+  const namesById = new Map(sessions.map(({ id, name }) => [id, name]));
   const visible = [...groups].flatMap(([cwd, items]) => {
     const selected = view === "attention" ? items.filter(needsAttention) : items;
-    return (view !== "project" || cwd === project) && selected.length ? [cards(cwd, selected)] : [];
+    return (view !== "project" || cwd === project) && selected.length ? [cards(cwd, selected, namesById)] : [];
   });
   const empty = query ? "No sessions match this filter in the current view."
     : view === "attention" ? "No ready or failed chats right now."

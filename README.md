@@ -88,7 +88,9 @@ chat before sending again. Live chat was verified with Pi 1.5.2.
 
 Run `pi --dashboard` from your shell. From a running Pi session, `/chat dashboard`
 or the logo in the explorer controls opens the dashboard without losing a chat draft.
-The sidebar groups sessions by their original project directory. Filter by
+The sidebar groups sessions by their original project directory. Clones have
+separate cards with a **Cloned from** line when their parent session is available.
+Filter by
 **Name or directory** to narrow the sidebar, cards, and counts. **All sessions**
 shows every group; **Needs attention** shows connected chats that are ready for
 input or whose last turn stopped. Its status counts still include all matching

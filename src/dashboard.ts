@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import type { SessionInfo } from "@earendil-works/pi-coding-agent";
 import { listLiveChats } from "./chat-presence.ts";
 import { canFocusBrowser, focusBrowserChat } from "./focus-browser.ts";
@@ -17,7 +17,7 @@ const assets = new Map([
   ["/logo.png", ["logo.png", "image/png"]],
 ]);
 
-type SavedChat = Pick<SessionInfo, "id" | "cwd" | "path" | "name" | "firstMessage" | "modified">;
+type SavedChat = Pick<SessionInfo, "id" | "cwd" | "path" | "name" | "firstMessage" | "modified" | "parentSessionPath">;
 type Options = {
   list: () => Promise<SavedChat[]>;
   presenceDir: string;
@@ -91,14 +91,17 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
         ]);
         const bookmarks = new Set(markers);
         const ids = new Set([...saved.keys(), ...live.keys(), ...owned.keys()]);
+        const idsByPath = new Map([...saved.values()].map(({ path, id }) => [resolve(path), id]));
         const sessions = [...ids].map((id) => {
           const peer = live.get(id);
           const owner = owned.get(id);
           const session = saved.get(id);
+          const parentId = session?.parentSessionPath ? idsByPath.get(resolve(session.parentSessionPath)) : undefined;
           const preview = session?.firstMessage?.replace(/\s+/g, " ").trim().slice(0, 180) || "";
           const name = peer?.name?.trim() || session?.name?.trim() || owner?.name?.trim() || preview.slice(0, 100) || "Untitled session";
           return {
             id, name, cwd: peer?.cwd || owner?.cwd || session?.cwd || "",
+            parentId: parentId !== id ? parentId : undefined,
             preview: preview !== name ? preview : "",
             modified: session?.modified.getTime() ?? null,
             bookmarked: bookmarks.size > 0 && bookmarks.has(bookmarkKey(id)),

@@ -173,6 +173,35 @@ test("dashboard protects session metadata and actions with a separate loopback c
   assert.equal((await dashboard.request("/api/response")).status, 404, "dashboard token does not expose a transcript route");
 });
 
+test("dashboard clone cards show their parent without nesting or depending on the filter", async (t) => {
+  const parent = { ...saved, name: "Original <em>work</em>" };
+  const clone = { ...saved, id: "clone", path: "/private/transcripts/clone.jsonl", name: "Cloned chat", parentSessionPath: parent.path };
+  const orphan = { ...saved, id: "orphan", path: "/private/transcripts/orphan.jsonl", name: "Orphaned clone", parentSessionPath: "/private/transcripts/missing.jsonl" };
+  const dashboard = await fixture(t, { list: async () => [parent, clone, orphan] });
+  const sessions = await dashboard.sessions();
+  assert.equal(sessions.find(({ id }) => id === clone.id).parentId, parent.id);
+  assert.ok(!JSON.stringify(sessions).includes("/private/transcripts/"));
+
+  const asset = async (path) => (await fetch(dashboard.url.origin + path)).text();
+  const dom = new JSDOM(await asset("/"), { url: dashboard.url.href, runScripts: "outside-only" });
+  t.after(() => dom.window.close());
+  dom.window.fetch = (path) => dashboard.request(path);
+  dom.window.eval(await asset("/dashboard.js"));
+  const { document, Event } = dom.window;
+  const lineage = await waitFor(() => document.querySelector(".clone-lineage"));
+  assert.equal(lineage.previousElementSibling.textContent, clone.name);
+  assert.equal(lineage.textContent, `⑂ Cloned from ${parent.name}`);
+  assert.equal(lineage.querySelector("em"), null);
+  assert.equal(document.querySelectorAll(".grid > .card").length, 3);
+  assert.equal(document.querySelectorAll(".clone-lineage").length, 1, "unknown parents have no label");
+
+  const filter = document.getElementById("session-filter");
+  filter.value = clone.name;
+  filter.dispatchEvent(new Event("input"));
+  assert.deepEqual([...document.querySelectorAll(".card h3")].map(({ textContent }) => textContent), [clone.name]);
+  assert.equal(document.querySelector(".clone-lineage").textContent, lineage.textContent);
+});
+
 test("dashboard bookmarks survive restarts and renames and can be removed", async (t) => {
   const dashboard = await fixture(t);
   const path = "/api/session/bookmark";
