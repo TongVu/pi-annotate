@@ -7,7 +7,7 @@ import { startChatServer } from "./server.ts";
 import { createChatNoteStore } from "./chat-notes.ts";
 import { listPiSessions, readPiSession } from "./session-explorer.ts";
 import { createChatPresence } from "./chat-presence.ts";
-import { AUTO_CHAT_SESSION, NEW_CHAT_TARGET, forkChatInTerminal, kittyDashboardTarget, resumeInKitty, resumeChatInTerminal, startNewChatInTerminal } from "./resume-chat.ts";
+import { AUTO_CHAT_SESSION, NEW_CHAT_TARGET, forkChatInTerminal, kittyDashboardTarget, resumeInKitty, resumeChatInTerminal, startNewChatInKitty, startNewChatInTerminal } from "./resume-chat.ts";
 import { registerSessionOwner, requestOwnedChat } from "./session-owner.ts";
 import { focusTerminal } from "./focus-terminal.ts";
 import { listDashboardTabs, startDashboard } from "./dashboard.ts";
@@ -35,7 +35,7 @@ export default function piChat(pi: ExtensionAPI) {
 }
 
 export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string, userAgent?: string) => Promise<void>, {
-  focusDashboard = focusBrowserDashboard, getAgentDir = agentDirPath,
+  focusDashboard = focusBrowserDashboard, getAgentDir = agentDirPath, listSessions = listPiSessions,
 } = {}) {
   pi.registerFlag("dashboard", { type: "boolean", default: false, description: "Open the Pi Chat dashboard at startup" });
   let active: Awaited<ReturnType<typeof startChatServer>> | undefined;
@@ -81,7 +81,7 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
     const project = ctx.sessionManager.getCwd();
     const kitty = process.platform === "linux" ? kittyDashboardTarget() : undefined;
     const pending = dashboard ??= startDashboard({
-      list: () => listPiSessions(sessionDir),
+      list: () => listSessions(sessionDir),
       project,
       presenceDir: presenceRegistry(agentDir),
       ownerDir: ownerRegistry(agentDir),
@@ -93,6 +93,7 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
         createChat: (cwd) => startNewChatInTerminal(cwd, fileURLToPath(import.meta.url), agentDir),
       } : kitty ? {
         resume: (session) => resumeInKitty(session, fileURLToPath(import.meta.url), agentDir, kitty),
+        createChat: (cwd) => startNewChatInKitty(cwd, fileURLToPath(import.meta.url), agentDir, kitty),
       } : {}),
     });
     const opened = await pending.catch((error) => {

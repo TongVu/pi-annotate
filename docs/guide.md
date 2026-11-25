@@ -111,10 +111,11 @@ account signed into Codex, not Pi's context usage, and refreshes about once a mi
   on macOS or in a new tab in the dashboard’s Kitty window on Linux. If terminal
   launch is unavailable, copy the resume command, then run `/chat` in Pi.
 - **Create new chat** asks you to choose a dashboard project, including the one
-  you launched the dashboard from, even if it has no chats yet. On macOS
-  it starts a fresh Pi in that directory and opens its chat in a new tab, leaving
-  existing chats and drafts alone. On other platforms, copy the start command,
-  then run `/chat` in Pi.
+  you launched the dashboard from, even if it has no chats yet. It starts a fresh
+  Pi there in Terminal on macOS or in a new tab in the dashboard’s Kitty window
+  on Linux, then opens the new session’s browser chat. Existing chats and drafts
+  are left alone. If terminal launch is unavailable, copy the start command, then
+  run `/chat` in Pi.
 
 The dashboard lists saved sessions in Pi's default store and this Pi's custom
 store, if any, plus chats advertised by other running Pi instances using the

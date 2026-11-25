@@ -28,7 +28,7 @@ type Options = {
   tabRegistry?: string;
   project?: string;
   resume?: (session: SavedChat) => Promise<void | false>;
-  createChat?: (cwd: string) => Promise<void>;
+  createChat?: (cwd: string) => Promise<void | false>;
   canFocus?: typeof canFocusBrowser;
   focus?: typeof focusBrowserChat;
   focusTerminal?: () => Promise<void>;
@@ -194,16 +194,18 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
           if (!projects.has(cwd)) {
             return reply(404, { error: "That project is no longer on the dashboard. Refresh and choose another project." });
           }
-          if (!createChat) {
-            const command = process.platform === "win32"
-              ? `Set-Location -LiteralPath '${cwd.replace(/'/g, "''")}' -ErrorAction Stop; if ($?) { pi }`
-              : `cd -- ${shellQuote(cwd)} && pi`;
-            return reply(200, { command });
-          }
           if (creating) return reply(409, { error: "Pi is already opening a new chat. Check Terminal or the new tab." });
           creating = true;
           try {
-            await createChat(cwd);
+            if (!createChat || await createChat(cwd) === false) {
+              const command = process.platform === "win32"
+                ? `Set-Location -LiteralPath '${cwd.replace(/'/g, "''")}' -ErrorAction Stop; if ($?) { pi }`
+                : `cd -- ${shellQuote(cwd)} && pi`;
+              return reply(200, {
+                command,
+                message: createChat ? "Kitty did not accept the tab launch. Check launch permission or use the manual command." : undefined,
+              });
+            }
             return reply(202, { message: "Starting a new Pi session in Terminal. A chat tab will open when Pi is ready." });
           } finally {
             creating = false;

@@ -78,21 +78,32 @@ export function kittyDashboardTarget(env = process.env) {
   return { socket: env.KITTY_LISTEN_ON, windowId: env.KITTY_WINDOW_ID! };
 }
 
+type KittyTarget = NonNullable<ReturnType<typeof kittyDashboardTarget>>;
+
 // A negative reply is safe to fall back from. A timeout is ambiguous: never retry a launch.
-export async function resumeInKitty(session: { id: string; cwd: string; path: string }, extension: string, agentDir: string, target: NonNullable<ReturnType<typeof kittyDashboardTarget>>) {
-  await validateSavedChat(session);
+async function launchInKitty(cwd: string, autoChat: string, extension: string, agentDir: string, target: KittyTarget, sessionArgs: string[] = []) {
   const pi = await findPi();
   const config = process.env.KITTY_CONFIG_DIRECTORY || join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "kitty");
   const password = join(config, "pi-chat-rc-pass");
   const auth = await access(password, constants.R_OK).then(() => ["--password-file", password, "--use-password", "always"], () => ["--use-password", "never"]);
   try {
     await promisify(execFile)("kitty", ["@", "--to", target.socket, ...auth, "launch", "--type=tab", "--match", `window_id:${target.windowId}`,
-      "--cwd", session.cwd, "--env", `PATH=${process.env.PATH}`, "--env", `PI_CODING_AGENT_DIR=${agentDir}`, "--env", `${AUTO_CHAT_SESSION}=${session.id}`,
-      "--", pi, "--session", session.path, "--extension", extension], { timeout: 10_000 });
+      "--cwd", cwd, "--env", `PATH=${process.env.PATH}`, "--env", `PI_CODING_AGENT_DIR=${agentDir}`, "--env", `${AUTO_CHAT_SESSION}=${autoChat}`,
+      "--", pi, ...sessionArgs, "--extension", extension], { timeout: 10_000 });
   } catch (error) {
     if (error.code === "ENOENT" || /remote control is disabled|disallowed by remote_control_password|No matching tabs/i.test(error.stderr ?? "")) return false;
     throw new Error("Could not confirm the Kitty launch. Check the dashboard’s Kitty window before trying again.");
   }
+}
+
+export async function resumeInKitty(session: { id: string; cwd: string; path: string }, extension: string, agentDir: string, target: KittyTarget) {
+  await validateSavedChat(session);
+  return launchInKitty(session.cwd, session.id, extension, agentDir, target, ["--session", session.path]);
+}
+
+export async function startNewChatInKitty(cwd: string, extension: string, agentDir: string, target: KittyTarget) {
+  await validateNewChatDirectory(cwd);
+  return launchInKitty(cwd, NEW_CHAT_TARGET, extension, agentDir, target);
 }
 
 async function launchChatInTerminal(session: { id?: string; cwd: string; path: string }, extension: string, agentDir: string, operation: "resume" | "fork") {
@@ -104,10 +115,14 @@ async function launchChatInTerminal(session: { id?: string; cwd: string; path: s
   await openTerminal(args);
 }
 
-export async function startNewChatInTerminal(cwd: string, extension: string, agentDir: string) {
+async function validateNewChatDirectory(cwd: string) {
   if (!isAbsolute(cwd) || !await stat(cwd).then((entry) => entry.isDirectory(), () => false)) {
     throw new Error("That project directory is unavailable.");
   }
+}
+
+export async function startNewChatInTerminal(cwd: string, extension: string, agentDir: string) {
+  await validateNewChatDirectory(cwd);
   await openTerminal(terminalNewArgs(cwd, await findPi(), extension, agentDir));
 }
 

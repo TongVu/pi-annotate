@@ -52,8 +52,8 @@ Expect a positive numeric window ID and a `unix:` address under the private runt
 
 ### Dashboard tab switching
 
-**Saved session:** To launch Pi in a new tab of the dashboard's Kitty window, Kitty
-must permit the `launch` command on its private local socket. With `socket-only`
+**New or saved session:** To launch Pi in a new tab of the dashboard's Kitty window,
+Kitty must permit the `launch` command on its private local socket. With `socket-only`
 this already works. If using `allow_remote_control password`, keep the existing
 focus/wallpaper allowlist. Generate a private launch-only password instead of
 adding `launch` to the empty-password allowlist. In the Kitty config directory
@@ -94,10 +94,12 @@ Use a disposable project/session. The user operates Edge; an agent can check con
 3. Click **🕹️ Switch to Terminal** from the chat: it should select the second Kitty tab, without starting another Pi. From the dashboard the same button should select the *dashboard's* Kitty tab. Record any Wayland foreground limitation separately.
 4. Leave a draft in the chat, switch to the dashboard and click the session. The original Edge tab should activate with its draft intact. Discard the test draft and close the browser tab. Click the session again: one new browser tab should connect to the same Pi, with no new Kitty tab. Finally exit the disposable Pi and click the saved session: exactly one new Kitty tab and one connected browser tab should open.
 
+5. Click **Create new chat**, choose the disposable project, then click **Create chat**. Confirm that Kitty selects a new tab running a fresh Pi in that directory and Edge opens a new, empty chat connected to it. No command should need to be copied. Wayland may leave Edge in front while Kitty starts Pi.
+
 ### Expected differences, not installation failures
 
 - **Dashboard logo:** on Linux it can open another dashboard tab instead of selecting an existing one.
-- **Create new chat** still provides a copyable command. The dashboard's one-click Kitty launcher resumes saved sessions only. In the explorer, one-click launch and clone remain Mac-only.
+- In the explorer, one-click launch and clone remain Mac-only.
 
 Report what passed on this desktop, what required a manual step, and what remains untested. Don't relax browser security as part of installation.
 

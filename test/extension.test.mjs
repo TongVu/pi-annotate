@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { registerChatExtension } from "../src/index.ts";
 import { AUTO_CHAT_SESSION, NEW_CHAT_TARGET } from "../src/resume-chat.ts";
 
@@ -113,6 +114,56 @@ test("--dashboard does not launch a browser from non-interactive Pi", async (t) 
   f.ctx.mode = "print";
   await f.handlers.get("session_start")({ reason: "startup" }, f.ctx);
   assert.deepEqual(f.notices, []);
+});
+
+test("a Linux dashboard launches a fresh Pi in its Kitty window", { skip: process.platform !== "linux" }, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "pi-chat-create-kitty-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const cwd = join(root, "new project's workspace");
+  await mkdir(cwd);
+  const argsFile = join(root, "argv");
+  const kitty = join(root, "kitty");
+  const pi = join(root, "pi");
+  await writeFile(pi, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  await writeFile(kitty, '#!/bin/sh\nprintf "%s\\n" "$@" > "$TEST_ARGS"\n', { mode: 0o755 });
+  const env = { PATH: root, PI_MANAGED_INSTALL_ROOT: undefined, KITTY_CONFIG_DIRECTORY: root,
+    KITTY_WINDOW_ID: "27", KITTY_LISTEN_ON: `unix:${join(root, "socket")}`, TEST_ARGS: argsFile,
+    TMUX: undefined, STY: undefined, SSH_CONNECTION: undefined };
+  for (const [key, value] of Object.entries(env)) {
+    const previous = process.env[key];
+    t.after(() => { if (previous === undefined) delete process.env[key]; else process.env[key] = previous; });
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  const f = fixture(t, { getAgentDir: async () => root, listSessions: async () => [] });
+  f.ctx.sessionManager.getCwd = () => cwd;
+  await f.run("dashboard");
+  const url = openedUrl(f.notices);
+  const create = () => fetch(`${url.origin}/api/session/new`, {
+    method: "POST", body: JSON.stringify({ cwd }), headers: { Authorization: `Bearer ${url.hash.slice(1)}`,
+      Origin: url.origin, "Content-Type": "application/json" },
+  });
+  const launched = await create();
+  const result = await launched.json();
+  assert.equal(launched.status, 202, result.error);
+  assert.equal(result.command, undefined);
+  assert.deepEqual((await readFile(argsFile, "utf8")).trimEnd().split("\n"), ["@", "--to", env.KITTY_LISTEN_ON, "--use-password", "never",
+    "launch", "--type=tab", "--match", "window_id:27", "--cwd", cwd, "--env", `PATH=${root}`, "--env", `PI_CODING_AGENT_DIR=${root}`,
+    "--env", `${AUTO_CHAT_SESSION}=${NEW_CHAT_TARGET}`, "--", pi, "--extension", fileURLToPath(new URL("../src/index.ts", import.meta.url))]);
+
+  await writeFile(kitty, '#!/bin/sh\necho "disallowed by remote_control_password" >&2\nexit 1\n');
+  const denied = await create();
+  assert.equal(denied.status, 200);
+  const fallback = await denied.json();
+  assert.match(fallback.message, /launch permission/);
+  assert.match(fallback.command, /^cd -- .* && pi$/);
+
+  await writeFile(kitty, "#!/bin/sh\nexit 1\n");
+  const unconfirmed = await create();
+  assert.equal(unconfirmed.status, 400);
+  const failure = await unconfirmed.json();
+  assert.match(failure.error, /Could not confirm the Kitty launch/);
+  assert.equal(failure.command, undefined, "do not suggest another launch when Kitty may already have started Pi");
 });
 
 test("a fresh Pi launched by the dashboard opens an empty browser chat on startup", async (t) => {
