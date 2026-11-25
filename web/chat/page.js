@@ -130,7 +130,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
 
   // An older running Pi server may serve this file without the shared prefix.
   const { set: setTooltip, hide: hideMessagePreview } = tooltipFactory
-    ? tooltipFactory({ sideTargets: "#turns, #chat-explorer" })
+    ? tooltipFactory({ sideTargets: "#chat-explorer" })
     : { set: (target, text) => { target.title = text; }, hide: () => {} };
 
   function updateChat(data) {
@@ -218,7 +218,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   const transcript = mountTranscript(window, {
     fetchImage: (query) => window.fetch(`/api/image?${query}`, { headers: { Authorization: `Bearer ${token}` } }),
     isViewingLive, isCommentOpen: annotations.isDialogOpen,
-    setTooltip, showImagePreview: attachmentUi.showImagePreview, status,
+    showImagePreview: attachmentUi.showImagePreview, status,
   });
   const explorer = mountExplorer(window, {
     api, status, setTooltip, hideMessagePreview,

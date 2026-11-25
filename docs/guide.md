@@ -17,7 +17,10 @@ terminal modes work.
    it saves locally per chat in Pi's data directory, survives closing and
    reopening `/chat`, and can be previewed or copied as Markdown. The dots stay
    centered on the left as you scroll; the current turn is blue.
-   Hover to preview a message or click to jump to it.
+   Hover over the dots to open a scrollable list with up to four lines of preview
+   per message. Click a dot or list row to jump to that message. On touch, tap a
+   dot to open the list; with a keyboard, focus a dot and press **Right Arrow**
+   to enter the list.
 3. Press **Enter** or click the checkmark button to send an ordinary message.
    **Shift+Enter** inserts a newline. Click **Send questions** to submit the
    annotation batch. You can paste a screenshot into an annotation's comment

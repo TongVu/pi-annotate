@@ -116,9 +116,9 @@ textarea { width: 100%; resize: vertical; background: var(--bg); color: var(--te
 .chat-page #status { flex: 1 1 auto; min-width: 0; padding: 0; margin: 0; border: 0; overflow-wrap: anywhere; color: var(--muted); font-size: 12px; line-height: 1.35; }
 .chat-page #status.error { color: #ffb4a6; }
 @media (prefers-color-scheme: light) { .chat-page #status.error { color: #a12d20; } }
-.chat-page main { grid-area: 1 / 1; grid-template-columns: [tools] var(--chat-tools-width, minmax(220px, 340px)) [rail] 38px [transcript] minmax(0, 1fr); grid-template-rows: var(--chat-toolbar-height) minmax(0, 1fr) auto; width: 100%; min-height: 0; margin: 0 auto; }
+.chat-page main { --turn-rail-width: 26px; --turn-blue: #74baff; grid-area: 1 / 1; grid-template-columns: [tools] var(--chat-tools-width, minmax(220px, 340px)) [rail] var(--turn-rail-width) [transcript] minmax(0, 1fr); grid-template-rows: var(--chat-toolbar-height) minmax(0, 1fr) auto; width: 100%; min-height: 0; margin: 0 auto; }
 .chat-page main:is(.chat-tools-collapsed, :has(#saved-conversation:not([hidden]))) { --chat-tools-width: 0px; }
-#chat-rail:not([hidden]) { grid-area: 2 / rail / auto / transcript; display: grid; grid-template-rows: minmax(0, 1fr); min-height: 0; }
+#chat-rail:not([hidden]) { grid-area: 2 / rail / auto / -1; display: grid; grid-template: minmax(0, 1fr) / var(--turn-rail-width); position: relative; z-index: 3; min-height: 0; pointer-events: none; }
 #chat-state:not([hidden]) { flex: none; display: grid; place-items: center; width: 18px; height: 24px; color: var(--muted); margin-inline-start: -6px; }
 .chat-state-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 #chat-state[data-state="ready"] { --chat-state-dot: var(--ready, #77bda7); }
@@ -129,12 +129,17 @@ textarea { width: 100%; resize: vertical; background: var(--bg); color: var(--te
 @media (prefers-reduced-motion: reduce) { #chat-state[data-state] .chat-state-icon::after { animation: none; } }
 @media (prefers-color-scheme: light) { #chat-state { --ready: #26694c; --working: #9a5c00; } }
 /* The rail shares the transcript row, not the transcript plus the composer. */
-#turns { align-self: center; max-height: 100%; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 2px; }
-#turns button { display: grid; place-items: center; width: 100%; height: 16px; padding: 0; background: transparent; color: var(--muted); }
-#turns button::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: .65; }
+#turns { align-self: center; max-height: 100%; overflow: auto; overscroll-behavior: contain; scrollbar-width: none; padding: 2px; pointer-events: auto; }
+#turns button { display: grid; place-items: center; width: 100%; height: 8px; padding: 0; border: 0; background: transparent; color: var(--muted); }
+#turns button::before { content: ""; width: 4px; height: 4px; border-radius: 50%; background: currentColor; opacity: .65; }
 #turns button:hover, #turns button:focus-visible { color: var(--text); outline-offset: -2px; }
-#turns button[aria-current] { color: #74baff; }
-#turns button[aria-current]::before { opacity: 1; }
+#turns button[aria-current] { color: var(--turn-blue); }
+#turns button[aria-current]::before { width: 6px; height: 6px; opacity: 1; }
+#turn-list:not([hidden]) { position: absolute; inset-inline-start: var(--turn-rail-width); top: 50%; transform: translateY(-50%); width: min(260px, calc(100% - var(--turn-rail-width) - 8px)); max-height: min(600px, calc(100% - 12px)); overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--turn-blue) 40%, var(--border)) var(--panel); padding: 4px; border: 1px solid var(--turn-blue); border-radius: 8px; background: var(--panel); pointer-events: auto; }
+#turn-list button { display: block; width: 100%; min-height: 32px; padding: 6px 8px; border: 0; border-radius: 4px; background: transparent; color: var(--text); font-size: 12px; font-weight: 400; line-height: 16px; text-align: start; }
+#turn-list button span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; overflow-wrap: anywhere; }
+#turn-list button:is(:hover, :focus-visible, [aria-current]) { background: color-mix(in srgb, var(--panel), var(--turn-blue) 12%); outline-offset: -2px; }
+@media (pointer: coarse) { #turns button { height: 24px; } }
 .chat-page article:not([hidden]) { grid-area: 2 / transcript / span 2 / -1; display: grid; grid-template-rows: subgrid; min-height: 0; padding: 0; }
 .chat-page #response { overflow: auto; overscroll-behavior: contain; padding: 0 clamp(16px, 4vw, 46px) 20px; }
 .chat-page #response:focus-visible { outline: none; box-shadow: inset 2px 0 var(--muted); }
@@ -282,11 +287,11 @@ textarea { width: 100%; resize: vertical; background: var(--bg); color: var(--te
 #saved-response:focus-visible { outline: none; box-shadow: inset 2px 0 var(--muted); }
 @media (max-width: 760px) {
   .chat-page, .chat-page.explorer-open { grid-template: var(--chat-toolbar-height) minmax(0, 1fr) / minmax(0, 1fr); }
-  #chat-explorer:not([hidden]) { grid-area: 2 / 1; justify-self: end; width: min(300px, 90%); z-index: 1; box-shadow: -4px 0 16px #0003; }
-  .chat-page main { grid-area: 1 / 1 / -1; grid-template-columns: [rail] 34px [transcript] minmax(0, 1fr); grid-template-rows: var(--chat-toolbar-height) minmax(0, 1fr) auto auto; }
+  #chat-explorer:not([hidden]) { grid-area: 2 / 1; justify-self: end; width: min(300px, 90%); z-index: 4; box-shadow: -4px 0 16px #0003; }
+  .chat-page main { grid-area: 1 / 1 / -1; grid-template-columns: [rail] var(--turn-rail-width) [transcript] minmax(0, 1fr); grid-template-rows: var(--chat-toolbar-height) minmax(0, 1fr) auto auto; }
   .chat-page #chat-tools { grid-area: 4 / 1 / auto / -1; max-height: 45dvh; padding: 3px 16px 12px; }
   #chat-note-input { height: 72px; min-height: 56px; max-height: 12dvh; }
   .chat-note-preview { max-height: 12dvh; }
   .chat-page #chat-tools h2, .chat-page #empty { margin: 0 0 6px; }
 }
-@media (prefers-color-scheme: light) { :root { --bg: #faf9f6; --panel: #fff; --text: #292d2a; --muted: #64685f; --border: #d4d8ce; --accent: #9cd3c0; } #status { color: #226449; } #status.error { color: #a12d20; } #turns button[aria-current] { color: #1264b4; } }
+@media (prefers-color-scheme: light) { :root { --bg: #faf9f6; --panel: #fff; --text: #292d2a; --muted: #64685f; --border: #d4d8ce; --accent: #9cd3c0; } #status { color: #226449; } #status.error { color: #a12d20; } .chat-page main { --turn-blue: #1264b4; } }
