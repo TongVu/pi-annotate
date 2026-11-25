@@ -6,6 +6,8 @@ const { set: setTooltip, hide: hideTooltip } = typeof createTooltips === "functi
   ? createTooltips({ sideTargets: ".side" })
   : { set: (target, text) => { target.title = text; }, hide: () => {} };
 const filter = $("session-filter");
+const stats = $("stats");
+const clearStatus = $("clear-status-filter");
 const directory = $("directory");
 const projectPath = $("project-path");
 const projectPathStatus = $("project-path-status");
@@ -47,6 +49,7 @@ let browserSelect = false;
 let projects = [];
 let view = "all";
 let project;
+let statusFilter;
 let lastData;
 let refreshInFlight;
 let connected = false;
@@ -182,7 +185,10 @@ function render() {
   hideTooltip();
   const focused = document.activeElement?.dataset;
   createChatButton.disabled = !projects.length;
-  if (view === "project" && !projects.includes(project) && !sessions.some(({ cwd }) => cwd === project)) view = "all";
+  if (view === "project" && !projects.includes(project) && !sessions.some(({ cwd }) => cwd === project)) {
+    view = "all";
+    statusFilter = undefined;
+  }
   const query = filter.value.trim().toLowerCase();
   const matches = sessions.filter(({ name, cwd, bookmarked }) =>
     (view !== "bookmarks" || bookmarked) && (name.toLowerCase().includes(query) || cwd.toLowerCase().includes(query)));
@@ -211,22 +217,34 @@ function render() {
   const attention = counts.ready + counts.error;
   $("summary").textContent = view === "attention" ? `${attention} of ${total} need attention`
     : `${total} · ${attention} need attention · ${counts.saved} saved`;
-  $("stats").replaceChildren(...["working", "ready", "disconnected", "error"].map((state) => {
-    const stat = el("div", "stat");
+  const canFilterStatus = view === "all" || view === "project";
+  stats.replaceChildren(...["working", "ready", "disconnected", "error"].map((state) => {
+    const stat = el(canFilterStatus ? "button" : "div", "stat");
+    if (canFilterStatus) {
+      stat.type = "button";
+      stat.dataset.statusFilter = state;
+      stat.setAttribute("aria-controls", "sessions");
+      stat.setAttribute("aria-pressed", String(statusFilter === state));
+    }
     stat.append(pill(state, state === "error" ? "Errors" : statuses[state]), el("b", "", counts[state]));
     return stat;
   }));
+  clearStatus.hidden = !statusFilter;
   const namesById = new Map(sessions.map(({ id, name }) => [id, name]));
   const visible = [...groups].flatMap(([cwd, items]) => {
-    const selected = view === "attention" ? items.filter(needsAttention) : items;
+    const selected = statusFilter ? items.filter(({ status }) => status === statusFilter)
+      : view === "attention" ? items.filter(needsAttention) : items;
     return (view !== "project" || cwd === project) && selected.length ? [cards(cwd, selected, namesById)] : [];
   });
-  const empty = query ? "No sessions match this filter in the current view."
+  const empty = statusFilter ? "No sessions match the status filter in the current view."
+    : query ? "No sessions match this filter in the current view."
     : view === "attention" ? "No ready or failed chats right now."
     : view === "bookmarks" ? "No bookmarks yet. Use the bookmark button on a session card to add one."
     : projects.length ? "No sessions here yet. Use Create new chat to get started." : "No Pi sessions found.";
   $("sessions").replaceChildren(...(visible.length ? visible : [el("p", "sub", empty)]));
-  if (focused?.id !== undefined || focused?.project !== undefined) {
+  if (focused?.statusFilter) {
+    stats.querySelector(`[data-status-filter="${focused.statusFilter}"]`)?.focus({ preventScroll: true });
+  } else if (focused?.id !== undefined || focused?.project !== undefined) {
     const replacement = [...document.querySelectorAll("button[data-id], button[data-project]")].find(({ dataset }) =>
       focused.id !== undefined ? dataset.id === focused.id && dataset.place === focused.place : dataset.project === focused.project);
     (replacement ?? (view === "bookmarks" ? bookmarkView : undefined))?.focus({ preventScroll: true });
@@ -455,10 +473,14 @@ document.addEventListener("click", (event) => {
     if (open && !open.disabled && !window.getSelection()?.toString()) void openChat(open.dataset.id);
     return;
   }
-  const { id, place, project: cwd, view: next } = button.dataset;
-  if (place === "bookmark") void toggleBookmark(id);
+  const { id, place, project: cwd, view: next, statusFilter: state } = button.dataset;
+  if (state) {
+    statusFilter = statusFilter === state ? undefined : state;
+    render();
+  } else if (place === "bookmark") void toggleBookmark(id);
   else if (id !== undefined) void openChat(id);
   else if (cwd !== undefined || next) {
+    if (view !== (next || "project") || project !== cwd) statusFilter = undefined;
     view = next || "project";
     project = cwd;
     render();
@@ -467,6 +489,11 @@ document.addEventListener("click", (event) => {
 });
 $("legend").append(...["working", "ready", "disconnected", "error", "saved"].map((state) => pill(state)), codexQuota);
 filter.addEventListener("input", render);
+clearStatus.addEventListener("click", () => {
+  stats.querySelector(`[data-status-filter="${statusFilter}"]`)?.focus({ preventScroll: true });
+  statusFilter = undefined;
+  render();
+});
 $("refresh").addEventListener("click", () => void refresh(true));
 focusTerminalButton.addEventListener("click", async () => {
   if (focusTerminalButton.hidden || focusTerminalButton.disabled) return;

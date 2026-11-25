@@ -53,7 +53,10 @@
         </div>
       </header>
       <div id="dashboard-scroll" role="region" aria-label="Session results" tabindex="0">
-        <div id="stats" class="stats" aria-label="Session counts"></div>
+        <div class="status-overview">
+          <div id="stats" class="stats" role="group" aria-label="Session counts"></div>
+          <button id="clear-status-filter" type="button" aria-controls="sessions" hidden>Clear status filter</button>
+        </div>
         <div id="notice" class="notice" hidden>
           <p id="message" role="status"></p>
           <div id="manual" hidden>

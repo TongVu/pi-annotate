@@ -686,6 +686,78 @@ test("dashboard filters projects and cards by name or directory within the selec
   assert.equal(q("#message").textContent, "Check macOS Automation permissions.");
 });
 
+test("dashboard status cards filter the current session list without narrowing the counts or sidebar", async (t) => {
+  const html = await readFile(new URL("../web/dashboard.html", import.meta.url), "utf8");
+  const script = await readFile(new URL("../web/dashboard.js", import.meta.url), "utf8");
+  const dom = new JSDOM(html, { url: "http://127.0.0.1:3456/#dashboard-test", runScripts: "outside-only" });
+  t.after(() => dom.window.close());
+  const sessions = [
+    { id: "a", name: "Draft", cwd: "/work/site", status: "disconnected", action: "reopen" },
+    { id: "b", name: "Review", cwd: "/work/site", status: "ready", action: "focus" },
+    { id: "c", name: "Export", cwd: "/work/slides", status: "disconnected", action: "reopen" },
+  ];
+  dom.window.fetch = async () => ({ ok: true, json: async () => ({ sessions }) });
+  dom.window.eval(`${tooltipScript}\n${script}`);
+  const q = (selector) => dom.window.document.querySelector(selector);
+  const all = (selector) => [...dom.window.document.querySelectorAll(selector)];
+  const stat = (state) => q(`[data-status-filter="${state}"]`);
+  const titles = () => all(".card h3").map((node) => node.textContent);
+  const counts = () => all(".stat b").map((node) => node.textContent);
+  const clear = q("#clear-status-filter");
+  const search = (value) => {
+    const field = q("#session-filter");
+    field.value = value;
+    field.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  };
+  await waitFor(() => stat("disconnected"));
+  assert.equal(clear.hidden, true);
+  stat("disconnected").focus();
+  stat("disconnected").click();
+  assert.deepEqual(titles(), ["Draft", "Export"]);
+  assert.deepEqual(counts(), ["0", "1", "2", "0"]);
+  assert.equal(all("#projects .session-link").length, 3);
+  assert.equal(stat("disconnected").getAttribute("aria-pressed"), "true");
+  assert.equal(dom.window.document.activeElement, stat("disconnected"));
+
+  sessions[2].status = "ready";
+  q("#refresh").click();
+  await waitFor(() => counts()[2] === "1");
+  assert.deepEqual(titles(), ["Draft"], "refresh keeps the filter and uses the latest status");
+  assert.equal(dom.window.document.activeElement, stat("disconnected"));
+  search("review");
+  assert.deepEqual(titles(), []);
+  assert.match(q("#sessions").textContent, /No sessions match the status filter/);
+  assert.deepEqual(counts(), ["0", "1", "0", "0"]);
+  stat("ready").click();
+  assert.deepEqual(titles(), ["Review"]);
+  assert.equal(all('#stats [aria-pressed="true"]').length, 1);
+  assert.equal(stat("disconnected").getAttribute("aria-pressed"), "false");
+  assert.equal(clear.hidden, false);
+  clear.focus();
+  clear.click();
+  assert.equal(clear.hidden, true);
+  assert.equal(stat("ready").getAttribute("aria-pressed"), "false");
+  assert.equal(dom.window.document.activeElement, stat("ready"));
+  assert.equal(q("#session-filter").value, "review");
+
+  search("");
+  q('[data-project="/work/site"]').click();
+  stat("ready").click();
+  assert.deepEqual(titles(), ["Review"]);
+  assert.deepEqual(counts(), ["0", "1", "1", "0"]);
+  stat("ready").click();
+  assert.deepEqual(titles(), ["Review", "Draft"]);
+  stat("disconnected").click();
+  q('[data-view="attention"]').click();
+  assert.deepEqual(titles(), ["Review", "Export"]);
+  assert.equal(all("#stats button").length, 0);
+  assert.equal(clear.hidden, true);
+  q('[data-view="bookmarks"]').click();
+  assert.equal(all("#stats button").length, 0);
+  q('[data-view="all"]').click();
+  assert.equal(titles().length, 3, "changing views clears the status filter");
+});
+
 test("Create new chat completes known projects by name or path and submits only the confirmed choice", async (t) => {
   const html = await readFile(new URL("../web/dashboard.html", import.meta.url), "utf8");
   const script = await readFile(new URL("../web/dashboard.js", import.meta.url), "utf8");
