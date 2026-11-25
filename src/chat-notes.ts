@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { attachmentBlocks } from "./chat-attachments.ts";
+import { parseNoteAttachments } from "./chat-attachments.ts";
 
 type NoteAttachment = { name: string; mimeType: string; data: string };
 
@@ -56,10 +56,11 @@ export function createChatNoteStore(directory: string) {
       return JSON.parse(await read(fileFor(sessionId, "attachments.json"), "[]"));
     },
     async writeAttachments(sessionId: string, files: NoteAttachment[]) {
-      const blocks = Array.isArray(files) && files.length === 0 ? [] : attachmentBlocks(files);
-      const attachments = files.map(({ name, mimeType, data }, index) => ({
-        name, mimeType: blocks[index].mimeType ?? mimeType, data,
-      }));
+      const items = Array.isArray(files) && files.length === 0 ? [] : parseNoteAttachments(files);
+      const attachments = files.map(({ name, mimeType, data }, index) => {
+        const item = items[index];
+        return { name, mimeType: item.type === "image" ? item.mimeType : mimeType, data };
+      });
       await write(fileFor(sessionId, "attachments.json"), JSON.stringify(attachments));
     },
   };

@@ -323,10 +323,17 @@ test("installed Pi accepts a browser prompt before the model finishes, then expo
     const blocked = await send(picture);
     assert.equal(blocked.status, 400);
     assert.match((await blocked.json()).error, /Images are disabled/);
-    assert.equal((await send({ requestId: "49cda6e1-0914-4c13-9369-84e400e3e6c9", text: "", attachments: [file] })).status, 200);
+    const log = "\x1b[91mBuild failed\x1b[0m\n".padEnd(512 * 1024 + 1, "x");
+    const consoleText = { name: "consoleText", mimeType: "", data: Buffer.from(log).toString("base64") };
+    const received = await send({ requestId: "49cda6e1-0914-4c13-9369-84e400e3e6c9", text: "", attachments: [consoleText] });
+    assert.equal(received.status, 200, await received.clone().text());
     await session.waitForIdle();
     const afterText = await state(`?after=${followUp.cursor}`);
-    assert.match(afterText.messages[0].text, /Attached file: "notes.md"/);
+    assert.match(afterText.messages[0].text, /Attached file: "consoleText"/);
+    assert.doesNotMatch(afterText.messages[0].text, /Build failed/);
+    const logReference = sessionManager.getBranch().findLast((entry) => entry.type === "message" && entry.message.role === "user").message.content[0].text;
+    const logPath = JSON.parse(logReference.match(/^Local path: (.*)$/m)[1]);
+    assert.equal(await readFile(logPath, "utf8"), log);
     settingsManager.setBlockImages(false);
     assert.equal((await send(picture)).status, 200, JSON.stringify(errors));
     await session.waitForIdle();
@@ -414,6 +421,7 @@ test("installed Pi accepts a browser prompt before the model finishes, then expo
     assert.equal(settingsManager.getDefaultModel(), "vision");
     assert.equal(settingsManager.getDefaultThinkingLevel(), "medium");
     await session.prompt("/chat close");
+    assert.equal(await readFile(logPath, "utf8"), log, "closing the browser chat preserves the attachment for later turns");
     assert.equal((await dashboardState()).status, 200);
     await assert.rejects(() => get("/api/response"));
     if (process.platform !== "win32") {

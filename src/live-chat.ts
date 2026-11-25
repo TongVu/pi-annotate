@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { formatChatAnnotations } from "./annotations.ts";
-import { annotationImagesAt, attachmentBlocks } from "./chat-attachments.ts";
+import { annotationImagesAt, INLINE_TEXT_LIMIT, inlineAttachmentBlocks, parseAttachments, saveChatAttachments } from "./chat-attachments.ts";
 import { renderChatEntry, readChatImage } from "./chat-transcript.ts";
 
-export function createLiveChat({ noteStore, getSessionId, getSessionName, setSessionName, getBranch, isIdle, getContextUsage, getModelSettings, setModelSettings, onCompact, onSend }) {
+export function createLiveChat({ noteStore, attachmentDir, getSessionId, getSessionName, setSessionName, getBranch, isIdle, getContextUsage, getModelSettings, setModelSettings, onCompact, onSend }) {
   const rendered = new Map();
   const requests = new Map();
   let inFlight = false;
@@ -99,7 +99,7 @@ export function createLiveChat({ noteStore, getSessionId, getSessionName, setSes
       setSessionName(sessionName);
       reply(200, { sessionName: getSessionName?.() ?? sessionName });
     },
-    async send(body, reply) {
+    async send(body, reply, isCurrent) {
       const { requestId, text, attachments, annotations } = body;
       if (typeof requestId !== "string" || !/^[a-f0-9-]{36}$/.test(requestId) ||
           (text === undefined) === (annotations === undefined) || (annotations !== undefined && attachments !== undefined)) {
@@ -117,6 +117,8 @@ export function createLiveChat({ noteStore, getSessionId, getSessionName, setSes
           return;
         }
         let prompt;
+        let largeAttachments;
+        let uploadSessionId;
         if (annotations !== undefined) {
           const entries = new Map(getBranch().map((entry) => [entry.id, entry]));
           prompt = formatChatAnnotations(annotations, (id) => {
@@ -129,14 +131,39 @@ export function createLiveChat({ noteStore, getSessionId, getSessionName, setSes
             throw new Error("Write a message (up to 32,000 characters) or attach files.");
           }
           const caption = text.trim();
-          prompt = attachments === undefined ? caption : [...(caption ? [{ type: "text", text: caption }] : []), ...attachmentBlocks(attachments)];
+          if (attachments === undefined) {
+            prompt = caption;
+          } else {
+            const { items, textTotal } = parseAttachments(attachments, { allowAnsiColor: true });
+            prompt = caption ? [{ type: "text", text: caption }] : [];
+            if (textTotal <= INLINE_TEXT_LIMIT) {
+              prompt.push(...inlineAttachmentBlocks(items));
+            } else {
+              uploadSessionId = getSessionId?.();
+              if (!attachmentDir || !uploadSessionId) throw new Error("Large attachment storage is unavailable.");
+              largeAttachments = items;
+            }
+          }
         }
-        const completion = onSend(prompt).then(() => { inFlight = false; }, (error) => {
-          inFlight = false;
-          requests.delete(requestId);
-          throw error;
-        });
         inFlight = true;
+        const completion = (async () => {
+          let upload;
+          try {
+            if (largeAttachments) {
+              upload = await saveChatAttachments(attachmentDir, uploadSessionId, largeAttachments);
+              if (!isCurrent()) throw new Error("The Pi session changed. Run /chat again.");
+              if (!isIdle()) throw new Error("Pi is busy. Wait for it to finish and retry.");
+              prompt.push(...upload.blocks);
+            }
+            await onSend(prompt);
+          } catch (error) {
+            await upload?.discard();
+            requests.delete(requestId);
+            throw error;
+          } finally {
+            inFlight = false;
+          }
+        })();
         attempt = { fingerprint, completion };
         requests.set(requestId, attempt);
       }

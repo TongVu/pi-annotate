@@ -2,9 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { request } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { createChatPresence } from "../src/chat-presence.ts";
 import { createChatNoteStore } from "../src/chat-notes.ts";
 import { startChatServer } from "../src/server.ts";
@@ -575,8 +575,8 @@ test("chat validates mixed attachments and includes every file in duplicate dete
     { ...image, data: "A".repeat(Math.ceil(5 * 1024 * 1024 / 3) * 4 + 4) },
     { ...file, name: "../../Example.java" },
     { ...file, name: "binary.zip", data: Buffer.from([0x50, 0x4b, 0x03, 0x04]).toString("base64") },
+    { ...file, data: Buffer.from("\x1b[2JClear the screen").toString("base64") },
     { ...file, name: "doc.pdf", data: Buffer.from("%PDF-1.4").toString("base64") },
-    { ...file, data: Buffer.alloc(129 * 1024, 0x61).toString("base64") },
   ]) {
     assert.equal((await post({ requestId, text: "", attachments: [file, invalid] })).status, 400);
   }
@@ -590,6 +590,47 @@ test("chat validates mixed attachments and includes every file in duplicate dete
   assert.equal(sent.length, 1);
   assert.match(sent[0][0].text, /Attached file: "Example.java" ---\nclass Example/);
   assert.deepEqual(sent[0].slice(1), Array(2).fill({ type: "image", mimeType: image.mimeType, data: image.data }));
+});
+
+test("chat inlines up to 512 KiB of text and saves larger batches as private files", async (t) => {
+  const attachmentDir = await mkdtemp(join(tmpdir(), "pi-chat-uploads-"));
+  t.after(() => rm(attachmentDir, { recursive: true, force: true }));
+  const f = await fixture(t, { chat: { attachmentDir, getSessionId: () => "session-with-log" } });
+  const log = Buffer.from("\x1b[91mBuild output\x1b[0m\n".padEnd(512 * 1024, "a"));
+  const file = { name: "consoleText", mimeType: "", data: log.toString("base64") };
+  const inline = { requestId: "00000000-0000-4000-8000-000000000001", text: "Check the log", attachments: [file] };
+  assert.equal((await f.post(inline)).status, 200);
+  assert.match(f.sent[0][1].text, /Build output/);
+  assert.doesNotMatch(f.sent[0][1].text, /\x1b/);
+  assert.deepEqual(await readdir(attachmentDir), []);
+
+  const detail = "Failure detail";
+  const large = {
+    ...inline, requestId: "00000000-0000-4000-8000-000000000002",
+    attachments: [file, { ...file, data: Buffer.from(detail).toString("base64") }],
+  };
+  const responses = await Promise.all([f.post(large), f.post(large)]);
+  assert.deepEqual(responses.map(({ status }) => status), [200, 200]);
+  assert.equal(f.sent.length, 2);
+  const [caption, ...references] = f.sent[1];
+  assert.equal(caption.text, inline.text);
+  assert.equal(references.length, 2);
+  const paths = references.map(({ text }) => {
+    assert.match(text, /Attached file: "consoleText" \(\d+ bytes\)/);
+    assert.doesNotMatch(text, /Build output|Failure detail/);
+    return JSON.parse(text.match(/^Local path: (.*)$/m)[1]);
+  });
+  assert.notEqual(paths[0], paths[1], "duplicate names must not overwrite each other");
+  assert.ok(paths.every(isAbsolute));
+  const uploadDir = dirname(paths[0]);
+  assert.equal(dirname(dirname(uploadDir)), attachmentDir);
+  assert.deepEqual(await readdir(dirname(uploadDir)), [basename(uploadDir)]);
+  assert.deepEqual(await readFile(paths[0]), log);
+  assert.equal(await readFile(paths[1], "utf8"), detail);
+  if (process.platform !== "win32") {
+    assert.equal((await stat(uploadDir)).mode & 0o777, 0o700);
+    assert.equal((await stat(paths[0])).mode & 0o777, 0o600);
+  }
 });
 
 test("invalid JSON is rejected by the live chat endpoint", async (t) => {

@@ -50,18 +50,27 @@ Use this path only if `XDG_RUNTIME_DIR` is set to your private runtime directory
 Restart Kitty and start Pi directly in a new Kitty shell so Pi inherits the socket
 address. On Wayland, the compositor may not bring Kitty in front of the browser.
 
-Click the **Attach files** clipboard icon to select multiple files, or paste a
-screenshot into the composer. Draft images show a thumbnail; click it or the
-filename to inspect a larger local preview before sending. Sent images can also
-be opened from the thumbnails in the conversation. Send up to 10 UTF-8
-text/code files or PNG, JPEG, GIF, and WebP images, with or without a message.
-Limits are 5 MiB per file, 10 MiB combined, and 128 KiB
-combined for text files. The same image limits apply across an annotation batch.
+Drop files onto the composer, click **Attach files** to pick them, or paste a
+screenshot. Dropping a file keeps your draft intact and doesn't send it. Draft
+images show a thumbnail; click it or the filename to inspect a larger preview.
+Sent images can also be opened from the thumbnails in the conversation. Send
+up to 10 UTF-8 text/code files or PNG, JPEG, GIF, and WebP images, with or
+without a message. Limits are 5 MiB per file and 10 MiB combined. The same
+image limits apply across an annotation batch.
+
+UTF-8 build logs can contain ANSI color codes, which are removed from inline
+text. If text attachments total more than 512 KiB, Pi Chat saves the original
+bytes in a private `.pi-chat-attachments` directory under Pi's session storage
+(or Pi's agent directory for in-memory sessions). Pi receives their
+local paths instead of their contents and can search or read excerpts with its
+file tools. These copies stay on disk after the chat closes so resumed chats
+can still read them.
 PDFs, Office documents, and archives aren't supported.
 Images sent to Pi require an image-capable model and must not be blocked in Pi settings.
 
 The sidebar note also accepts pasted screenshots and files via its paperclip,
-with the same types and limits as the composer. Click an image to preview it
+with the same types and upload limits as the composer, plus a 128 KiB combined
+limit for note text attachments. Click an image to preview it
 or a text filename to download it. Attachments are saved with the note for that
 session, not sent to Pi. **Copy note Markdown** still copies only the text.
 

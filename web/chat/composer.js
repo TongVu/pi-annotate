@@ -1,5 +1,6 @@
 export function mountComposerDraft(window, { sender, attachmentUi, status, setTooltip }) {
   const $ = (id) => window.document.getElementById(id);
+  const form = $("chat-form");
   const chatInput = $("chat-input");
   const chatFile = $("chat-file");
   const { renderAttachmentList, readAttachment, checkAttachmentLimits } = attachmentUi;
@@ -58,12 +59,24 @@ export function mountComposerDraft(window, { sender, attachmentUi, status, setTo
   chatInput.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || event.isComposing || event.keyCode === 229) return;
     event.preventDefault();
-    if (!event.repeat && !$("chat-send").disabled) $("chat-form").requestSubmit();
+    if (!event.repeat && !$("chat-send").disabled) form.requestSubmit();
   });
   chatInput.addEventListener("paste", (event) => {
     const files = Array.from(event.clipboardData?.files ?? []);
     if (!files.length || sender.sending) return;
     event.preventDefault();
+    void attachFiles(files);
+  });
+  form.addEventListener("dragover", (event) => {
+    if (!event.dataTransfer?.types.includes("Files")) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = sender.sending || readingFiles ? "none" : "copy";
+  });
+  form.addEventListener("drop", (event) => {
+    const files = Array.from(event.dataTransfer?.files ?? []);
+    if (!files.length && !event.dataTransfer?.types.includes("Files")) return;
+    event.preventDefault();
+    if (!sender.sending) chatInput.focus({ preventScroll: true });
     void attachFiles(files);
   });
   $("chat-attach").addEventListener("click", () => chatFile.click());
@@ -72,7 +85,7 @@ export function mountComposerDraft(window, { sender, attachmentUi, status, setTo
     chatFile.value = "";
     void attachFiles(files);
   });
-  $("chat-form").addEventListener("submit", (event) => {
+  form.addEventListener("submit", (event) => {
     event.preventDefault();
     const body = composerBody();
     if (!readingFiles && (body.text || body.attachments)) {

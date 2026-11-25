@@ -1343,6 +1343,55 @@ test("browser chat adds several picked or pasted files, removes them individuall
   assert.equal(list.hidden, true);
 });
 
+test("dropping a log on the composer keeps the draft and waits for Send", async (t) => {
+  const posts = [];
+  const f = await fixture(t, { chatFetch: async (path, body) => {
+    if (path === "/api/response") return { ok: true, json: async () => ({ mode: "chat", protocol: 2, cursor: null, messages: [], busy: false }) };
+    posts.push(body);
+    return { ok: true, json: async () => ({ ok: true }) };
+  } });
+  const w = f.window;
+  const input = f.$("chat-input");
+  const list = f.$("chat-attachments");
+  input.value = "Find the first failure";
+  input.setSelectionRange(8, 8);
+  const attachmentsReady = new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => { observer.disconnect(); reject(new Error("Dropped file was not attached")); }, 1000);
+    const observer = new w.MutationObserver(() => {
+      if (!list.children.length) return;
+      clearTimeout(timeout);
+      observer.disconnect();
+      resolve();
+    });
+    observer.observe(list, { childList: true });
+  });
+  const log = "a".repeat(513 * 1024);
+  const dispatchDrag = (type, dataTransfer) => {
+    const event = new w.Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "dataTransfer", { value: dataTransfer });
+    input.dispatchEvent(event);
+    return event;
+  };
+  assert.equal(dispatchDrag("dragover", { types: ["text/plain"] }).defaultPrevented, false);
+  const dragOver = { types: ["Files"], files: [] };
+  assert.equal(dispatchDrag("dragover", dragOver).defaultPrevented, true);
+  assert.equal(dragOver.dropEffect, "copy");
+  assert.equal(dispatchDrag("drop", { types: ["Files"], files: [new w.File([log], "consoleText")] }).defaultPrevented, true);
+  await attachmentsReady;
+  assert.match(list.textContent, /consoleText/);
+  assert.equal(input.value, "Find the first failure");
+  assert.equal(w.document.activeElement, input);
+  assert.equal(input.selectionStart, 8);
+  assert.equal(posts.length, 0);
+  input.value += " and summarize it";
+  input.dispatchEvent(new w.Event("input"));
+  f.$("chat-send").click();
+  await tick();
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].text, "Find the first failure and summarize it");
+  assert.deepEqual(posts[0].attachments, [{ name: "consoleText", mimeType: "", data: Buffer.from(log).toString("base64") }]);
+});
+
 test("live annotations can paste and pick images, edit them, and retry without touching the composer", async (t) => {
   const posts = [];
   const f = await fixture(t, { chatFetch: async (path, body) => {

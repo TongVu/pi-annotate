@@ -157,8 +157,10 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
       };
     };
     try {
+      const sessionDir = ctx.sessionManager.getSessionDir();
       // Keep the existing path so the repository rename doesn't strand saved notes.
-      const noteStore = createChatNoteStore(join(ctx.sessionManager.getSessionDir(), ".pi-annotate-notes"));
+      const noteStore = createChatNoteStore(join(sessionDir, ".pi-annotate-notes"));
+      const attachmentDir = join(sessionDir || await getAgentDir(), ".pi-chat-attachments");
       const opened = await startChatServer({
         isCurrent,
         onClose: () => {
@@ -169,6 +171,7 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
         },
         chat: {
           noteStore,
+          attachmentDir,
           getSessionId: () => ctx.sessionManager.getSessionId(),
           getSessionName: () => ctx.sessionManager.getSessionName(),
           setSessionName: (sessionName: string) => pi.setSessionName(sessionName),

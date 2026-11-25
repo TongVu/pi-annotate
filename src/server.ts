@@ -236,7 +236,7 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
           reply(410, { error: `Pi session/branch changed. Run ${reopenCommand} again.` });
           return;
         }
-        await live.send(body, reply);
+        await live.send(body, reply, () => !expired && isCurrent());
         return;
       }
       reply(404, { error: "Not found." });
