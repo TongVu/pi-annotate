@@ -79,8 +79,10 @@ On macOS, the logo switches to an existing dashboard tab in Chrome or Safari,
 including one opened by another Pi using the same agent directory. If no tab
 is found, or tab switching is unavailable, the logo opens a new tab. macOS may
 ask for browser Automation permission.
-The sidebar groups sessions by their original project directory. Clones have
-separate cards with a **Cloned from** line when their parent session is available.
+The sidebar groups sessions by their original project directory. Select a
+project and hover over its path (or Tab to **Copy project path**) to copy the
+exact path for pasting into your terminal. Clones have separate cards with a
+**Cloned from** line when their parent session is available.
 Filter by
 **Name or directory** to narrow the sidebar, cards, and counts. **All sessions**
 shows every group; **Needs attention** shows connected chats that are ready for

@@ -83,6 +83,45 @@ test("dashboard still loads sessions when an existing Pi listener serves unbundl
   assert.equal(dom.window.document.querySelector("#legend .codex-quota").hidden, true);
 });
 
+test("dashboard copies the selected project's exact directory path", async (t) => {
+  const cwd = "/work/Project with spaces";
+  const dashboard = await fixture(t, { list: async () => [{ ...saved, cwd }, { ...saved, id: "other" }] });
+  const asset = async (path) => (await fetch(dashboard.url.origin + path)).text();
+  const dom = new JSDOM(await asset("/"), { url: dashboard.url.href, runScripts: "outside-only" });
+  t.after(() => dom.window.close());
+  const { document, navigator } = dom.window;
+  const copied = [];
+  const clipboard = { writeText: async (text) => copied.push(text) };
+  Object.defineProperty(navigator, "clipboard", { value: clipboard });
+  dom.window.fetch = (path) => dashboard.request(path);
+  dom.window.eval(await asset("/dashboard.js"));
+
+  await waitFor(() => document.querySelectorAll("button[data-project]").length === 2);
+  const directory = document.getElementById("directory");
+  const path = document.getElementById("project-path");
+  const copy = document.getElementById("copy-project-path");
+  const status = document.getElementById("project-path-status");
+  assert.equal(directory.hidden, true, "only project views show the copy control");
+  document.querySelector(`button[data-project="${cwd}"]`).click();
+  assert.equal(directory.hidden, false);
+  assert.equal(path.textContent, cwd);
+  copy.focus();
+  assert.equal(document.activeElement, copy);
+  copy.click();
+  await waitFor(() => status.textContent === "Path copied.");
+  assert.deepEqual(copied, [cwd]);
+  assert.equal(document.getElementById("notice").hidden, true, "copy feedback stays in the header");
+
+  document.querySelector(`button[data-project="${saved.cwd}"]`).click();
+  assert.equal(path.textContent, saved.cwd);
+  assert.equal(status.textContent, "");
+  clipboard.writeText = async () => { throw new Error("Clipboard unavailable"); };
+  copy.click();
+  await waitFor(() => status.textContent.includes("copy it manually"));
+  document.querySelector('button[data-view="all"]').click();
+  assert.equal(directory.hidden, true);
+});
+
 test("dashboard loads Codex quota without blocking sessions and displays it after Saved", async (t) => {
   let reads = 0;
   let reportQuota;

@@ -6,6 +6,9 @@ const { set: setTooltip, hide: hideTooltip } = typeof createTooltips === "functi
   ? createTooltips({ sideTargets: ".side" })
   : { set: (target, text) => { target.title = text; }, hide: () => {} };
 const filter = $("session-filter");
+const directory = $("directory");
+const projectPath = $("project-path");
+const projectPathStatus = $("project-path-status");
 const codexQuota = el("span", "codex-quota");
 setTooltip(codexQuota, "Codex account usage limit");
 codexQuota.hidden = true;
@@ -194,8 +197,12 @@ function render() {
   sidebar(groups);
   $("heading").textContent = view === "project" ? projectName(project)
     : view === "attention" ? "Needs attention" : view === "bookmarks" ? "Bookmarks" : "All sessions";
-  $("directory").hidden = view !== "project" || !project;
-  $("directory").textContent = project ?? "";
+  const path = view === "project" ? project ?? "" : "";
+  directory.hidden = !path;
+  if (projectPath.textContent !== path) {
+    projectPath.textContent = path;
+    projectPathStatus.textContent = "";
+  }
   // Needs attention filters the cards, not the status overview.
   const scope = view === "project" ? groups.get(project) ?? [] : matches;
   const counts = Object.fromEntries(Object.keys(statuses).map((state) => [state, 0]));
@@ -474,6 +481,18 @@ focusTerminalButton.addEventListener("click", async () => {
   }
 });
 $("dismiss").addEventListener("click", () => { $("notice").hidden = true; });
+$("copy-project-path").addEventListener("click", async () => {
+  const path = projectPath.textContent;
+  if (!path) return;
+  let message;
+  try {
+    await navigator.clipboard.writeText(path);
+    message = "Path copied.";
+  } catch {
+    message = "Couldn’t copy. Select the path to copy it manually.";
+  }
+  if (projectPath.textContent === path) projectPathStatus.textContent = message;
+});
 $("copy").addEventListener("click", async () => {
   try {
     await navigator.clipboard.writeText($("command").value);
