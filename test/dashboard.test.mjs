@@ -897,3 +897,31 @@ test("Create new chat completes known projects by name or path and submits only 
   assert.equal(q("#message").textContent, "Opening new chat");
   assert.equal(q("#heading").textContent, "one", "creating a chat does not leave the current dashboard view");
 });
+
+test("verify starts an independent reviewer with only the selected worktree and display name", async (t) => {
+  const calls = [];
+  const dashboard = await fixture(t, { verifyChat: async (...args) => { calls.push(args); } });
+  assert.equal((await dashboard.sessions())[0].canVerify, true);
+  const post = body => dashboard.request('/api/session/verify', body);
+  assert.equal((await post({ id: saved.id, prompt: 'history' })).status, 400);
+  assert.equal((await post({ id: 'missing' })).status, 404);
+  assert.equal((await post({ id: saved.id })).status, 202);
+  assert.deepEqual(calls, [[saved.cwd, saved.name]]);
+});
+
+test("Verify agent clicks launch the reviewer, not the card's open action", async (t) => {
+  const html = await readFile(new URL('../web/dashboard.html', import.meta.url), 'utf8');
+  const script = await readFile(new URL('../web/dashboard.js', import.meta.url), 'utf8');
+  const dom = new JSDOM(html, { url: 'http://127.0.0.1:3456/#dashboard-test', runScripts: 'outside-only' });
+  t.after(() => dom.window.close());
+  const posts = [];
+  dom.window.fetch = async (path, init) => {
+    if (path === '/api/dashboard') return { ok: true, json: async () => ({ projects: [saved.cwd], sessions: [{ ...saved, modified: +saved.modified, status: 'saved', action: 'resume', canVerify: true }] }) };
+    posts.push([path, JSON.parse(init.body)]);
+    return { ok: true, json: async () => ({ message: 'Starting reviewer' }) };
+  };
+  dom.window.eval(`${tooltipScript}\n${script}`);
+  (await waitFor(() => dom.window.document.querySelector('.card .verify-agent'))).click();
+  await waitFor(() => dom.window.document.querySelector('#message').textContent === 'Starting reviewer');
+  assert.deepEqual(posts, [['/api/session/verify', { id: saved.id }]]);
+});

@@ -192,7 +192,16 @@ function cards(cwd, items, namesById) {
       when.dateTime = new Date(session.modified).toISOString();
       setTooltip(when, new Date(session.modified).toLocaleString());
     }
-    row.append(when, actionButton(session));
+    row.append(when);
+    if (session.canVerify) {
+      const verify = el("button", "verify-agent", "Verify agent");
+      verify.type = "button";
+      verify.dataset.place = "verify";
+      verify.dataset.id = session.id;
+      setTooltip(verify, "Open an independent, read-only Sol review of the current worktree in a new chat");
+      row.append(verify);
+    }
+    row.append(actionButton(session));
     card.append(petStage(session), row);
     grid.append(card);
   }
@@ -496,6 +505,9 @@ document.addEventListener("click", (event) => {
   if (state) {
     statusFilter = statusFilter === state ? undefined : state;
     render();
+  } else if (place === "verify") {
+    button.disabled = true;
+    void api("/api/session/verify", { id }).then(result => notice(result.message), error => notice(error.message, true)).finally(() => { button.disabled = false; });
   } else if (place === "bookmark") void toggleBookmark(id);
   else if (id !== undefined) void openChat(id);
   else if (cwd !== undefined || next) {

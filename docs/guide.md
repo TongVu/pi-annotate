@@ -134,6 +134,7 @@ account signed into Codex, not Pi's context usage, and refreshes about once a mi
 - **Resume chat** starts the saved session in its original project via Terminal
   on macOS or in a new tab in the dashboard’s Kitty window on Linux. If terminal
   launch is unavailable, copy the resume command, then run `/chat` in Pi.
+- **Verify agent** on a session card starts a fresh reviewer tab on macOS or supported Kitty dashboards. Its display name is `Verify: <chat title>` (branch if untitled). It uses GPT-6.2 Sol at medium effort with only a read-only Git repository tool: no working-chat transcript, global memory, shell, edits, or test execution. It reviews the **current worktree**, not a historical checkout associated with a saved chat. The comparison uses the merge base with local `origin/HEAD`, `main`, or `master`, falling back to `HEAD`; staged, unstaged and non-ignored new files are included. No fetch or checkout is performed.
 - **Create new chat** asks you to choose a dashboard project, including the one
   you launched the dashboard from, even if it has no chats yet. It starts a fresh
   Pi there in Terminal on macOS or in a new tab in the dashboard’s Kitty window

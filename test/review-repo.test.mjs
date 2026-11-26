@@ -1,0 +1,31 @@
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import test from 'node:test';
+import { reviewQuery } from '../src/review-repo.ts';
+
+test('review reads branch, staged, unstaged and new files, but not ignored files or paths outside the repo', async t => {
+  const temp = await mkdtemp(join(tmpdir(), 'pi-review-'));
+  t.after(() => rm(temp, { recursive: true, force: true }));
+  const cwd = join(temp, 'repo');
+  await mkdir(cwd);
+  const git = (...args) => execFileSync('git', args, { cwd, env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
+  const write = (path, text) => writeFile(join(cwd, path), text);
+  git('init', '-q', '-b', 'main');
+  await write('code', 'base\n');
+  await write('.gitignore', 'ignored\n');
+  git('add', '.'); git('-c', 'user.name=Tester', '-c', 'user.email=test@example.org', 'commit', '-qm', 'base');
+  git('checkout', '-qb', 'feature');
+  await write('code', 'committed\n'); git('add', 'code'); git('-c', 'user.name=Tester', '-c', 'user.email=test@example.org', 'commit', '-qm', 'change');
+  await write('staged', 'staged'); git('add', 'staged');
+  await write('code', 'working\n'); await write('new', 'new'); await write('ignored', 'secret');
+  await writeFile(join(temp, 'transcript'), 'private'); await symlink('../transcript', join(cwd, 'link'));
+  const q = (action, path) => reviewQuery(cwd, action, path);
+  assert.match(await q('scope'), /Branch: feature\nBase: main/);
+  assert.match(await q('diff', 'code'), /-base\n\+working/);
+  assert.match(await q('diff', 'staged'), /\+staged/);
+  assert.equal(await q('read', 'new'), 'new');
+  for (const path of ['../transcript', join(temp, 'transcript'), '.git/config', 'link', 'ignored']) await assert.rejects(q('read', path));
+});

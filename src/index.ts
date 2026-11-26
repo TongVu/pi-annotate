@@ -7,7 +7,7 @@ import { startChatServer } from "./server.ts";
 import { createChatNoteStore } from "./chat-notes.ts";
 import { createSubchat, isBranchableReply, listPiSessions, readPiSession } from "./session-explorer.ts";
 import { createChatPresence } from "./chat-presence.ts";
-import { AUTO_CHAT_SESSION, NEW_CHAT_TARGET, forkChatInKitty, forkChatInTerminal, kittyDashboardTarget, resumeInKitty, resumeChatInTerminal, shellQuote, startNewChatInKitty, startNewChatInTerminal } from "./resume-chat.ts";
+import { AUTO_CHAT_SESSION, NEW_CHAT_TARGET, forkChatInKitty, forkChatInTerminal, kittyDashboardTarget, resumeInKitty, resumeChatInTerminal, shellQuote, startVerifyChat, startNewChatInKitty, startNewChatInTerminal } from "./resume-chat.ts";
 import { registerSessionOwner, requestOwnedChat } from "./session-owner.ts";
 import { focusTerminal } from "./focus-terminal.ts";
 import { listDashboardTabs, startDashboard } from "./dashboard.ts";
@@ -104,6 +104,7 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
       ownerDir: ownerRegistry(agentDir),
       bookmarkDir: join(agentDir, "pi-chat-bookmarks"),
       tabRegistry: registry,
+      verifyChat: process.platform === "darwin" || kitty ? (cwd, name) => startVerifyChat(cwd, name, fileURLToPath(import.meta.url), agentDir, kitty) : undefined,
       focusTerminal,
       ...(process.platform === "darwin" ? {
         resume: (session) => resumeChatInTerminal(session, fileURLToPath(import.meta.url), agentDir),

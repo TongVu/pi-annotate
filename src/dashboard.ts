@@ -28,6 +28,7 @@ type Options = {
   tabRegistry?: string;
   project?: string;
   resume?: (session: SavedChat) => Promise<void | false>;
+  verifyChat?: (cwd: string, name?: string) => Promise<void>;
   createChat?: (cwd: string) => Promise<void | false>;
   canFocus?: typeof canFocusBrowser;
   focus?: typeof focusBrowserChat;
@@ -54,7 +55,7 @@ export async function listDashboardTabs(registry: string) {
   return tabs;
 }
 
-export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir, tabRegistry, project, resume, createChat, canFocus = canFocusBrowser, focus = focusBrowserChat, focusTerminal, readQuota = readCodexQuota }: Options) {
+export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir, tabRegistry, project, resume, createChat, verifyChat, canFocus = canFocusBrowser, focus = focusBrowserChat, focusTerminal, readQuota = readCodexQuota }: Options) {
   const token = randomBytes(32).toString("hex");
   const tabId = randomBytes(16).toString("hex");
   const tabPath = `/?dashboard=${tabId}`;
@@ -63,6 +64,7 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
   let listing: Promise<SavedChat[]> | undefined;
   let listAgain = 0;
   const opening = new Map<string, number>();
+  const verifying = new Set<string>();
   let creating = false;
   let quotaLeft: number | undefined;
   let nextQuotaRead = 0;
@@ -141,6 +143,7 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
             bookmarked: bookmarks.size > 0 && bookmarks.has(bookmarkKey(id)),
             status: peer ? peer.status ?? "connected" : owner ? "disconnected" : "saved",
             terminalWorking: !peer && owner?.working ? true : undefined,
+            canVerify: verifyChat && (peer?.cwd || owner?.cwd || session?.cwd) ? true : undefined,
             action: peer ? (peer.tab && canFocus(agent) ? "focus" : peer.tab && browserSwitcher ? "browser-tab" : "manual-tab")
               : owner ? "reopen" : session?.cwd ? (resume ? "resume" : "manual-resume") : "unavailable",
           };
@@ -148,9 +151,10 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
         return reply(200, { projects: [...projects].sort(), sessions, supportsBookmarks: true, browserSelect: browserSwitcher || undefined, canFocusTerminal: focusTerminal ? true : undefined, codexQuotaLeft: quotaLeft });
       }
       const newChat = req.url === "/api/session/new";
+      const verify = req.url === "/api/session/verify";
       const focusHost = req.url === "/api/focus-terminal";
       const bookmark = req.url === "/api/session/bookmark";
-      if (req.method === "POST" && (newChat || focusHost || bookmark || req.url === "/api/open")) {
+      if (req.method === "POST" && (newChat || verify || focusHost || bookmark || req.url === "/api/open")) {
         if (!isSameOriginJson(req.headers, origin)) {
           return reply(403, { error: "Expected a same-origin JSON request." });
         }
@@ -183,6 +187,21 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
           if (closed) return;
           await focusTerminal();
           return reply(200, { message: "Switched to the terminal hosting this dashboard." });
+        }
+        if (verify) {
+          const id = body?.id;
+          if (typeof id !== "string" || !id || Object.keys(body).length !== 1) return reply(400, { error: "Choose a session to verify." });
+          if (!verifyChat) return reply(501, { error: "Reviewer launch is unavailable on this dashboard." });
+          if (verifying.has(id)) return reply(409, { error: "Already starting this reviewer." });
+          verifying.add(id);
+          try {
+            const { saved, live, owned } = await discover(true);
+            const cwd = live.get(id)?.cwd || owned.get(id)?.cwd || saved.get(id)?.cwd;
+            if (!cwd || !isAbsolute(cwd)) return reply(404, { error: "This session’s worktree is unavailable." });
+            if (closed) return;
+            await verifyChat(cwd, live.get(id)?.name || saved.get(id)?.name || owned.get(id)?.name);
+            return reply(202, { message: "Starting an independent reviewer. A new chat tab will open when Pi is ready." });
+          } finally { verifying.delete(id); }
         }
         if (newChat) {
           const cwd = body?.cwd;

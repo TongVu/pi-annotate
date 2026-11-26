@@ -37,6 +37,24 @@ test("Kitty receives literal resume arguments and only the password file path", 
     "PI_ANNOTATE_AUTO_CHAT_SESSION=saved", "--", join(root, "pi"), "--session", path, "--extension", extension]);
 });
 
+test("review launch sends only the display name, scope and fixed request to a fresh restricted Pi", { skip: process.platform === "win32" }, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "pi-chat-review-launch-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const argsFile = join(root, "argv");
+  await writeFile(join(root, "pi"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  await writeFile(join(root, "kitty"), '#!/bin/sh\nprintf "%s\\0" "$@" > "$TEST_ARGS"\n', { mode: 0o755 });
+  const title = "Fix '$(literal)' rerun";
+  const source = new URL("../src/resume-chat.ts", import.meta.url).href;
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", `import {startVerifyChat} from ${JSON.stringify(source)}; await startVerifyChat(process.cwd(), process.argv[1], '/pkg/src/index.ts', process.argv[2], {socket:'unix:/test', windowId:'1'});`, title, root], { env: { ...process.env, PI_MANAGED_INSTALL_ROOT: '', PATH: `${root}:${process.env.PATH}`, TEST_ARGS: argsFile }, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  const args = (await readFile(argsFile, "utf8")).split('\0');
+  for (const [key, value] of Object.entries({ '--name': `Verify: ${title}`, '--model': 'gpt-6.2-sol', '--thinking': 'medium', '--tools': 'review_repo' })) assert.equal(args[args.indexOf(key) + 1], value);
+  for (const flag of ['--no-context-files', '--no-extensions', '--no-mcp', '--no-skills', '--no-prompt-templates']) assert.ok(args.includes(flag));
+  assert.equal(args.filter(a => a.includes(title)).length, 1);
+  assert.ok(!args.includes('--session') && !args.includes('--fork') && args.includes('PI_ANNOTATE_AUTO_CHAT_SESSION=new'));
+  assert.ok(args.some(a => a.startsWith('Independent, read-only review') && a.includes('Worktree:')));
+});
+
 test("Terminal resume command quotes paths, opts in to browser startup, and sends no prompt", { skip: process.platform === "win32" }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), "pi-chat-launch-"));
   t.after(() => rm(root, { recursive: true, force: true }));
