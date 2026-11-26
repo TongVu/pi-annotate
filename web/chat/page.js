@@ -22,6 +22,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   let chatTitleStatus = "⚪";
   let liveSessionName;
   let busy = false;
+  let stoppableRequestId;
   let failed = false;
   let connected = true;
   const sender = createSendCoordinator({
@@ -30,8 +31,9 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     isAvailable: () => isViewingLive() && !composerControls.changing && connected,
     isBusy: () => busy,
     onChange: refreshChatUi,
-    onAccepted() {
+    onAccepted(result) {
       busy = true; // The next fresh poll reconciles this with Pi, even for a very fast reply.
+      stoppableRequestId = result?.stoppableRequestId;
     },
     status,
   });
@@ -140,6 +142,8 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     transcript.appendLive(data.messages, { initial: !cursor });
     cursor = data.cursor;
     busy = data.busy;
+    stoppableRequestId = data.stoppableRequestId;
+    if (!busy) composer.forgetSentDraft();
     failed = data.failed;
     connected = true;
     composerControls.updateContext(data.contextUsage, data.canCompact === true);
@@ -207,7 +211,11 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   });
   const isViewingLive = () => !explorer.isSaved();
   const attachmentUi = mountAttachmentUi(window, setTooltip);
-  const composer = mountComposerDraft(window, { sender, attachmentUi, status, setTooltip });
+  const composer = mountComposerDraft(window, {
+    sender, attachmentUi, status, setTooltip,
+    canStopReply: (id) => connected && isViewingLive() && busy && id === stoppableRequestId,
+    stopReply: (requestId) => api("/api/chat/stop", { requestId }),
+  });
   const composerControls = mountComposerControls(window, {
     api, status, setTooltip, isViewingLive,
     isBusy: () => busy || sender.sending,

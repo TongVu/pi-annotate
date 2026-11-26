@@ -218,7 +218,9 @@ textarea { width: 100%; resize: vertical; background: var(--bg); color: var(--te
 #chat-model-panel p:empty { display: none; }
 #chat-model-panel #chat-model-error { color: var(--model-error, #ffb4a6); }
 @media (prefers-color-scheme: light) { #chat-model-panel { --model-error: #a12d20; } }
-#chat-send { margin-left: auto; }
+#chat-send { margin-left: auto; font-size: 17px; }
+#chat-send[type="button"] { background: var(--panel); border-color: var(--stop-border, #ecaa52); color: var(--text); }
+@media (prefers-color-scheme: light) { #chat-send[type="button"] { --stop-border: #9a5c00; } }
 .attachment-list { margin: 0; padding: 4px 12px 6px; overflow-x: auto; color: var(--muted); font-size: 14px; list-style: none; }
 .attachment-list:not([hidden]) { display: flex; align-items: center; gap: 8px; }
 .attachment-list li { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; max-width: min(100%, 280px); }

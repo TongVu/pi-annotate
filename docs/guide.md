@@ -21,12 +21,16 @@ terminal modes work.
    per message. Click a dot or list row to jump to that message. On touch, tap a
    dot to open the list; with a keyboard, focus a dot and press **Right Arrow**
    to enter the list.
-3. Press **Enter** or click the checkmark button to send an ordinary message.
+3. Press **Enter** or click **💬** to send an ordinary message.
    **Shift+Enter** inserts a newline. Click **Send questions** to submit the
    annotation batch. You can paste a screenshot into an annotation's comment
    field or attach images with its clipboard button. Each question keeps its own
    images. These are separate sends: each leaves the other draft untouched and
    clears its own draft only after Pi accepts it. The terminal draft is untouched.
+   While Pi is working on your browser message, click **✍️** to stop the reply
+   and restore the text and attachments to the composer. Edit the draft, then
+   resend once Pi is idle. The original turn stays in the transcript; stopping
+   does not undo actions Pi already took.
 4. New messages appear in the same tab as Pi finishes them. The composer border
    and status dot pulse amber while Pi is working unless reduced motion is set.
    The dot turns green when Pi is ready. Replies aren't streamed

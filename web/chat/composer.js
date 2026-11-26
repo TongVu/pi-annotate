@@ -1,11 +1,19 @@
-export function mountComposerDraft(window, { sender, attachmentUi, status, setTooltip }) {
+export function mountComposerDraft(window, { sender, attachmentUi, status, setTooltip, canStopReply, stopReply }) {
   const $ = (id) => window.document.getElementById(id);
   const form = $("chat-form");
   const chatInput = $("chat-input");
   const chatFile = $("chat-file");
+  const action = $("chat-send");
   const { renderAttachmentList, readAttachment, checkAttachmentLimits } = attachmentUi;
   let attachments = [];
   let readingFiles = false;
+  let sentDraft;
+  let stopping = false;
+
+  function canStop() {
+    // Never replace a newer draft, even if Pi became stoppable again after a poll.
+    return sentDraft && !sender.sending && !chatInput.value && !attachments.length && !readingFiles && canStopReply(sentDraft.requestId);
+  }
 
   function composerBody() {
     return { text: chatInput.value.trim(), ...(attachments.length ? { attachments } : {}) };
@@ -13,10 +21,18 @@ export function mountComposerDraft(window, { sender, attachmentUi, status, setTo
 
   function updateControls() {
     const body = composerBody();
-    $("chat-send").disabled = (!body.text && !body.attachments) || readingFiles || !sender.canSend(body);
-    $("chat-attach").disabled = sender.sending || readingFiles;
-    for (const button of $("chat-attachments").querySelectorAll("button")) button.disabled = sender.sending || readingFiles;
-    chatInput.readOnly = sender.sending;
+    const stopMode = canStop() || stopping;
+    const type = stopMode ? "button" : "submit";
+    if (action.type !== type) {
+      action.type = type;
+      action.firstElementChild.textContent = stopMode ? "✍️" : "💬";
+      action.setAttribute("aria-label", stopMode ? "Stop and edit" : "Send message");
+      setTooltip(action, stopMode ? "Stop and edit" : "Send message (Enter)");
+    }
+    action.disabled = stopMode ? stopping : (!body.text && !body.attachments) || readingFiles || !sender.canSend(body);
+    chatInput.readOnly = sender.sending || stopMode;
+    $("chat-attach").disabled = chatInput.readOnly || readingFiles;
+    for (const button of $("chat-attachments").querySelectorAll("button")) button.disabled = chatInput.readOnly || readingFiles;
   }
 
   function setAttachments(next) {
@@ -31,7 +47,7 @@ export function mountComposerDraft(window, { sender, attachmentUi, status, setTo
   }
 
   async function attachFiles(files) {
-    if (!files.length || sender.sending || readingFiles) return;
+    if (!files.length || chatInput.readOnly || readingFiles) return;
     readingFiles = true;
     updateControls();
     try {
@@ -55,28 +71,55 @@ export function mountComposerDraft(window, { sender, attachmentUi, status, setTo
     setTooltip(expand, text);
   });
 
+  action.addEventListener("click", async (event) => {
+    if (action.type !== "button") return;
+    event.preventDefault();
+    if (stopping || !canStop()) return;
+    const draft = sentDraft;
+    stopping = true;
+    updateControls();
+    status("Stopping Pi…");
+    try {
+      await stopReply(draft.requestId);
+      sentDraft = undefined;
+      chatInput.value = draft.text;
+      setAttachments(draft.attachments);
+      status("Stopped. Edit your message, then send it again.");
+      if (!form.closest("[hidden]")) {
+        chatInput.focus({ preventScroll: true });
+        chatInput.setSelectionRange(chatInput.value.length, chatInput.value.length);
+      }
+    } catch (error) {
+      if (error.status === 409) sentDraft = undefined;
+      status(error.message || "Could not stop Pi.", true);
+    } finally {
+      stopping = false;
+      updateControls();
+    }
+  });
+
   chatInput.addEventListener("input", updateControls);
   chatInput.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || event.isComposing || event.keyCode === 229) return;
     event.preventDefault();
-    if (!event.repeat && !$("chat-send").disabled) form.requestSubmit();
+    if (!event.repeat && action.type === "submit" && !action.disabled) form.requestSubmit();
   });
   chatInput.addEventListener("paste", (event) => {
     const files = Array.from(event.clipboardData?.files ?? []);
-    if (!files.length || sender.sending) return;
+    if (!files.length || chatInput.readOnly) return;
     event.preventDefault();
     void attachFiles(files);
   });
   form.addEventListener("dragover", (event) => {
     if (!event.dataTransfer?.types.includes("Files")) return;
     event.preventDefault();
-    event.dataTransfer.dropEffect = sender.sending || readingFiles ? "none" : "copy";
+    event.dataTransfer.dropEffect = chatInput.readOnly || readingFiles ? "none" : "copy";
   });
   form.addEventListener("drop", (event) => {
     const files = Array.from(event.dataTransfer?.files ?? []);
     if (!files.length && !event.dataTransfer?.types.includes("Files")) return;
     event.preventDefault();
-    if (!sender.sending) chatInput.focus({ preventScroll: true });
+    if (!chatInput.readOnly) chatInput.focus({ preventScroll: true });
     void attachFiles(files);
   });
   $("chat-attach").addEventListener("click", () => chatFile.click());
@@ -88,8 +131,10 @@ export function mountComposerDraft(window, { sender, attachmentUi, status, setTo
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const body = composerBody();
-    if (!readingFiles && (body.text || body.attachments)) {
-      void sender.send(body, () => {
+    if (!readingFiles && action.type === "submit" && (body.text || body.attachments)) {
+      void sender.send(body, (result) => {
+        const requestId = result?.stoppableRequestId;
+        sentDraft = requestId ? { requestId, text: chatInput.value, attachments } : undefined;
         chatInput.value = "";
         setAttachments([]);
       });
@@ -98,6 +143,7 @@ export function mountComposerDraft(window, { sender, attachmentUi, status, setTo
 
   return {
     updateControls,
+    forgetSentDraft: () => { sentDraft = undefined; },
     hasDraft: () => Boolean(chatInput.value.trim() || attachments.length || readingFiles),
     focus: () => chatInput.focus({ preventScroll: true }),
   };

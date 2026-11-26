@@ -147,6 +147,7 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
       const disconnect = live && req.url === "/api/close";
       const renameSession = live && req.url === "/api/session/name";
       const compactSession = live && req.url === "/api/session/compact";
+      const stopReply = req.url === "/api/chat/stop";
       const localAction = req.url === "/api/session/focus-terminal" ? { name: "Switch to Terminal", run: chat.focusTerminal }
         : req.url === "/api/dashboard/open" ? { name: "Open dashboard", run: chat.openDashboard && (() => chat.openDashboard(req.headers["user-agent"] ?? "")) } : undefined;
       const renderNote = live && req.url === "/api/markdown";
@@ -154,7 +155,7 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
       const saveNoteAttachments = live && req.url === "/api/note/attachments";
       const openSession = explorer && req.url === "/api/session/open";
       const cloneSession = explorer && req.url === "/api/session/clone";
-      if (req.method === "POST" && (disconnect || renameSession || compactSession || modelSettings || localAction || renderNote || saveNote || saveNoteAttachments || openSession || cloneSession || req.url === "/api/chat")) {
+      if (req.method === "POST" && (disconnect || renameSession || compactSession || stopReply || modelSettings || localAction || renderNote || saveNote || saveNoteAttachments || openSession || cloneSession || req.url === "/api/chat")) {
         if (!isSameOriginJson(req.headers, origin)) {
           reply(403, { error: "Expected a same-origin JSON request." });
           return;
@@ -171,7 +172,7 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
           reply(200, { ok: true });
           return;
         }
-        const raw = await readBody(req, renderNote || saveNote ? NOTE_BODY_LIMIT : openSession || renameSession || compactSession || modelSettings || localAction || cloneSession ? 4096 : CHAT_BODY_LIMIT);
+        const raw = await readBody(req, renderNote || saveNote ? NOTE_BODY_LIMIT : openSession || renameSession || compactSession || stopReply || modelSettings || localAction || cloneSession ? 4096 : CHAT_BODY_LIMIT);
         const body = JSON.parse(raw.toString("utf8"));
         if (modelSettings) {
           if (!body || typeof body !== "object" || Object.keys(body).length !== 1 ||
@@ -179,6 +180,13 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
             throw new Error("Choose a model or thinking effort.");
           }
           if (checkCurrent()) await live.modelSettings(reply, checkCurrent, body);
+          return;
+        }
+        if (stopReply) {
+          if (!body || typeof body.requestId !== "string" || !/^[a-f0-9-]{36}$/.test(body.requestId) || Object.keys(body).length !== 1) {
+            throw new Error("Invalid stop request.");
+          }
+          if (checkCurrent()) live.stop(body.requestId, reply);
           return;
         }
         if (compactSession) {

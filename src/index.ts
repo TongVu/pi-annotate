@@ -43,14 +43,31 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
   let sessionOwner: Awaited<ReturnType<typeof registerSessionOwner>> | undefined;
   let ownerGeneration = 0;
   let generation = 0;
-  const chatDispatch = new AsyncLocalStorage<() => void>();
+  type ChatDispatch = { requestId?: string; confirm: () => void; accepted: boolean };
+  const chatDispatch = new AsyncLocalStorage<ChatDispatch>();
+  let activeDispatch: ChatDispatch | undefined;
+  pi.on("message_start", (event) => {
+    // A terminal message delivered into the same run must not be stopped by the old browser action.
+    if (event.message.role === "user" && activeDispatch?.accepted) activeDispatch = undefined;
+  });
   pi.on("message_end", (event) => {
     // This callback belongs to the async Pi run started by this browser send,
     // not a concurrent terminal prompt. A transformed input is still accepted.
-    if (event.message.role === "user") chatDispatch.getStore()?.();
+    const dispatch = chatDispatch.getStore();
+    if (event.message.role === "user" && dispatch && !dispatch.accepted) {
+      dispatch.accepted = true;
+      dispatch.confirm();
+    }
   });
-  pi.on("agent_start", () => sessionOwner?.setWorking(true));
-  pi.on("agent_end", () => sessionOwner?.setWorking(false));
+  pi.on("agent_start", () => {
+    const dispatch = chatDispatch.getStore();
+    activeDispatch = dispatch && !dispatch.accepted ? dispatch : undefined;
+    sessionOwner?.setWorking(true);
+  });
+  pi.on("agent_end", () => {
+    activeDispatch = undefined;
+    sessionOwner?.setWorking(false);
+  });
   const stop = () => {
     generation++;
     active?.close();
@@ -221,12 +238,16 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
           onCompact: () => new Promise<void>((resolve, reject) => {
             ctx.compact({ onComplete: () => resolve(), onError: reject });
           }),
-          onSend: (content: Parameters<ExtensionAPI["sendUserMessage"]>[0]) => new Promise<void>((resolve) => {
+          getStoppableRequestId: () => activeDispatch?.accepted && !ctx.isIdle() && !ctx.hasPendingMessages()
+            ? activeDispatch.requestId : undefined,
+          onStop: () => ctx.abort(),
+          onSend: (content: Parameters<ExtensionAPI["sendUserMessage"]>[0], requestId?: string) => new Promise<void>((resolve) => {
             if (Array.isArray(content) && content.some((block) => block.type === "image")) {
               if (pi.getSettings().images?.blockImages) throw new Error("Images are disabled in Pi's settings.");
               if (!ctx.model?.input.includes("image")) throw new Error("The current Pi model cannot receive images. Choose an image-capable model in Pi.");
             }
-            chatDispatch.run(resolve, () => pi.sendUserMessage(content, { expandPromptTemplates: false }));
+            chatDispatch.run({ requestId, confirm: resolve, accepted: false },
+              () => pi.sendUserMessage(content, { expandPromptTemplates: false }));
           }),
         },
       });

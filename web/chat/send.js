@@ -28,11 +28,11 @@ export function createSendCoordinator({ submit, requestId, isAvailable, isBusy, 
       onChange();
       status("Sending to Pi…");
       try {
-        await submit({ ...body, requestId: lastAttempt.id });
+        const result = await submit({ ...body, requestId: lastAttempt.id });
         lastAttempt = undefined;
-        clearDraft();
+        clearDraft(result);
         accepted++;
-        onAccepted();
+        onAccepted(result);
         status("Sent to Pi.");
       } catch (error) {
         status(error.message || "Could not confirm the send. Your draft is still here.", true);

@@ -3,7 +3,7 @@ import { formatChatAnnotations } from "./annotations.ts";
 import { annotationImagesAt, INLINE_TEXT_LIMIT, inlineAttachmentBlocks, parseAttachments, saveChatAttachments } from "./chat-attachments.ts";
 import { renderChatEntry, readChatImage } from "./chat-transcript.ts";
 
-export function createLiveChat({ noteStore, attachmentDir, getSessionId, getSessionName, setSessionName, getBranch, isIdle, getContextUsage, getModelSettings, setModelSettings, onCompact, onSend }) {
+export function createLiveChat({ noteStore, attachmentDir, getSessionId, getSessionName, setSessionName, getBranch, isIdle, getContextUsage, getModelSettings, setModelSettings, onCompact, getStoppableRequestId, onStop, onSend }) {
   const rendered = new Map();
   const requests = new Map();
   let inFlight = false;
@@ -17,6 +17,11 @@ export function createLiveChat({ noteStore, attachmentDir, getSessionId, getSess
     const last = (branch ?? getBranch()).findLast((entry) => entry.type === "message" && ["user", "assistant"].includes(entry.message.role));
     return ["error", "aborted"].includes(last?.message.stopReason) ? "error" : "ready";
   };
+  function stoppableRequestId() {
+    const id = onStop && getStoppableRequestId?.();
+    const attempt = requests.get(id);
+    return attempt?.editable && !attempt.stopped ? id : undefined;
+  }
   function noteSessionId() {
     const sessionId = getSessionId?.();
     if (!noteStore || typeof sessionId !== "string" || !sessionId) throw new Error("Persistent note storage is unavailable.");
@@ -33,7 +38,7 @@ export function createLiveChat({ noteStore, attachmentDir, getSessionId, getSess
       }
       const messages = branch.slice(index + 1).map(render).filter(Boolean);
       const state = status(branch);
-      reply(200, { mode: "chat", protocol: 2, annotationImages: true, sessionId: getSessionId?.(), sessionName: getSessionName?.(), cursor: branch.at(-1)?.id ?? null, messages, busy: state === "working", failed: state === "error", contextUsage: getContextUsage?.(), canCompact: typeof onCompact === "function" && branch.some((entry) => entry.type === "message" && entry.message.role === "user") });
+      reply(200, { mode: "chat", protocol: 2, annotationImages: true, sessionId: getSessionId?.(), sessionName: getSessionName?.(), cursor: branch.at(-1)?.id ?? null, messages, busy: state === "working", failed: state === "error", stoppableRequestId: stoppableRequestId(), contextUsage: getContextUsage?.(), canCompact: typeof onCompact === "function" && branch.some((entry) => entry.type === "message" && entry.message.role === "user") });
     },
     async modelSettings(reply, checkCurrent, change?) {
       if (!getModelSettings || (change && !setModelSettings)) {
@@ -99,6 +104,20 @@ export function createLiveChat({ noteStore, attachmentDir, getSessionId, getSess
       setSessionName(sessionName);
       reply(200, { sessionName: getSessionName?.() ?? sessionName });
     },
+    stop(requestId, reply) {
+      const attempt = requests.get(requestId);
+      if (attempt?.stopped) {
+        reply(200, { ok: true });
+        return;
+      }
+      if (!attempt?.editable || stoppableRequestId() !== requestId) {
+        reply(409, { error: "This reply is no longer available to stop." });
+        return;
+      }
+      onStop();
+      attempt.stopped = true;
+      reply(200, { ok: true });
+    },
     async send(body, reply, isCurrent) {
       const { requestId, text, attachments, annotations } = body;
       if (typeof requestId !== "string" || !/^[a-f0-9-]{36}$/.test(requestId) ||
@@ -155,7 +174,7 @@ export function createLiveChat({ noteStore, attachmentDir, getSessionId, getSess
               if (!isIdle()) throw new Error("Pi is busy. Wait for it to finish and retry.");
               prompt.push(...upload.blocks);
             }
-            await onSend(prompt);
+            await onSend(prompt, annotations === undefined ? requestId : undefined);
           } catch (error) {
             await upload?.discard();
             requests.delete(requestId);
@@ -164,7 +183,7 @@ export function createLiveChat({ noteStore, attachmentDir, getSessionId, getSess
             inFlight = false;
           }
         })();
-        attempt = { fingerprint, completion };
+        attempt = { fingerprint, completion, editable: annotations === undefined, stopped: false };
         requests.set(requestId, attempt);
       }
       // Pi's public send API is fire-and-forget. Keep the request ID reserved even
@@ -175,7 +194,7 @@ export function createLiveChat({ noteStore, attachmentDir, getSessionId, getSess
           timeout = setTimeout(() => resolve(false), 15000);
           timeout.unref();
         })]);
-        if (confirmed) reply(200, { ok: true });
+        if (confirmed) reply(200, { ok: true, stoppableRequestId: stoppableRequestId() === requestId ? requestId : undefined });
         else reply(504, { error: "Pi hasn't confirmed this send. Check the terminal. Retrying the same send only checks for confirmation." });
       } finally {
         clearTimeout(timeout);

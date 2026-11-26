@@ -1219,11 +1219,8 @@ test("chat composer works from an empty session and clears only its own draft", 
   assert.equal(pickerOpens, 1);
   assert.ok(f.$("chat-send").closest(".chat-composer").contains(f.$("chat-input")));
   assert.equal(f.$("chat-send").getAttribute("aria-label"), "Send message");
-  assert.ok(f.$("chat-send").querySelector("svg"));
-  assert.equal(f.$("chat-send").querySelector("svg").getAttribute("width"), "18");
-  assert.equal(f.$("chat-send").querySelector("svg").getAttribute("stroke-width"), "2");
-  assert.equal(f.$("chat-send").querySelector("svg path").getAttribute("d"), "m5 12 4 4L19 6");
-  assert.equal(f.$("chat-send").querySelector("svg path").getAttribute("d"), f.$("save-annotation").querySelector("svg path").getAttribute("d"));
+  assert.equal(f.$("chat-send").textContent, "💬");
+  assert.equal(f.$("save-annotation").querySelector("svg path").getAttribute("d"), "m5 12 4 4L19 6");
   assert.equal(f.$("chat-send").disabled, true);
   const input = f.$("chat-input");
   input.value = "Hello from the browser";
@@ -1247,6 +1244,82 @@ test("chat composer works from an empty session and clears only its own draft", 
   await tick();
   assert.equal(posts[0].text, "Hello from the browser");
   assert.equal(f.$("chat-input").value, "");
+});
+
+test("the composer stops its active reply and restores text and attachments before resending", async (t) => {
+  const calls = [];
+  const json = (data) => ({ ok: true, json: async () => data });
+  let busy = false;
+  let stoppableRequestId;
+  let completeStop;
+  const f = await fixture(t, { chatFetch: async (path, body) => {
+    if (path.startsWith("/api/response")) return json({ mode: "chat", protocol: 2, cursor: null, messages: [], busy, stoppableRequestId });
+    assert.ok(["/api/chat", "/api/chat/stop"].includes(path), path);
+    calls.push({ path, body });
+    if (path === "/api/chat/stop") return new Promise((resolve) => {
+      completeStop = () => { stoppableRequestId = undefined; resolve(json({ ok: true })); };
+    });
+    busy = true;
+    stoppableRequestId = body.requestId;
+    return json({ ok: true, stoppableRequestId });
+  } });
+  const { window, $ } = f;
+  const input = $("chat-input");
+  const action = $("chat-send");
+  const original = "  First draft\nwith a file.  ";
+  const enter = () => input.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", cancelable: true }));
+  const list = $("chat-attachments");
+  const attached = new Promise((resolve) => {
+    const observer = new window.MutationObserver(() => {
+      if (list.children.length) { observer.disconnect(); resolve(); }
+    });
+    observer.observe(list, { childList: true });
+  });
+  const paste = new window.Event("paste", { cancelable: true });
+  Object.defineProperty(paste, "clipboardData", { value: { files: [new window.File(["note"], "note.txt")] } });
+  input.dispatchEvent(paste);
+  await attached;
+  input.value = original;
+  input.dispatchEvent(new window.Event("input"));
+  action.click();
+  await tick();
+  const first = calls[0].body;
+  assert.equal(first.text, original.trim());
+  assert.equal(action.textContent, "✍️");
+  assert.equal(action.type, "button");
+  action.focus();
+  assert.equal(window.document.querySelector('[role="tooltip"]').textContent, "Stop and edit");
+  assert.equal(input.readOnly, true);
+  enter();
+  assert.equal(calls.length, 1, "Enter in the composer is not a stop shortcut");
+  action.click();
+  assert.equal(action.disabled, true);
+  assert.equal(input.value, "", "the draft isn't restored until Pi acknowledges the stop");
+  assert.deepEqual(calls[1], { path: "/api/chat/stop", body: { requestId: first.requestId } });
+  completeStop();
+  await tick();
+  assert.equal(calls.length, 2, "restoring a draft never submits it");
+  assert.equal(input.value, original);
+  assert.equal(window.document.activeElement, input);
+  assert.equal(input.selectionStart, original.length);
+  assert.ok(list.querySelector('[aria-label="Remove note.txt"]'));
+  assert.equal(action.textContent, "💬");
+  assert.equal(action.disabled, true, "wait for the idle poll before resending");
+  assert.equal(input.readOnly, false);
+
+  busy = false;
+  await f.poll();
+  input.value = "Revised draft";
+  enter();
+  await tick();
+  assert.equal(calls[2].body.text, "Revised draft");
+  assert.deepEqual(calls[2].body.attachments, first.attachments);
+  assert.notEqual(calls[2].body.requestId, first.requestId);
+  busy = false;
+  stoppableRequestId = undefined;
+  await f.poll();
+  assert.equal(action.textContent, "💬");
+  assert.equal(input.value, "", "a normally completed reply does not restore its draft");
 });
 
 test("sending either draft leaves the other one unsent", async (t) => {

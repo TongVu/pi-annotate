@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { registerChatExtension } from "../src/index.ts";
 import { AUTO_CHAT_SESSION, NEW_CHAT_TARGET } from "../src/resume-chat.ts";
 
-function fixture(t, { dashboard = false, launchPage = async () => {}, ...dashboardOptions } = {}) {
+function fixture(t, { dashboard = false, launchPage = async () => {}, sendUserMessage = () => {}, ...dashboardOptions } = {}) {
   const handlers = new Map();
   const commands = new Map();
   const flags = new Map();
@@ -19,7 +19,7 @@ function fixture(t, { dashboard = false, launchPage = async () => {}, ...dashboa
     getFlag: (name) => name === "dashboard" && dashboard,
     setSessionName: () => {},
     getSettings: () => ({}),
-    sendUserMessage: () => {},
+    sendUserMessage,
   }, launchPage, dashboardOptions);
   t.after(() => handlers.get("session_shutdown")());
   const ctx = {
@@ -54,6 +54,74 @@ test("/chat is the sole registered browser command and opens a live session", as
   assert.equal((await response.json()).mode, "chat");
   await f.run("close");
   await assert.rejects(() => fetch(url.origin));
+});
+
+test("stop targets the active browser message, not queued, terminal, or later prompts", async (t) => {
+  const f = fixture(t, { sendUserMessage: (content) => {
+    busy = true;
+    start();
+    userMessage(content);
+  } });
+  let busy = false;
+  let queued = false;
+  let aborts = 0;
+  const start = () => f.handlers.get("agent_start")();
+  const end = () => { f.handlers.get("agent_end")(); busy = false; };
+  const userMessage = (content) => {
+    const event = { message: { role: "user", content } };
+    f.handlers.get("message_start")(event);
+    f.handlers.get("message_end")(event);
+  };
+  f.ctx.isIdle = () => !busy;
+  f.ctx.hasPendingMessages = () => queued;
+  f.ctx.abort = () => { aborts++; };
+  await f.run();
+  const url = openedUrl(f.notices);
+  const headers = { Authorization: `Bearer ${url.hash.slice(1)}`, Origin: url.origin, "Content-Type": "application/json" };
+  const post = (path, body, requestHeaders = headers) => fetch(url.origin + path, { method: "POST", headers: requestHeaders, body: JSON.stringify(body) });
+  const stop = (requestId, requestHeaders) => post("/api/chat/stop", { requestId }, requestHeaders);
+  const state = async () => (await fetch(`${url.origin}/api/response`, { headers })).json();
+  const first = "00000000-0000-4000-8000-000000000001";
+  const second = "00000000-0000-4000-8000-000000000002";
+  const third = "00000000-0000-4000-8000-000000000003";
+  const send = async (requestId) => {
+    const response = await post("/api/chat", { requestId, text: "A browser prompt" });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true, stoppableRequestId: requestId });
+  };
+
+  await send(first);
+  assert.equal((await state()).stoppableRequestId, first);
+  assert.equal((await stop(first, { ...headers, Origin: "https://other.example" })).status, 403);
+  assert.equal((await stop(first, { ...headers, Authorization: "invalid" })).status, 401);
+  assert.equal((await post("/api/chat/stop", { requestId: first, extra: true })).status, 400);
+  assert.equal((await stop(second)).status, 409);
+  queued = true;
+  assert.equal((await state()).stoppableRequestId, undefined);
+  assert.equal((await stop(first)).status, 409);
+  queued = false;
+  assert.equal(aborts, 0);
+  assert.equal((await stop(first)).status, 200);
+  assert.equal((await state()).busy, true, "stopping must not pretend Pi has finished unwinding");
+  assert.equal((await state()).stoppableRequestId, undefined);
+  assert.equal(aborts, 1);
+
+  end();
+  await send(second);
+  assert.equal((await stop(first)).status, 200, "retrying a confirmed stop is safe");
+  assert.equal(aborts, 1, "the previous stop must not interrupt a new reply");
+  userMessage("Terminal steering");
+  assert.equal((await stop(second)).status, 409);
+  end();
+
+  await send(third);
+  end();
+  busy = true;
+  start();
+  userMessage("Terminal prompt");
+  assert.equal((await state()).stoppableRequestId, undefined);
+  assert.equal((await stop(third)).status, 409);
+  assert.equal(aborts, 1);
 });
 
 test("the chat button opens a dashboard only when no existing tab can be focused", async (t) => {
