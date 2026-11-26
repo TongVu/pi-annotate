@@ -44,25 +44,31 @@
     <div id="session-list"></div>
   </nav>
   <main>
-    <div id="session-title-pill" class="session-title-pill" role="group" aria-label="Chat controls" hidden>
-      <button id="open-dashboard" type="button" class="secondary" aria-label="Open chat dashboard" title="Open or switch to the chat dashboard">
-        <img src="/logo.png" width="18" height="18" alt="">
-      </button>
-      <button id="session-title-text" type="button" aria-haspopup="dialog"></button>
-      <h2 id="saved-title" hidden></h2>
-      <button id="focus-terminal" type="button" class="secondary" aria-label="Switch to Terminal" title="Switch to Terminal"><span aria-hidden="true">🕹️</span></button>
-      <button id="chat-tools-toggle" type="button" class="secondary panel-toggle" aria-label="Collapse notes and annotations" title="Collapse notes and annotations" aria-expanded="true" aria-controls="chat-tools">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="3" y="4" width="18" height="16" rx="2"/>
-          <path d="M9 4v16"/>
-        </svg>
-      </button>
-      <button id="explorer-toggle" type="button" class="secondary panel-toggle" aria-label="Toggle chat explorer" title="Toggle chat explorer" aria-expanded="false" aria-controls="chat-explorer">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="3" y="4" width="18" height="16" rx="2"/>
-          <path d="M15 4v16"/>
-        </svg>
-      </button>
+    <div class="chat-heading">
+      <div id="session-title-pill" class="session-title-pill" role="group" aria-label="Chat controls" hidden>
+        <button id="open-dashboard" type="button" class="secondary" aria-label="Open chat dashboard" title="Open or switch to the chat dashboard">
+          <img src="/logo.png" width="18" height="18" alt="">
+        </button>
+        <button id="session-title-text" type="button" aria-haspopup="dialog"></button>
+        <h2 id="saved-title" hidden></h2>
+        <button id="focus-terminal" type="button" class="secondary" aria-label="Switch to Terminal" title="Switch to Terminal"><span aria-hidden="true">🕹️</span></button>
+        <button id="chat-tools-toggle" type="button" class="secondary panel-toggle" aria-label="Collapse notes and annotations" title="Collapse notes and annotations" aria-expanded="true" aria-controls="chat-tools">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="16" rx="2"/>
+            <path d="M9 4v16"/>
+          </svg>
+        </button>
+        <button id="explorer-toggle" type="button" class="secondary panel-toggle" aria-label="Toggle chat explorer" title="Toggle chat explorer" aria-expanded="false" aria-controls="chat-explorer">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="16" rx="2"/>
+            <path d="M15 4v16"/>
+          </svg>
+        </button>
+      </div>
+      <div id="subchat-origin" hidden>
+        <span>Branched from</span>
+        <button id="subchat-parent" type="button"><span id="subchat-parent-name"></span><span aria-hidden="true">↗</span></button>
+      </div>
     </div>
     <div id="chat-rail" hidden>
       <nav id="turns" aria-label="Message dots" hidden></nav>
@@ -70,7 +76,7 @@
     </div>
     <article id="conversation" aria-label="Assistant response">
       <div class="label" id="conversation-label">ASSISTANT RESPONSE <span>· Rendered Markdown</span></div>
-      <div id="response" tabindex="0"><div id="subchat-origin" hidden><button id="subchat-parent" type="button" class="secondary"></button></div></div>
+      <div id="response" tabindex="0"></div>
       <button id="annotate-selection" type="button" aria-haspopup="dialog" hidden>Add annotation</button>
       <form id="chat-form" hidden>
         <div class="chat-composer">

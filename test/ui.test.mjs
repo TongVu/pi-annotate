@@ -779,6 +779,7 @@ test("a reply can start a named subchat without changing the parent draft", asyn
     ["Fix Aura compile error", "Review staged changes"]);
   assert.equal(branches.firstElementChild.querySelector(":scope > .session-tree-children .session-open").textContent, "Check the import");
   assert.equal(f.$("session-title-text").textContent, "Stage Aura changes");
+  assert.equal(f.$("subchat-origin").hidden, true, "unbranched chats do not show the subtitle");
   assert.equal(input.value, "Unsent draft");
 });
 
@@ -801,15 +802,23 @@ test("a subchat marks its fork point and opens the original reply in the parent 
   assert.equal(divider.textContent, "Subchat starts here");
   assert.equal(divider.previousElementSibling.dataset.entryId, "target");
   assert.equal(divider.nextElementSibling.dataset.entryId, "followup");
-  assert.match(f.$("subchat-parent").textContent, /Branched from: Stage Aura changes/);
-  f.$("subchat-parent").click();
+  const subtitle = f.$("subchat-origin");
+  const parentButton = f.$("subchat-parent");
+  assert.equal(f.$("session-title-pill").nextElementSibling, subtitle);
+  assert.equal(subtitle.hidden, false);
+  assert.equal(subtitle.firstElementChild.textContent, "Branched from");
+  assert.equal(f.$("subchat-parent-name").textContent, "Stage Aura changes");
+  assert.equal(parentButton.querySelector('[aria-hidden="true"]').textContent, "↗");
+  parentButton.click();
   await tick();
+  assert.equal(subtitle.hidden, true);
   assert.equal(f.$("saved-title").textContent, "Stage Aura changes");
   assert.equal(f.window.document.activeElement.dataset.entryId, "target");
   assert.match(f.$("saved-response").textContent, /Later parent reply/);
   assert.equal(f.$("saved-response").querySelector(".reply-branch"), null);
   f.$("back-to-live").click();
   assert.equal(f.$("saved-conversation").hidden, true);
+  assert.equal(subtitle.hidden, false);
   assert.equal(f.$("response").querySelector(".subchat-divider"), divider);
 });
 

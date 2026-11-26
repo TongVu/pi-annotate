@@ -19,6 +19,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   const branchName = $("branch-chat-name");
   let creatingSubchat = false;
   const branchStatus = $("branch-chat-status");
+  const subchatOrigin = $("subchat-origin");
   const parentButton = $("subchat-parent");
   let branchReplyId;
   let originReplyId;
@@ -142,14 +143,20 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     ? tooltipFactory({ sideTargets: "#chat-explorer" })
     : { set: (target, text) => { target.title = text; }, hide: () => {} };
 
+  function updateSubchatOriginVisibility() {
+    subchatOrigin.hidden = !originReplyId || explorer.isSaved();
+  }
+
   function updateChat(data) {
     if (data.mode !== "chat" || !Array.isArray(data.messages)) throw new Error("Chat data is unavailable. Reopen from Pi.");
     const sessionName = data.sessionName?.trim();
     updateSessionTitle(sessionName);
     if (data.subchatOrigin) {
       originReplyId = data.subchatOrigin.replyId;
-      parentButton.textContent = `Branched from: ${data.subchatOrigin.parentName} ↗`;
-      $("subchat-origin").hidden = false;
+      const { parentName } = data.subchatOrigin;
+      $("subchat-parent-name").textContent = parentName;
+      setTooltip(parentButton, `Open parent chat: ${parentName}`);
+      updateSubchatOriginVisibility();
     }
     transcript.appendLive(data.messages, { initial: !cursor, branchReplyId: data.subchatOrigin?.replyId });
     cursor = data.cursor;
@@ -243,6 +250,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     }
   });
   parentButton.addEventListener("click", async () => {
+    hideMessagePreview();
     parentButton.disabled = true;
     try { await explorer.showParent(originReplyId); }
     finally { parentButton.disabled = false; }
@@ -284,6 +292,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     isConnected: () => connected,
     transcript,
     onViewChange() {
+      updateSubchatOriginVisibility();
       annotations.hideSelectionAction();
       updateControls();
     },
