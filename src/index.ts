@@ -7,7 +7,7 @@ import { startChatServer } from "./server.ts";
 import { createChatNoteStore } from "./chat-notes.ts";
 import { listPiSessions, readPiSession } from "./session-explorer.ts";
 import { createChatPresence } from "./chat-presence.ts";
-import { AUTO_CHAT_SESSION, NEW_CHAT_TARGET, forkChatInTerminal, kittyDashboardTarget, resumeInKitty, resumeChatInTerminal, startNewChatInKitty, startNewChatInTerminal } from "./resume-chat.ts";
+import { AUTO_CHAT_SESSION, NEW_CHAT_TARGET, forkChatInKitty, forkChatInTerminal, kittyDashboardTarget, resumeInKitty, resumeChatInTerminal, startNewChatInKitty, startNewChatInTerminal } from "./resume-chat.ts";
 import { registerSessionOwner, requestOwnedChat } from "./session-owner.ts";
 import { focusTerminal } from "./focus-terminal.ts";
 import { listDashboardTabs, startDashboard } from "./dashboard.ts";
@@ -178,6 +178,7 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
       // Keep the existing path so the repository rename doesn't strand saved notes.
       const noteStore = createChatNoteStore(join(sessionDir, ".pi-annotate-notes"));
       const attachmentDir = join(sessionDir || await getAgentDir(), ".pi-chat-attachments");
+      const kitty = process.platform === "linux" ? kittyDashboardTarget() : undefined;
       const opened = await startChatServer({
         isCurrent,
         onClose: () => {
@@ -200,7 +201,7 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
           }),
           explorer: {
             current: chatIdentity,
-            list: () => listPiSessions(ctx.sessionManager.getSessionDir()),
+            list: () => listSessions(ctx.sessionManager.getSessionDir()),
             read: readPiSession,
             ...(process.platform === "darwin" ? {
               launch: async (session) => {
@@ -211,10 +212,9 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
                 await resumeChatInTerminal(session, fileURLToPath(import.meta.url), agentDir);
                 return "launched";
               },
-              clone: async (session) => {
-                const { getAgentDir } = await import("@earendil-works/pi-coding-agent");
-                await forkChatInTerminal(session, fileURLToPath(import.meta.url), getAgentDir());
-              },
+              clone: async (session) => forkChatInTerminal(session, fileURLToPath(import.meta.url), await getAgentDir()),
+            } : kitty ? {
+              clone: async (session) => forkChatInKitty(session, fileURLToPath(import.meta.url), await getAgentDir(), kitty),
             } : {}),
           },
           getBranch: () => ctx.sessionManager.getBranch(),

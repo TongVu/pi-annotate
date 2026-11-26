@@ -184,11 +184,9 @@ test("--dashboard does not launch a browser from non-interactive Pi", async (t) 
   assert.deepEqual(f.notices, []);
 });
 
-test("a Linux dashboard launches a fresh Pi in its Kitty window", { skip: process.platform !== "linux" }, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "pi-chat-create-kitty-"));
+async function fakeKitty(t) {
+  const root = await mkdtemp(join(tmpdir(), "pi-chat-launch-kitty-"));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const cwd = join(root, "new project's workspace");
-  await mkdir(cwd);
   const argsFile = join(root, "argv");
   const kitty = join(root, "kitty");
   const pi = join(root, "pi");
@@ -203,6 +201,13 @@ test("a Linux dashboard launches a fresh Pi in its Kitty window", { skip: proces
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
+  return { root, argsFile, kitty, pi, env };
+}
+
+test("a Linux dashboard launches a fresh Pi in its Kitty window", { skip: process.platform !== "linux" }, async (t) => {
+  const { root, argsFile, kitty, pi, env } = await fakeKitty(t);
+  const cwd = join(root, "new project's workspace");
+  await mkdir(cwd);
   const f = fixture(t, { getAgentDir: async () => root, listSessions: async () => [] });
   f.ctx.sessionManager.getCwd = () => cwd;
   await f.run("dashboard");
@@ -232,6 +237,47 @@ test("a Linux dashboard launches a fresh Pi in its Kitty window", { skip: proces
   const failure = await unconfirmed.json();
   assert.match(failure.error, /Could not confirm the Kitty launch/);
   assert.equal(failure.command, undefined, "do not suggest another launch when Kitty may already have started Pi");
+});
+
+test("the Linux explorer offers clone in Kitty and forks the saved live chat", { skip: process.platform !== "linux" }, async (t) => {
+  const { root, argsFile, kitty, pi, env } = await fakeKitty(t);
+  const path = join(root, "chat's $(literal).jsonl");
+  const peerPath = join(root, "peer.jsonl");
+  await writeFile(path, "saved transcript");
+  await writeFile(peerPath, "other saved transcript");
+  const f = fixture(t, { getAgentDir: async () => root, listSessions: async () => [
+    { id: "session-1", cwd: root, path }, { id: "peer", cwd: root, path: peerPath },
+  ] });
+  f.ctx.sessionManager.getCwd = () => root;
+  f.ctx.sessionManager.getSessionFile = () => path;
+  const connect = async () => {
+    await f.run();
+    const url = openedUrl(f.notices);
+    const headers = { Authorization: `Bearer ${url.hash.slice(1)}`, Origin: url.origin, "Content-Type": "application/json" };
+    return {
+      catalog: await (await fetch(`${url.origin}/api/sessions`, { headers })).json(),
+      clone: (id) => fetch(`${url.origin}/api/session/clone`, { method: "POST", headers, body: JSON.stringify({ id }) }),
+    };
+  };
+  const { catalog, clone } = await connect();
+  assert.equal(catalog.current.canClone, true);
+  assert.equal(catalog.canOpen, undefined, "clone does not enable Resume in browser");
+  const launched = await clone("session-1");
+  assert.equal(launched.status, 202, await launched.text());
+  assert.deepEqual((await readFile(argsFile, "utf8")).trimEnd().split("\n"), ["@", "--to", env.KITTY_LISTEN_ON, "--use-password", "never",
+    "launch", "--type=tab", "--match", "window_id:27", "--cwd", root, "--env", `PATH=${root}`, "--env", `PI_CODING_AGENT_DIR=${root}`,
+    "--env", `${AUTO_CHAT_SESSION}=fork`, "--", pi, "--fork", path, "--extension", fileURLToPath(new URL("../src/index.ts", import.meta.url))]);
+  assert.equal(await readFile(path, "utf8"), "saved transcript");
+
+  await writeFile(kitty, '#!/bin/sh\necho "disallowed by remote_control_password" >&2\nexit 1\n');
+  const denied = await clone("peer");
+  assert.equal(denied.status, 400);
+  assert.match((await denied.json()).error, /launch permission/);
+
+  delete process.env.KITTY_LISTEN_ON;
+  const unsupported = await connect();
+  assert.equal(unsupported.catalog.current.canClone, undefined);
+  assert.equal((await unsupported.clone("session-1")).status, 404);
 });
 
 test("a fresh Pi launched by the dashboard opens an empty browser chat on startup", async (t) => {

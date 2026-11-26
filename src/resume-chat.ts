@@ -92,13 +92,20 @@ async function launchInKitty(cwd: string, autoChat: string, extension: string, a
       "--", pi, ...sessionArgs, "--extension", extension], { timeout: 10_000 });
   } catch (error) {
     if (error.code === "ENOENT" || /remote control is disabled|disallowed by remote_control_password|No matching tabs/i.test(error.stderr ?? "")) return false;
-    throw new Error("Could not confirm the Kitty launch. Check the dashboard’s Kitty window before trying again.");
+    throw new Error("Could not confirm the Kitty launch. Check your Kitty window before trying again.");
   }
 }
 
 export async function resumeInKitty(session: { id: string; cwd: string; path: string }, extension: string, agentDir: string, target: KittyTarget) {
   await validateSavedChat(session);
   return launchInKitty(session.cwd, session.id, extension, agentDir, target, ["--session", session.path]);
+}
+
+export async function forkChatInKitty(session: { cwd: string; path: string }, extension: string, agentDir: string, target: KittyTarget) {
+  await validateSavedChat(session);
+  if (await launchInKitty(session.cwd, "fork", extension, agentDir, target, ["--fork", session.path]) === false) {
+    throw new Error("Could not clone the chat in Kitty. Check its local socket and launch permission.");
+  }
 }
 
 export async function startNewChatInKitty(cwd: string, extension: string, agentDir: string, target: KittyTarget) {

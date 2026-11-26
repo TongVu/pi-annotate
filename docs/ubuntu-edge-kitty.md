@@ -99,7 +99,7 @@ Use a disposable project/session. The user operates Edge; an agent can check con
 ### Expected differences, not installation failures
 
 - **Dashboard logo:** on Linux it can open another dashboard tab instead of selecting an existing one.
-- In the explorer, one-click launch and clone remain Mac-only.
+- In the explorer, **Resume in browser** remains Mac-only. To clone a saved live chat from a Pi running directly in Kitty, hover or focus its row and click **🧬**. This uses the same private socket and launch permission as the dashboard.
 
 Report what passed on this desktop, what required a manual step, and what remains untested. Don't relax browser security as part of installation.
 

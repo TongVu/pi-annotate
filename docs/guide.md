@@ -160,6 +160,7 @@ a name to preview its full text.
 Green dots mark sessions with an open `/chat` tab under the same Pi agent setup;
 inactive, read-only sessions have no status dot. Only the session attached to
 this tab can receive messages here; use the original tab to send to another green chat.
+On macOS and [supported Linux Kitty setups](ubuntu-edge-kitty.md), hover or focus a saved live chat’s row and click **🧬** to fork it into a new Pi session and browser tab.
 On macOS, open an inactive session and click **Resume in browser**. If Pi is already
 running that session with the current extension loaded, it opens a browser tab
 from the existing process, so any in-progress turn keeps running. Otherwise it
