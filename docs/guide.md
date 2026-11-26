@@ -22,8 +22,9 @@ terminal modes work.
    dot to open the list; with a keyboard, focus a dot and press **Right Arrow**
    to enter the list.
 3. Press **Enter** or click **💬** to send an ordinary message.
-   **Shift+Enter** inserts a newline. Click **Send questions** to submit the
-   annotation batch. You can paste a screenshot into an annotation's comment
+   In the annotation dialog, **Enter** adds the question to the draft without
+   sending it. **Shift+Enter** inserts a newline in either field. Click
+   **Send questions** to submit the annotation batch. You can paste a screenshot into an annotation's comment
    field or attach images with its clipboard button. Each question keeps its own
    images. These are separate sends: each leaves the other draft untouched and
    clears its own draft only after Pi accepts it. The terminal draft is untouched.

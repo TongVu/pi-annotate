@@ -1623,8 +1623,17 @@ test("live annotations can paste and pick images, edit them, and retry without t
   Object.defineProperty(input, "files", { value: [picture("picked.png")] });
   input.dispatchEvent(new w.Event("change"));
   await picked;
-  f.add("What is this?");
+  const comment = f.$("comment");
+  comment.value = "What is this?";
+  const enter = (modifiers = {}) => comment.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Enter", cancelable: true, ...modifiers }));
+  assert.equal(enter({ shiftKey: true }), true, "Shift+Enter remains available for newlines");
+  assert.equal(enter({ isComposing: true }), true, "Enter can finish composing text without saving");
+  assert.equal(enter({ repeat: true }), false, "holding Enter must not save a draft");
+  assert.equal(f.$("annotations").children.length, 0);
+  assert.equal(enter(), false);
+  assert.equal(f.$("comment-dialog").open, false);
   assert.equal(f.$("annotations").querySelectorAll("img").length, 2);
+  assert.equal(posts.length, 0, "saving the annotation does not send the batch");
   f.$("annotations").querySelector('[aria-label="Edit annotation"]').click();
   list.querySelector('[aria-label="Remove picked.png"]').click();
   f.add("See the image.");

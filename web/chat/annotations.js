@@ -6,6 +6,8 @@ export function mountAnnotationDraft(window, { sender, attachmentUi, status, set
   const dialog = $("comment-dialog");
   const selectionAction = $("annotate-selection");
   const comment = $("comment");
+  const form = $("comment-form");
+  const save = $("save-annotation");
   const send = $("send");
   let annotations = [];
   let annotationImagesSupported = false;
@@ -18,7 +20,7 @@ export function mountAnnotationDraft(window, { sender, attachmentUi, status, set
   function updateControls() {
     send.disabled = !annotations.length || !sender.canSend({ annotations });
     const locked = sender.sending || readingAnnotationFiles;
-    $("comment-attach").disabled = $("save-annotation").disabled = locked;
+    $("comment-attach").disabled = save.disabled = locked;
     for (const button of $("comment-attachments").querySelectorAll("button")) button.disabled = locked;
     for (const button of $("annotations").querySelectorAll(".annotation-action")) button.disabled = sender.sending;
   }
@@ -207,7 +209,12 @@ export function mountAnnotationDraft(window, { sender, attachmentUi, status, set
     event.preventDefault();
     void attachAnnotationImages(images);
   });
-  $("comment-form").addEventListener("submit", (event) => {
+  comment.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || event.isComposing || event.keyCode === 229) return;
+    event.preventDefault();
+    if (!event.repeat && !save.disabled) form.requestSubmit(save);
+  });
+  form.addEventListener("submit", (event) => {
     event.preventDefault();
     if (!pending || !comment.value.trim() || readingAnnotationFiles || sender.sending) return;
     const annotation = { ...pending, comment: comment.value.trim() };
