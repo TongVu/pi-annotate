@@ -24,22 +24,32 @@ run `/reload` first. Keep the Pi terminal open while you use the browser.
 
 The screenshots below use fictional projects and conversations.
 
-### Chat in the browser and ask about a passage
-
-Read Markdown replies and code blocks, jump between turns, and send screenshots
-or text files. To ask about a specific passage, select it and click **Add
-annotation**. You can send several questions together, each with its quote. Keep
-a checklist or other reference material in the **Markdown note**, which saves
-locally without sending it to Pi.
-
-![Trail Atlas browser chat with a Markdown checklist and a follow-up question quoting a line from Pi’s reply](docs/screenshots/browser-chat.png)
-
 ### Find chats by project
 
-Use the dashboard to find saved sessions, bookmark chats you want to return to,
-and see which connected chats are working or ready for another message.
+Filter sessions by status, bookmark chats, and reopen or resume them from the
+Dashboard. Pixel pets reflect each session’s status: they type while Pi works,
+celebrate when it’s ready, and doze when the chat is disconnected and idle.
 
-![Dashboard showing six sessions grouped under Trail Atlas and Ember Notes, with bookmarks and session statuses](docs/screenshots/dashboard.png)
+![Dashboard showing six sessions across Trail Atlas and Ember Notes, with status dots beside titles and pixel pets reacting to session status](docs/screenshots/dashboard.png)
+
+### Find an earlier prompt and branch from a reply
+
+Hover over the message dots to preview the prompts you sent. Click a dot or a
+prompt in the list to jump back to it. Use **Branch from here** beneath a reply
+to start a named subchat with the conversation up to that point, leaving the
+original chat unchanged.
+
+![Trail Atlas chat with the prompt list open beside the message dots and the Branch from here tooltip beneath Pi’s reply](docs/screenshots/chat-navigation.png)
+
+### Chat in the browser and ask about a passage
+
+Read Markdown replies and code blocks, and send screenshots or text files.
+To ask about a specific passage, select it and click **Add annotation**. You can
+send several questions together, each with its quote. Keep a checklist or other
+reference material in the **Markdown note**, which saves locally without
+sending it to Pi.
+
+![Trail Atlas browser chat with a Markdown checklist and a follow-up question quoting a line from Pi’s reply](docs/screenshots/browser-chat.png)
 
 ## More details
 
