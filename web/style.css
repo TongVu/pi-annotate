@@ -154,10 +154,21 @@ textarea { width: 100%; resize: vertical; background: var(--bg); color: var(--te
 #open-dashboard:not(:disabled):is(:hover, :focus-visible) { background: var(--border); }
 .session-title-pill .panel-toggle { border-color: transparent; color: var(--muted); }
 .session-title-pill .panel-toggle:is(:hover, :focus-visible, [aria-expanded="true"]) { background: var(--border); color: var(--text); }
-#rename-session-input { width: 100%; margin: 0 0 18px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
-#rename-session-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-#rename-session-status { margin: -8px 0 12px; color: #a12d20; font-size: 13px; }
-#rename-session-status:empty { display: none; }
+#rename-session-input, #branch-chat-name { width: 100%; margin: 0 0 18px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
+#rename-session-input:focus-visible, #branch-chat-name:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#rename-session-status, #branch-chat-status { margin: -8px 0 12px; color: #a12d20; font-size: 13px; }
+#rename-session-status:empty, #branch-chat-status:empty { display: none; }
+#branch-chat-dialog { width: min(400px, calc(100vw - 32px)); }
+#branch-chat-name { margin: 4px 0 0; }
+#branch-chat-description, #branch-chat-keys { margin: 8px 0 0; color: var(--muted); font-size: 13px; }
+#branch-chat-status { margin: 8px 0 0; }
+#branch-chat-status:not(.error) { color: var(--muted); }
+#subchat-origin { position: sticky; top: 0; z-index: 1; padding: 4px 0 8px; background: var(--bg); }
+#subchat-parent { max-width: 100%; text-align: left; overflow-wrap: anywhere; }
+#response .subchat-divider { display: flex; align-items: center; gap: 12px; margin: 12px 0; color: var(--muted); font-size: 13px; }
+.subchat-divider::before, .subchat-divider::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
+.reply-branch { display: grid; place-items: center; width: 32px; height: 32px; margin-inline-start: auto; padding: 0; border: 0; background: transparent; color: var(--muted); }
+.reply-branch:is(:hover, :focus-visible) { background: var(--panel); color: var(--text); }
 .chat-turn { padding: 14px 0; }
 .chat-turn h2 { color: var(--muted); font-size: 13px; margin: 0 0 6px; }
 .user-turn { position: relative; width: fit-content; max-width: min(85%, 64ch); margin: 8px 0 20px auto; padding: 8px 14px; border: 2px solid var(--muted); border-radius: 16px 16px 0 16px; line-height: 1.55; }
@@ -267,7 +278,15 @@ textarea { width: 100%; resize: vertical; background: var(--bg); color: var(--te
 .session-row:hover .session-open, .session-row .session-open[aria-current] { background: var(--panel); border-color: var(--border); }
 .session-name { display: -webkit-box; flex: 1 1 auto; min-width: 0; max-height: 2.5em; overflow: hidden; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.25; text-overflow: ellipsis; }
 .session-row:has(.session-copy) .session-name, .session-row:has(.session-live-actions) .session-name { padding-inline-end: 32px; }
-.session-tree-children { margin: 4px 0 4px 12px; padding-inline-start: 8px; border-inline-start: 1px solid var(--border); }
+.session-tree-node { position: relative; }
+.session-tree-children { --branch-indent: 12px; margin-inline-start: 5px; padding-inline-start: var(--branch-indent); }
+.session-tree-children > .session-tree-node:not(:last-child)::before,
+.session-tree-children > .session-tree-node > .session-row::before {
+  content: ""; box-sizing: border-box; position: absolute; inset-block-start: 0; inset-inline-start: calc(-1 * var(--branch-indent)); pointer-events: none;
+}
+.session-tree-children > .session-tree-node:not(:last-child)::before { inset-block-end: 0; border-inline-start: 1px solid var(--border); }
+.session-tree-children > .session-tree-node > .session-row::before { inset-block-end: 50%; inline-size: var(--branch-indent); border-block-end: 1px solid var(--border); }
+.session-tree-children > .session-tree-node:last-child > .session-row::before { border-inline-start: 1px solid var(--border); border-end-start-radius: 5px; }
 .session-indicator { flex: none; width: 8px; height: 8px; border-radius: 50%; }
 .session-indicator.live { background: var(--session-live, #77bda7); }
 .session-live-actions { position: absolute; inset-block-start: 50%; inset-inline-end: 1px; transform: translateY(-50%); display: grid; place-items: center; width: 30px; height: 30px; }

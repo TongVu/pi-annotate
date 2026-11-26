@@ -86,6 +86,98 @@ test("Pi reload picks up changed local helper modules in the same process for /c
   assert.match((await responseState.json()).messages[0].text, /Reload marker/);
 });
 
+test("Pi branches a saved reply into a named child without replacing the parent chat", {
+  skip: !loaderPath || process.platform !== "linux" ? "Requires the installed Pi loader and Linux for the Kitty launch fixture" : false,
+}, async (t) => {
+  const { loadExtensions } = await import(pathToFileURL(loaderPath).href);
+  const { SessionManager } = await import(new URL("../../index.js", pathToFileURL(loaderPath)));
+  const { fauxAssistantMessage } = await import(new URL("../../../../pi-ai/dist/index.js", pathToFileURL(loaderPath)));
+  if (!fauxAssistantMessage) return t.skip("Requires Pi's faux provider");
+  const cwd = await mkdtemp(join(tmpdir(), "pi-chat-branch-"));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  const launchLog = join(cwd, "kitty-argv");
+  await writeFile(join(cwd, "kitty"), `#!/bin/sh\nprintf '%s\\n' "$@" > "$TEST_LAUNCH_LOG"\n`, { mode: 0o755 });
+  await writeFile(join(cwd, "pi"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  const env = { PI_CODING_AGENT_DIR: cwd, PI_MANAGED_INSTALL_ROOT: undefined, KITTY_WINDOW_ID: "27", KITTY_LISTEN_ON: `unix:${join(cwd, "socket")}`,
+    KITTY_CONFIG_DIRECTORY: cwd, PATH: cwd, TMUX: undefined, STY: undefined, SSH_CONNECTION: undefined, TEST_LAUNCH_LOG: launchLog };
+  for (const [key, value] of Object.entries(env)) {
+    const previous = process.env[key];
+    const set = (v) => { if (v === undefined) delete process.env[key]; else process.env[key] = v; };
+    set(value);
+    t.after(() => set(previous));
+  }
+  const parent = SessionManager.create(cwd, join(cwd, "sessions-store"));
+  parent.appendSessionInfo("Stage Aura changes");
+  const userId = parent.appendMessage({ role: "user", content: "What broke?", timestamp: Date.now() });
+  const firstReply = parent.appendMessage(fauxAssistantMessage("The compile error comes from a missing import."));
+  const abandoned = parent.appendMessage(fauxAssistantMessage("This reply belongs to an abandoned path."));
+  parent.branch(firstReply);
+  parent.appendMessage({ role: "user", content: "What about the tests?", timestamp: Date.now() });
+  const latest = parent.appendMessage(fauxAssistantMessage("Later reply stays in the parent."));
+  const parentPath = parent.getSessionFile();
+  const parentContents = await readFile(parentPath, "utf8");
+  const path = fileURLToPath(new URL("../src/index.ts", import.meta.url));
+  const loaded = await loadExtensions([path], cwd);
+  assert.deepEqual(loaded.errors, []);
+  const extension = loaded.extensions[0];
+  t.after(async () => { for (const close of extension.handlers.get("session_shutdown")) await close({}, {}); });
+  async function connect(sessionManager) {
+    let link;
+    await extension.commands.get("chat").handler("link", {
+      mode: "tui", isIdle: () => true, getContextUsage: () => undefined, sessionManager,
+      ui: { notify: (message) => { if (message.includes("http://127.0.0.1:")) link = message.split(": ").at(-1); } },
+    });
+    const url = new URL(link);
+    const headers = { Authorization: `Bearer ${url.hash.slice(1)}`, Origin: url.origin, "Content-Type": "application/json" };
+    return {
+      get: async (path) => {
+        const response = await fetch(url.origin + path, { headers });
+        assert.equal(response.status, 200, await response.clone().text());
+        return response.json();
+      },
+      branch: (replyId, name, extraHeaders = {}) => fetch(`${url.origin}/api/session/branch`, {
+        method: "POST", headers: { ...headers, ...extraHeaders }, body: JSON.stringify({ replyId, name }),
+      }),
+    };
+  }
+  const live = await connect(parent);
+  const initial = await live.get("/api/response");
+  assert.equal(initial.messages.find(({ id }) => id === firstReply).canBranch, true);
+  assert.equal((await live.branch(firstReply, "Child", { Authorization: "" })).status, 401);
+  assert.equal((await live.branch(firstReply, "Child", { Origin: "https://example.com" })).status, 403);
+  assert.equal((await live.branch(userId, "Child")).status, 404);
+  assert.equal((await live.branch(abandoned, "Child")).status, 404);
+  assert.equal((await live.branch(firstReply, " ")).status, 400);
+  const created = await live.branch(firstReply, "Fix Aura compile error");
+  assert.equal(created.status, 202, await created.clone().text());
+  assert.deepEqual(await created.json(), { launched: true });
+  assert.equal(await readFile(parentPath, "utf8"), parentContents);
+  assert.equal(parent.getLeafId(), latest);
+  assert.deepEqual(await live.get("/api/response"), initial, "the parent remains connected and unchanged");
+  const { sessions } = await live.get("/api/sessions");
+  assert.deepEqual(sessions.map(({ parentId, name }) => ({ parentId, name })), [{ parentId: parent.getSessionId(), name: "Fix Aura compile error" }]);
+  const launchArgs = (await readFile(launchLog, "utf8")).trimEnd().split("\n");
+  const childPath = launchArgs[launchArgs.indexOf("--session") + 1];
+  assert.ok(launchArgs.includes("--type=tab"));
+  assert.ok(launchArgs.includes(`${AUTO_CHAT_SESSION}=${sessions[0].id}`));
+  const child = SessionManager.open(childPath);
+  assert.notEqual(child.getSessionId(), parent.getSessionId());
+  assert.equal(child.getHeader().parentSession, parentPath);
+  assert.deepEqual(child.getBranch().filter(({ type }) => type === "message").map(({ id }) => id), [userId, firstReply]);
+  const childLive = await connect(child);
+  const childState = await childLive.get("/api/response");
+  assert.equal(childState.sessionName, "Fix Aura compile error");
+  assert.deepEqual(childState.subchatOrigin, { replyId: firstReply, parentName: "Stage Aura changes" });
+  assert.equal((await childLive.get("/api/sessions")).current.parentId, parent.getSessionId());
+
+  delete process.env.KITTY_LISTEN_ON;
+  const noLauncher = await connect(parent);
+  const manual = await noLauncher.branch(latest, "Review staged changes");
+  assert.equal(manual.status, 200, await manual.clone().text());
+  assert.match((await manual.json()).command, /^cd -- .* && pi --session /);
+  assert.ok((await noLauncher.get("/api/sessions")).sessions.some(({ name }) => name === "Review staged changes"));
+});
+
 test("Pi --dashboard opens the dashboard at startup without advertising the launcher as a chat", {
   skip: !loaderPath && "Requires an installed Pi loader",
   timeout: 10000,

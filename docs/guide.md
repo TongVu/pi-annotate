@@ -148,8 +148,18 @@ server too.
 Click the right-panel icon in the centered chat controls to open the explorer.
 To create a session, use **Create new chat** on the dashboard. The explorer groups sessions by
 project directory, with forked sessions nested under their Pi parent session
-when that parent is available. Click a project heading to collapse or expand its
-sessions. Type a session name or directory to filter the list; matches appear
+when that parent is available. On a completed assistant reply in a saved live
+chat, click the **Branch from here** icon, enter a name, and press **Enter** to
+create it (**Esc** to cancel). It inherits the selected reply and earlier
+conversation, not later turns. The parent and its draft stay
+open. Pi starts a separate Terminal session and browser tab on macOS or on Linux
+with Kitty launch configured. If no launcher is available, use the displayed
+resume command and run `/chat` there. The subchat marks its starting point and
+links to the originating reply in the parent's read-only transcript. Both
+sessions still use the same checkout. Dashboard cards remain flat.
+
+Click a project heading to collapse or expand its sessions. Type a session name
+or directory to filter the list; matches appear
 even in collapsed projects. Use **Collapse all** or **Expand all** to change
 every folder. The pin button clears the filter if needed, opens only the current
 chat's project folder, and scrolls that chat into view. Unnamed saved sessions

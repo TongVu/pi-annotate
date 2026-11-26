@@ -2,6 +2,7 @@ export function mountExplorer(window, { api, status, setTooltip, hideMessagePrev
   const { document, navigator, URLSearchParams, ClipboardItem, Blob } = window;
   const $ = (id) => document.getElementById(id);
   let catalog;
+  let loadingSessions;
   let catalogProblem = "";
   let openingSavedChat;
   let activeSessions = [];
@@ -35,15 +36,19 @@ export function mountExplorer(window, { api, status, setTooltip, hideMessagePrev
       status("Resume command copied.");
     } catch {
       try {
-        const field = $("resume-command");
-        field.value = await command;
-        $("resume-command-dialog").showModal();
-        field.focus();
-        field.select();
+        showResumeCommand(await command);
       } catch (error) {
         status(error.message || "Could not get this session’s resume command.", true);
       }
     }
+  }
+
+  function showResumeCommand(command) {
+    const field = $("resume-command");
+    field.value = command;
+    $("resume-command-dialog").showModal();
+    field.focus();
+    field.select();
   }
 
   $("close-resume-command").addEventListener("click", () => $("resume-command-dialog").close());
@@ -210,12 +215,15 @@ export function mountExplorer(window, { api, status, setTooltip, hideMessagePrev
       else node.group.roots.push(node);
     }
     const appendNode = (container, node) => {
-      container.append(node.row);
+      const branch = document.createElement("div");
+      branch.className = "session-tree-node";
+      branch.append(node.row);
+      container.append(branch);
       if (!node.children.length) return;
       const children = document.createElement("div");
       children.className = "session-tree-children";
       node.children.forEach((child) => appendNode(children, child));
-      container.append(children);
+      branch.append(children);
     };
     for (const group of groups.values()) group.roots.forEach((node) => appendNode(group.element, node));
     if (!refreshSessions.disabled) $("explorer-status").textContent = catalogProblem || (groups.size ? "" : "No matching chats.");
@@ -235,8 +243,11 @@ export function mountExplorer(window, { api, status, setTooltip, hideMessagePrev
     finally { activityInFlight = false; }
   }
 
-  async function loadSessions() {
-    if (refreshSessions.disabled) return;
+  function loadSessions() {
+    return loadingSessions ??= fetchSessions().finally(() => { loadingSessions = undefined; });
+  }
+
+  async function fetchSessions() {
     refreshSessions.disabled = true;
     $("explorer-status").textContent = "Loading saved chats…";
     try {
@@ -309,7 +320,7 @@ export function mountExplorer(window, { api, status, setTooltip, hideMessagePrev
     onBackToLive();
   }
 
-  async function showSavedChat({ id, name, cwd }) {
+  async function showSavedChat({ id, name, cwd }, replyId) {
     const selection = ++savedSelection;
     if (!savedSessionId) transcript.rememberLiveScroll();
     savedSessionId = id;
@@ -323,8 +334,9 @@ export function mountExplorer(window, { api, status, setTooltip, hideMessagePrev
     try {
       const { messages } = await api(`/api/session?${new URLSearchParams({ id })}`);
       if (selection !== savedSelection) return;
-      transcript.renderSaved(messages, id);
-      $("saved-status").textContent = !messages.length ? "No visible messages in this saved chat."
+      const foundReply = transcript.renderSaved(messages, id, replyId);
+      $("saved-status").textContent = replyId && !foundReply ? "The original reply is no longer on the parent’s active branch."
+        : !messages.length ? "No visible messages in this saved chat."
         : openSavedButton.hidden ? "To send a message, resume this chat in Pi from its original directory." : "";
     } catch (error) {
       if (selection === savedSelection) $("saved-status").textContent = error.message || "Could not read this chat.";
@@ -363,6 +375,14 @@ export function mountExplorer(window, { api, status, setTooltip, hideMessagePrev
 
   return {
     isSaved: () => savedSessionId !== undefined,
+    refreshSessions: loadSessions,
+    showResumeCommand,
+    async showParent(replyId) {
+      await loadSessions();
+      const parent = catalog?.sessions.find(({ id }) => id === catalog.current.parentId);
+      if (parent) await showSavedChat(parent, replyId);
+      else status(catalogProblem || "The parent chat is not available in the explorer.", true);
+    },
     setLiveSessionName(name) {
       if (catalog && catalog.current.name !== name) {
         catalog.current.name = name;

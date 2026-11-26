@@ -44,7 +44,7 @@ function readBody(req, limit) {
   });
 }
 
-/** Loopback only; no direct model calls, session-file writes, cookies, or CORS. */
+/** Loopback only; session operations are delegated to Pi, with no cookies or CORS. */
 export async function startChatServer({ chat, onClose, isCurrent = () => true, ttlMs = 30 * 60_000 }) {
   const live = createLiveChat(chat);
   const presence = chat.presence;
@@ -155,7 +155,8 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
       const saveNoteAttachments = live && req.url === "/api/note/attachments";
       const openSession = explorer && req.url === "/api/session/open";
       const cloneSession = explorer && req.url === "/api/session/clone";
-      if (req.method === "POST" && (disconnect || renameSession || compactSession || stopReply || modelSettings || localAction || renderNote || saveNote || saveNoteAttachments || openSession || cloneSession || req.url === "/api/chat")) {
+      const branchSession = req.url === "/api/session/branch";
+      if (req.method === "POST" && (branchSession || disconnect || renameSession || compactSession || stopReply || modelSettings || localAction || renderNote || saveNote || saveNoteAttachments || openSession || cloneSession || req.url === "/api/chat")) {
         if (!isSameOriginJson(req.headers, origin)) {
           reply(403, { error: "Expected a same-origin JSON request." });
           return;
@@ -172,7 +173,7 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
           reply(200, { ok: true });
           return;
         }
-        const raw = await readBody(req, renderNote || saveNote ? NOTE_BODY_LIMIT : openSession || renameSession || compactSession || stopReply || modelSettings || localAction || cloneSession ? 4096 : CHAT_BODY_LIMIT);
+        const raw = await readBody(req, renderNote || saveNote ? NOTE_BODY_LIMIT : openSession || renameSession || compactSession || stopReply || modelSettings || localAction || cloneSession || branchSession ? 4096 : CHAT_BODY_LIMIT);
         const body = JSON.parse(raw.toString("utf8"));
         if (modelSettings) {
           if (!body || typeof body !== "object" || Object.keys(body).length !== 1 ||
@@ -236,6 +237,10 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
         }
         if (cloneSession) {
           if (checkCurrent()) await explorer.cloneSession(body?.id, reply, checkCurrent);
+          return;
+        }
+        if (branchSession) {
+          if (checkCurrent()) await live.branch(body, reply, checkCurrent);
           return;
         }
         if (raw.length > CHAT_BODY_LIMIT) throw new Error("Request is too large.");

@@ -723,6 +723,96 @@ test("clicking the live chat title opens renaming and updates the browser tab", 
   assert.equal(preview(), null);
 });
 
+test("a reply can start a named subchat without changing the parent draft", async (t) => {
+  const submissions = [];
+  const f = await fixture(t, { chatFetch: async (path, body) => {
+    if (path === "/api/session/branch") {
+      submissions.push(body);
+      if (submissions.length === 1) return { ok: false, status: 409, json: async () => ({ error: "Try again." }) };
+      return { ok: true, json: async () => ({ launched: true }) };
+    }
+    if (path === "/api/sessions") return { ok: true, json: async () => ({
+      current: { id: "parent", cwd: "/work", name: "Stage Aura changes" },
+      sessions: [
+        { id: "child", cwd: "/work", name: "Fix Aura compile error", parentId: "parent" },
+        { id: "nested", cwd: "/work", name: "Check the import", parentId: "child" },
+        { id: "sibling", cwd: "/work", name: "Review staged changes", parentId: "parent" },
+      ],
+    }) };
+    if (path === "/api/activity") return { ok: true, json: async () => ({ sessions: [] }) };
+    return { ok: true, json: async () => ({ mode: "chat", protocol: 2, cursor: "later", busy: false, sessionName: "Stage Aura changes", messages: [
+      { id: "target", role: "assistant", canBranch: true, ...renderMarkdown("Fix the missing import.") },
+      { id: "later", role: "assistant", ...renderMarkdown("An intermediate reply without a branch action.") },
+    ] }) };
+  } });
+  const input = f.$("chat-input");
+  input.value = "Unsent draft";
+  input.dispatchEvent(new f.window.Event("input"));
+  const buttons = f.$("response").querySelectorAll('button[aria-label="Branch from here"]');
+  assert.equal(buttons.length, 1);
+  assert.ok(buttons[0].querySelector('svg[aria-hidden="true"]'));
+  assert.equal(buttons[0].dataset.tooltip, "Branch from here");
+  buttons[0].click();
+  const dialog = f.$("branch-chat-dialog");
+  const tryCancel = () => dialog.dispatchEvent(new f.window.Event("cancel", { cancelable: true }));
+  assert.equal(dialog.open, true);
+  assert.equal(dialog.querySelector("button"), null);
+  assert.equal(dialog.querySelectorAll("input").length, 1, "Enter implicitly submits a single-input form");
+  assert.equal(f.window.document.activeElement, f.$("branch-chat-name"));
+  assert.equal(tryCancel(), true, "native Escape dismissal is allowed while idle");
+  f.$("branch-chat-name").value = " Fix Aura compile error ";
+  const submit = () => f.$("branch-chat-form").dispatchEvent(new f.window.Event("submit", { cancelable: true }));
+  submit();
+  submit();
+  assert.equal(tryCancel(), false, "keep the dialog open while the create request is in flight");
+  await tick();
+  assert.equal(f.$("branch-chat-status").textContent, "Try again.");
+  assert.equal(f.$("branch-chat-dialog").open, true);
+  submit();
+  await tick();
+  assert.equal(f.$("branch-chat-dialog").open, false);
+  assert.deepEqual(submissions, [{ replyId: "target", name: "Fix Aura compile error" }, { replyId: "target", name: "Fix Aura compile error" }]);
+  const parentNode = f.$("session-list").querySelector(".session-tree-node");
+  assert.equal(parentNode.querySelector(":scope > .session-row .session-open").textContent, "Stage Aura changes");
+  const branches = parentNode.querySelector(":scope > .session-tree-children");
+  assert.deepEqual([...branches.children].map((node) => node.querySelector(":scope > .session-row .session-open").textContent),
+    ["Fix Aura compile error", "Review staged changes"]);
+  assert.equal(branches.firstElementChild.querySelector(":scope > .session-tree-children .session-open").textContent, "Check the import");
+  assert.equal(f.$("session-title-text").textContent, "Stage Aura changes");
+  assert.equal(input.value, "Unsent draft");
+});
+
+test("a subchat marks its fork point and opens the original reply in the parent transcript", async (t) => {
+  const target = { id: "target", role: "assistant", ...renderMarkdown("Original reply") };
+  const followup = { id: "followup", role: "user", ...renderMarkdown("Subchat follow-up") };
+  const f = await fixture(t, { chatFetch: async (path) => {
+    if (path === "/api/sessions") return { ok: true, json: async () => ({
+      current: { id: "child", cwd: "/work", parentId: "parent" },
+      sessions: [{ id: "parent", cwd: "/work", name: "Stage Aura changes" }],
+    }) };
+    if (path === "/api/session?id=parent") return { ok: true, json: async () => ({ messages: [target,
+      { id: "later", role: "assistant", ...renderMarkdown("Later parent reply") },
+    ] }) };
+    return { ok: true, json: async () => ({ mode: "chat", protocol: 2, sessionName: "Fix Aura compile error", cursor: "followup", busy: false,
+      messages: [target, followup], subchatOrigin: { replyId: "target", parentName: "Stage Aura changes" },
+    }) };
+  } });
+  const divider = f.$("response").querySelector(".subchat-divider");
+  assert.equal(divider.textContent, "Subchat starts here");
+  assert.equal(divider.previousElementSibling.dataset.entryId, "target");
+  assert.equal(divider.nextElementSibling.dataset.entryId, "followup");
+  assert.match(f.$("subchat-parent").textContent, /Branched from: Stage Aura changes/);
+  f.$("subchat-parent").click();
+  await tick();
+  assert.equal(f.$("saved-title").textContent, "Stage Aura changes");
+  assert.equal(f.window.document.activeElement.dataset.entryId, "target");
+  assert.match(f.$("saved-response").textContent, /Later parent reply/);
+  assert.equal(f.$("saved-response").querySelector(".reply-branch"), null);
+  f.$("back-to-live").click();
+  assert.equal(f.$("saved-conversation").hidden, true);
+  assert.equal(f.$("response").querySelector(".subchat-divider"), divider);
+});
+
 test("explorer groups chat branches and filters chats, then opens a saved transcript without losing the live draft", async (t) => {
   const calls = [];
   const longTitle = "Renovate updates for the important project with an extremely descriptive title";

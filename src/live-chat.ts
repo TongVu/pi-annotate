@@ -2,13 +2,25 @@ import { createHash } from "node:crypto";
 import { formatChatAnnotations } from "./annotations.ts";
 import { annotationImagesAt, INLINE_TEXT_LIMIT, inlineAttachmentBlocks, parseAttachments, saveChatAttachments } from "./chat-attachments.ts";
 import { renderChatEntry, readChatImage } from "./chat-transcript.ts";
+import { isBranchableReply, subchatOrigin } from "./session-explorer.ts";
 
-export function createLiveChat({ noteStore, attachmentDir, getSessionId, getSessionName, setSessionName, getBranch, isIdle, getContextUsage, getModelSettings, setModelSettings, onCompact, getStoppableRequestId, onStop, onSend }) {
+function validateSessionName(name) {
+  if (typeof name !== "string" || !name.trim() || name.trim().length > 100 || /[\u0000-\u001f\u007f]/.test(name)) {
+    throw new Error("Choose a chat name between 1 and 100 characters without control characters.");
+  }
+  return name.trim();
+}
+
+export function createLiveChat({ noteStore, attachmentDir, getSessionId, getSessionName, setSessionName, getBranch, onBranch, isIdle, getContextUsage, getModelSettings, setModelSettings, onCompact, getStoppableRequestId, onStop, onSend }) {
   const rendered = new Map();
   const requests = new Map();
   let inFlight = false;
+  let branching = false;
   const render = (entry) => {
-    if (!rendered.has(entry.id)) rendered.set(entry.id, renderChatEntry(entry));
+    if (!rendered.has(entry.id)) {
+      const message = renderChatEntry(entry);
+      rendered.set(entry.id, message && onBranch && isBranchableReply(entry) ? { ...message, canBranch: true } : message);
+    }
     return rendered.get(entry.id);
   };
   const isBusy = () => inFlight || !isIdle();
@@ -38,7 +50,8 @@ export function createLiveChat({ noteStore, attachmentDir, getSessionId, getSess
       }
       const messages = branch.slice(index + 1).map(render).filter(Boolean);
       const state = status(branch);
-      reply(200, { mode: "chat", protocol: 2, annotationImages: true, sessionId: getSessionId?.(), sessionName: getSessionName?.(), cursor: branch.at(-1)?.id ?? null, messages, busy: state === "working", failed: state === "error", stoppableRequestId: stoppableRequestId(), contextUsage: getContextUsage?.(), canCompact: typeof onCompact === "function" && branch.some((entry) => entry.type === "message" && entry.message.role === "user") });
+      const origin = after === null && subchatOrigin(branch, getSessionId?.());
+      reply(200, { ...(origin ? { subchatOrigin: origin } : {}), mode: "chat", protocol: 2, annotationImages: true, sessionId: getSessionId?.(), sessionName: getSessionName?.(), cursor: branch.at(-1)?.id ?? null, messages, busy: state === "working", failed: state === "error", stoppableRequestId: stoppableRequestId(), contextUsage: getContextUsage?.(), canCompact: typeof onCompact === "function" && branch.some((entry) => entry.type === "message" && entry.message.role === "user") });
     },
     async modelSettings(reply, checkCurrent, change?) {
       if (!getModelSettings || (change && !setModelSettings)) {
@@ -92,15 +105,28 @@ export function createLiveChat({ noteStore, attachmentDir, getSessionId, getSess
     saveNoteAttachments(attachments) {
       return noteStore.writeAttachments(noteSessionId(), attachments);
     },
-    rename(name, reply) {
-      if (typeof name !== "string" || !name.trim() || name.trim().length > 100 || /[\u0000-\u001f\u007f]/.test(name)) {
-        throw new Error("Choose a chat name between 1 and 100 characters without control characters.");
+    async branch(body, reply, checkCurrent) {
+      if (!onBranch) return reply(501, { error: "Branching is unavailable for this chat." });
+      if (!body || Object.keys(body).length !== 2 || typeof body.replyId !== "string") throw new Error("Choose a reply to branch from.");
+      const name = validateSessionName(body.name);
+      if (branching) return reply(409, { error: "Pi is already creating a subchat." });
+      if (!getBranch().some((entry) => entry.id === body.replyId && isBranchableReply(entry))) {
+        return reply(404, { error: "That completed reply is not on this chat’s active branch." });
       }
+      branching = true;
+      try {
+        const result = await onBranch(body.replyId, name);
+        if (checkCurrent()) reply(result.launched ? 202 : 200, result);
+      } finally {
+        branching = false;
+      }
+    },
+    rename(name, reply) {
+      const sessionName = validateSessionName(name);
       if (typeof setSessionName !== "function") {
         reply(501, { error: "Renaming this session is unavailable." });
         return;
       }
-      const sessionName = name.trim();
       setSessionName(sessionName);
       reply(200, { sessionName: getSessionName?.() ?? sessionName });
     },

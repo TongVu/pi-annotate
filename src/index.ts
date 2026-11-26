@@ -5,9 +5,9 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { startChatServer } from "./server.ts";
 import { createChatNoteStore } from "./chat-notes.ts";
-import { listPiSessions, readPiSession } from "./session-explorer.ts";
+import { createSubchat, isBranchableReply, listPiSessions, readPiSession } from "./session-explorer.ts";
 import { createChatPresence } from "./chat-presence.ts";
-import { AUTO_CHAT_SESSION, NEW_CHAT_TARGET, forkChatInKitty, forkChatInTerminal, kittyDashboardTarget, resumeInKitty, resumeChatInTerminal, startNewChatInKitty, startNewChatInTerminal } from "./resume-chat.ts";
+import { AUTO_CHAT_SESSION, NEW_CHAT_TARGET, forkChatInKitty, forkChatInTerminal, kittyDashboardTarget, resumeInKitty, resumeChatInTerminal, shellQuote, startNewChatInKitty, startNewChatInTerminal } from "./resume-chat.ts";
 import { registerSessionOwner, requestOwnedChat } from "./session-owner.ts";
 import { focusTerminal } from "./focus-terminal.ts";
 import { listDashboardTabs, startDashboard } from "./dashboard.ts";
@@ -217,6 +217,28 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
               clone: async (session) => forkChatInKitty(session, fileURLToPath(import.meta.url), await getAgentDir(), kitty),
             } : {}),
           },
+          onBranch: chatIdentity().path && (async (replyId: string, name: string) => {
+            const child = await createSubchat(() => {
+              if (!isCurrent() || !ctx.sessionManager.getBranch().some((entry) => entry.id === replyId && isBranchableReply(entry))) return;
+              const parent = chatIdentity();
+              if (parent.path) return { ...parent, path: parent.path, dir: sessionDir };
+            }, replyId, name);
+            try {
+              const extension = fileURLToPath(import.meta.url);
+              if (process.platform === "darwin") {
+                await resumeChatInTerminal(child, extension, await getAgentDir());
+                return { launched: true };
+              }
+              if (kitty && await resumeInKitty(child, extension, await getAgentDir(), kitty) !== false) return { launched: true };
+            } catch (error) {
+              // The launcher may have started Pi before failing. Don't suggest a second launch yet.
+              return { message: `Subchat saved. ${error instanceof Error ? error.message : "Could not confirm the launch."}` };
+            }
+            return {
+              message: "Subchat saved. Run the resume command in Terminal, then type /chat in Pi.",
+              command: `cd -- ${shellQuote(child.cwd)} && pi --session ${shellQuote(child.path)}`,
+            };
+          }),
           getBranch: () => ctx.sessionManager.getBranch(),
           isIdle: () => ctx.isIdle(),
           getContextUsage: () => ctx.getContextUsage(),

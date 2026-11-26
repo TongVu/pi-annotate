@@ -70,7 +70,7 @@
     </div>
     <article id="conversation" aria-label="Assistant response">
       <div class="label" id="conversation-label">ASSISTANT RESPONSE <span>· Rendered Markdown</span></div>
-      <div id="response" tabindex="0"></div>
+      <div id="response" tabindex="0"><div id="subchat-origin" hidden><button id="subchat-parent" type="button" class="secondary"></button></div></div>
       <button id="annotate-selection" type="button" aria-haspopup="dialog" hidden>Add annotation</button>
       <form id="chat-form" hidden>
         <div class="chat-composer">
@@ -189,6 +189,16 @@
       <input id="rename-session-input" type="text" maxlength="100" required autocomplete="off">
       <p id="rename-session-status" role="status"></p>
       <div class="actions"><button id="cancel-rename-session" type="button" class="secondary">Cancel</button><button id="save-session-name" type="submit">Save name</button></div>
+    </form>
+  </dialog>
+  <dialog id="branch-chat-dialog" closedby="any" aria-labelledby="branch-chat-title" aria-describedby="branch-chat-description branch-chat-keys">
+    <form id="branch-chat-form">
+      <h2 id="branch-chat-title">Branch from here</h2>
+      <label for="branch-chat-name">Subchat name</label>
+      <input id="branch-chat-name" type="text" maxlength="100" required autocomplete="off" enterkeyhint="done">
+      <p id="branch-chat-description">Copies the conversation through this reply.</p>
+      <p id="branch-chat-keys"><kbd>Enter</kbd> to create · <kbd>Esc</kbd> to cancel</p>
+      <p id="branch-chat-status" role="status"></p>
     </form>
   </dialog>
   <dialog id="compact-chat-dialog" aria-labelledby="compact-chat-title" aria-describedby="compact-chat-description">

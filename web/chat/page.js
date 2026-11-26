@@ -15,6 +15,13 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   const renameSessionDialog = $("rename-session-dialog");
   const renameSessionInput = $("rename-session-input");
   const saveSessionName = $("save-session-name");
+  const branchDialog = $("branch-chat-dialog");
+  const branchName = $("branch-chat-name");
+  let creatingSubchat = false;
+  const branchStatus = $("branch-chat-status");
+  const parentButton = $("subchat-parent");
+  let branchReplyId;
+  let originReplyId;
   let cursor = null;
   let notes;
   const appTitle = "Pi Chat";
@@ -139,7 +146,12 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     if (data.mode !== "chat" || !Array.isArray(data.messages)) throw new Error("Chat data is unavailable. Reopen from Pi.");
     const sessionName = data.sessionName?.trim();
     updateSessionTitle(sessionName);
-    transcript.appendLive(data.messages, { initial: !cursor });
+    if (data.subchatOrigin) {
+      originReplyId = data.subchatOrigin.replyId;
+      parentButton.textContent = `Branched from: ${data.subchatOrigin.parentName} ↗`;
+      $("subchat-origin").hidden = false;
+    }
+    transcript.appendLive(data.messages, { initial: !cursor, branchReplyId: data.subchatOrigin?.replyId });
     cursor = data.cursor;
     busy = data.busy;
     stoppableRequestId = data.stoppableRequestId;
@@ -197,6 +209,45 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     }
   });
 
+  function openBranchDialog(replyId) {
+    if (!connected) return status("Reopen /chat in Pi before branching.", true);
+    hideMessagePreview();
+    annotations.hideSelectionAction();
+    branchReplyId = replyId;
+    branchName.value = "";
+    branchStatus.textContent = "";
+    branchDialog.showModal();
+    branchName.focus();
+  }
+  branchDialog.addEventListener("cancel", (event) => {
+    if (creatingSubchat) event.preventDefault();
+  });
+  $("branch-chat-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const name = branchName.value.trim();
+    if (creatingSubchat || !branchReplyId || !name || name.length > 100) return;
+    creatingSubchat = true;
+    branchStatus.classList.remove("error");
+    branchStatus.textContent = "Creating subchat…";
+    try {
+      const result = await api("/api/session/branch", { replyId: branchReplyId, name });
+      branchDialog.close();
+      status(result.message || "Pi is opening the subchat in a new tab.");
+      if (result.command) explorer.showResumeCommand(result.command);
+      void explorer.refreshSessions();
+    } catch (error) {
+      branchStatus.textContent = error.message || "Could not create the subchat.";
+      branchStatus.classList.add("error");
+    } finally {
+      creatingSubchat = false;
+    }
+  });
+  parentButton.addEventListener("click", async () => {
+    parentButton.disabled = true;
+    try { await explorer.showParent(originReplyId); }
+    finally { parentButton.disabled = false; }
+  });
+
   const dashboardButton = $("open-dashboard");
   dashboardButton.addEventListener("click", async () => {
     hideMessagePreview();
@@ -225,8 +276,8 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   const annotations = mountAnnotationDraft(window, { sender, attachmentUi, status, setTooltip, isViewingLive });
   const transcript = mountTranscript(window, {
     fetchImage: (query) => window.fetch(`/api/image?${query}`, { headers: { Authorization: `Bearer ${token}` } }),
-    isViewingLive, isCommentOpen: annotations.isDialogOpen,
-    showImagePreview: attachmentUi.showImagePreview, status,
+    isViewingLive, isCommentOpen: () => annotations.isDialogOpen() || branchDialog.open,
+    showImagePreview: attachmentUi.showImagePreview, onBranchReply: openBranchDialog, setTooltip, status,
   });
   const explorer = mountExplorer(window, {
     api, status, setTooltip, hideMessagePreview,

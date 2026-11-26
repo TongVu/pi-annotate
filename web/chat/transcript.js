@@ -1,4 +1,4 @@
-export function mountTranscript(window, { fetchImage, isViewingLive, isCommentOpen, showImagePreview, status }) {
+export function mountTranscript(window, { fetchImage, isViewingLive, isCommentOpen, showImagePreview, onBranchReply, setTooltip, status }) {
   const { document, IntersectionObserver, URL, URLSearchParams } = window;
   const response = document.getElementById("response");
   const rail = document.getElementById("chat-rail");
@@ -118,6 +118,7 @@ export function mountTranscript(window, { fetchImage, isViewingLive, isCommentOp
     const turn = document.createElement("section");
     const assistant = message.role === "assistant";
     turn.className = `chat-turn ${assistant ? "assistant-turn" : "user-turn"}`;
+    turn.dataset.entryId = message.id;
     const content = document.createElement("div");
     if (assistant) {
       const label = document.createElement("h2");
@@ -139,6 +140,20 @@ export function mountTranscript(window, { fetchImage, isViewingLive, isCommentOp
     }
     if (message.text || message.html || assistant) turn.append(content);
     if (!assistant) appendTranscriptImages(turn, message, session);
+    if (assistant && !session && message.canBranch) {
+      const branch = document.createElement("button");
+      branch.type = "button";
+      branch.className = "reply-branch";
+      branch.setAttribute("aria-label", "Branch from here");
+      branch.setAttribute("aria-haspopup", "dialog");
+      branch.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+        <circle cx="6" cy="5" r="2.5"/><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="5" r="2.5"/>
+        <path d="M6 7.5v9m12-9a7 7 0 0 1-7 7H6"/>
+      </svg>`;
+      setTooltip(branch, "Branch from here");
+      branch.addEventListener("click", () => onBranchReply(message.id));
+      turn.append(branch);
+    }
     return turn;
   }
 
@@ -149,7 +164,7 @@ export function mountTranscript(window, { fetchImage, isViewingLive, isCommentOp
     savedResponse.replaceChildren();
   }
 
-  function appendLive(messages, { initial = false } = {}) {
+  function appendLive(messages, { initial = false, branchReplyId } = {}) {
     const follow = initial || nearChatEnd();
     const fragment = document.createDocumentFragment();
     const dots = document.createDocumentFragment();
@@ -191,6 +206,12 @@ export function mountTranscript(window, { fetchImage, isViewingLive, isCommentOp
         rows.append(row);
       }
       fragment.append(turn);
+      if (message.id === branchReplyId) {
+        const divider = document.createElement("p");
+        divider.className = "subchat-divider";
+        divider.textContent = "Subchat starts here";
+        fragment.append(divider);
+      }
     }
     response.append(fragment);
     turnRail.append(dots);
@@ -210,11 +231,21 @@ export function mountTranscript(window, { fetchImage, isViewingLive, isCommentOp
     appendLive,
     clearSaved,
     focusSaved: () => savedResponse.focus({ preventScroll: true }),
-    renderSaved(messages, id) {
+    renderSaved(messages, id, replyId) {
       const fragment = document.createDocumentFragment();
-      for (const message of messages) fragment.append(renderTurn(message, id));
+      let target;
+      for (const message of messages) {
+        const turn = renderTurn(message, id);
+        if (message.id === replyId) target = turn;
+        fragment.append(turn);
+      }
       savedResponse.append(fragment);
-      savedResponse.scrollTop = savedResponse.scrollHeight;
+      if (target) {
+        savedResponse.scrollTop = target.getBoundingClientRect().top - savedResponse.getBoundingClientRect().top;
+        target.tabIndex = -1;
+        target.focus({ preventScroll: true });
+      } else savedResponse.scrollTop = savedResponse.scrollHeight;
+      return Boolean(target);
     },
     rememberLiveScroll() {
       closeTurnList();
