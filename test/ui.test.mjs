@@ -1497,17 +1497,21 @@ test("browser chat adds several picked or pasted files, removes them individuall
   f.$("close-preview").click();
   assert.equal(f.$("image-preview").open, false);
   assert.equal(f.$("preview-image").hasAttribute("src"), false);
-  const picked = waitForFileCount(3);
+  const picked = waitForFileCount(4);
   Object.defineProperty(file, "files", { value: [
     new w.File(["picked"], "picked.png", { type: "image/png" }),
+    new w.File(["draft"], "draft.txt"),
     new w.File(["code"], "Example.java"),
   ] });
   file.dispatchEvent(new w.Event("change"));
   await picked;
+  assert.deepEqual(filenames(), ["clipboard.png", "picked.png", "draft.txt", "Example.java"]);
+  const removeFile = list.querySelector('.file-attachment [aria-label="Remove draft.txt"]');
+  assert.equal(removeFile.textContent, "×");
+  removeFile.click();
   assert.deepEqual(filenames(), ["clipboard.png", "picked.png", "Example.java"]);
   const removeImage = list.querySelector('[aria-label="Remove picked.png"]');
   assert.equal(removeImage.textContent, "×");
-  assert.equal(list.querySelector('[aria-label="Remove Example.java"]').textContent, "Remove");
   removeImage.click();
   assert.equal(f.$("image-preview").open, false);
   assert.deepEqual(filenames(), ["clipboard.png", "Example.java"]);

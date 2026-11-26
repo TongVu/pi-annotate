@@ -30,7 +30,6 @@ export function mountAttachmentUi(window, setTooltip) {
       const remove = document.createElement("button");
       remove.type = "button";
       remove.className = "secondary";
-      remove.textContent = "Remove";
       remove.setAttribute("aria-label", `Remove ${file.name}`);
       if (removeFile) remove.addEventListener("click", () => removeFile(index));
       if (previewTypes.has(file.mimeType)) {
@@ -60,6 +59,12 @@ export function mountAttachmentUi(window, setTooltip) {
         item.append(link);
       } else {
         item.append(name);
+        if (removeFile) {
+          item.className = "file-attachment";
+          remove.classList.add("file-attachment-remove");
+          remove.textContent = "×";
+          setTooltip(remove, `Remove ${file.name}`);
+        }
       }
       if (removeFile) item.append(remove);
       list.append(item);

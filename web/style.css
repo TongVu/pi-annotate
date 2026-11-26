@@ -237,6 +237,10 @@ textarea { width: 100%; resize: vertical; background: var(--bg); color: var(--te
 .attachment-list li { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; max-width: min(100%, 280px); }
 .attachment-list li span { overflow-wrap: anywhere; }
 .attachment-list button { padding: 4px 7px; }
+.attachment-list .file-attachment { gap: 4px; padding: 2px 3px 2px 8px; border: 1px solid var(--border); border-radius: 8px; }
+.file-attachment span { min-width: 0; }
+.attachment-list .file-attachment-remove { display: grid; place-items: center; flex: none; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 5px; color: var(--muted); font-size: 16px; font-weight: 400; line-height: 1; }
+.file-attachment-remove:is(:hover, :focus-visible) { background: var(--border); color: var(--text); outline-offset: -2px; }
 .attachment-preview { min-width: 0; display: inline-flex; align-items: center; gap: 8px; text-align: left; }
 .image-attachment { position: relative; }
 .attachment-list .image-attachment .attachment-preview { padding-inline-end: 32px; }
