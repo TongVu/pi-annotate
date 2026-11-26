@@ -332,7 +332,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     updateChat(data);
     status("");
     if (data.team === true) void import("./team.js").then(({ mountAgentTeam }) => {
-      team = mountAgentTeam(window, { api, attachmentUi, onViewChange() {
+      team = mountAgentTeam(window, { api, attachmentUi, setTooltip, onViewChange() {
         annotations.hideSelectionAction();
         updateControls();
       } });

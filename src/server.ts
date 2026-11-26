@@ -48,7 +48,7 @@ function readBody(req, limit) {
 }
 
 /** Loopback only; session operations are delegated to Pi, with no cookies or CORS. */
-export async function startChatServer({ chat, onClose, isCurrent = () => true, ttlMs = 30 * 60_000 }) {
+export async function startChatServer({ chat, onClose, isCurrent = () => true, ttlMs = 30 * 60_000, closeTeamOnClose = true }) {
   const live = createLiveChat(chat);
   const presence = chat.presence;
   const explorer = chat.explorer && createChatCatalog(chat.explorer, presence);
@@ -101,7 +101,7 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
           if (!isSameOriginJson(req.headers, origin)) return reply(403, { error: "Expected a same-origin JSON request." });
           const body = JSON.parse((await readBody(req, CHAT_BODY_LIMIT)).toString("utf8"));
           if (!checkCurrent()) return;
-          if (body?.action === "start") chat.team.start(body.brief, body.attachments);
+          if (body?.action === "start" || body?.action === "feedback") chat.team.start(body.brief, body.attachments, body.action === "feedback");
           else if (body?.action === "resume") chat.team.resume(body.role, body.pause, body.direction);
           else if (body?.action === "stop") chat.team.close();
           else throw new Error("Unknown team action.");
@@ -295,7 +295,7 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
     server.close();
     server.closeAllConnections();
     void presence?.close();
-    chat.team?.close();
+    if (closeTeamOnClose) chat.team?.close();
     onClose?.();
   };
   const timer = setTimeout(close, ttlMs);

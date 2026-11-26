@@ -1,23 +1,29 @@
 // Run from the repository root: node docs/mockups/team-setup-preview.mjs
-// Preview the real page and team API without credentials, model calls, or Git changes.
-import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+// Exercise the real page, team runner, and Git diff with offline workers in a temporary repo.
+import { execFileSync } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { createAgentTeam } from "../../src/agent-team.ts";
+import { createAgentTeam, prepareTeamWorkspace } from "../../src/agent-team.ts";
 import { saveChatAttachments } from "../../src/chat-attachments.ts";
-import { teamReportType } from "../../src/chat-transcript.ts";
 import { startChatServer } from "../../src/server.ts";
 
 const scratch = await mkdtemp(join(tmpdir(), "pi-chat-team-preview-"));
+const repo = join(scratch, "fixture");
+await mkdir(repo);
+const git = (...args) => execFileSync("git", ["-c", "core.hooksPath=/dev/null", "-C", repo, ...args], { stdio: "pipe" });
+git("init");
+await writeFile(join(repo, "api.js"), 'export const status = { label: "Not started", round: 0 };\n');
+git("add", "api.js");
+git("-c", "user.name=Preview", "-c", "user.email=preview@example.invalid", "commit", "-m", "chore: seed preview fixture");
 const branch = [{ id: "preview-intro", type: "message", message: { role: "assistant", content:
-  "**Teams preview · simulated workers.** Click **Teams**, add a brief and files, and click **Start team**. The real Pi Chat page and API handle the drafts and attachments. This preview does not call a model or change a Git checkout." } }];
+  "**Teams preview · simulated workers.** Click the **two-person icon** in the title bar. Write a brief and press the **up arrow**. The simulated implementers edit two files in one temporary Git checkout. Open the combined result, then use the **speech bubble with a plus** to send feedback to the same team. No model requests or changes to your repository." } }];
 const team = createAgentTeam({
-  prepare: async () => ({ head: "demo", backend: "(simulated backend worktree)", frontend: "(simulated frontend worktree)" }),
+  prepare: async ({ workspace }) => workspace ?? prepareTeamWorkspace(repo, scratch),
   saveAttachments: (items) => saveChatAttachments(scratch, "preview", items),
-  openWorker: async () => {
-    let listener, inputs;
+  openWorker: async ({ cwd, writable }) => {
+    let listener, round = 0;
     const controller = new AbortController();
     const abort = async () => { controller.abort(); };
     return {
@@ -25,18 +31,23 @@ const team = createAgentTeam({
       abort,
       dispose: () => { void abort(); },
       async prompt(text, { images = [] } = {}) {
-        inputs ??= { files: (text.match(/^(?:--- )?Attached file:/gm) ?? []).length, images: images.length };
         const role = text.match(/^You are the (.+?) in a Pi Chat team\./)?.[1] ?? "Role";
-        const evidence = `Received ${inputs.files} text file(s) and ${inputs.images} image(s).`;
-        await delay(750, undefined, { signal: controller.signal });
-        const report = text.includes("Your final report appears in the main chat")
-          ? `The simulated team completed its handoffs. ${evidence} This preview made no model requests, edits, or merges.`
-          : `${role}: ${evidence} Simulated assignment complete.`;
+        const files = (text.match(/^(?:--- )?Attached file:/gm) ?? []).length;
+        await delay(600, undefined, { signal: controller.signal });
+        if (writable && role === "Backend implementer") {
+          round++;
+          await writeFile(join(cwd, "api.js"), `export const status = { label: "Ready", round: ${round} };\n`);
+        }
+        if (writable && role === "Frontend implementer") {
+          const api = await readFile(join(cwd, "api.js"), "utf8");
+          const currentRound = api.match(/round: (\d+)/)?.[1];
+          await writeFile(join(cwd, "view.js"), `import { status } from "./api.js";\n\n// Updated after reading the backend in round ${currentRound}.\nexport const renderStatus = () => \`\${status.label} · round \${status.round}\`;\n`);
+        }
+        const report = `${role}: simulated handoff. Received ${files} text file(s) and ${images.length} image(s) this turn.`;
         listener?.({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: JSON.stringify({ status: "done", report }) }] } });
       },
     };
   },
-  onComplete: ({ review }) => branch.push({ id: randomUUID(), type: "custom_message", customType: teamReportType, display: true, content: review }),
 });
 const cleanup = () => { void rm(scratch, { recursive: true, force: true }); };
 const server = await startChatServer({

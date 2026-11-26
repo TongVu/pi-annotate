@@ -1,12 +1,15 @@
-.chat-page #chat-tools:has(#team-bar:not([hidden])) { grid-template-rows: auto minmax(0, 1fr); gap: 10px; }
-#team-bar:not([hidden]) { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
-#team-toggle, #team-view-toggle { flex: none; padding: 5px 10px; border-radius: 999px; font-size: 12px; }
-#team-toggle[aria-expanded="true"], #team-view-toggle[aria-expanded="true"] { background: color-mix(in srgb, var(--panel), var(--accent) 16%); }
-#team-attention { color: var(--team-warning, #e0ad70); font-size: 12px; }
+#team-view-toggle { position: relative; }
+#team-view-toggle[aria-expanded="false"] .chat-mode-icon,
+#team-view-toggle[aria-expanded="true"] .team-mode-icon,
+.session-title-pill:has(#team-view-toggle[aria-expanded="true"]) #chat-tools-toggle { display: none; }
+#team-attention { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+#team-attention-dot:not([hidden]) { position: absolute; inset: 2px 2px auto auto; width: 7px; height: 7px; border-radius: 50%; background: var(--team-warning, #e0ad70); }
 #chat-tools #chat-tools-content[hidden] { display: none; }
 #team-panel { overflow: auto; min-height: 0; padding: 2px 2px 12px; color: var(--text); }
-#team-setup:not([hidden]) { grid-area: 2 / transcript / span 2 / -1; display: grid; min-height: 0; min-width: 0; overflow: auto; padding: clamp(14px, 4vw, 40px); }
-.team-setup-content { width: min(100%, 720px); margin: auto; }
+.chat-page main:has(#team-setup:not([hidden])) { --chat-tools-width: 0px; --turn-rail-width: 0px; }
+.chat-page main:has(#team-setup:not([hidden])) #chat-tools { display: none; }
+:is(#team-setup, #team-result):not([hidden]) { grid-area: 2 / transcript / span 2 / -1; display: grid; min-height: 0; min-width: 0; overflow: auto; padding: clamp(14px, 3vw, 36px); }
+.team-setup-content { width: min(100%, 1040px); margin: auto; }
 .team-setup-intro { display: flex; align-items: end; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
 .team-setup-intro h1 { margin: 4px 0; font-size: clamp(26px, 4vw, 38px); letter-spacing: -.035em; }
 .team-setup-intro p { margin: 0; color: var(--muted); }
@@ -16,15 +19,15 @@
 #team-start { padding: clamp(12px, 3vw, 22px); border: 1px solid var(--border); border-radius: 16px; background: var(--panel); }
 #team-start label, #team-direction label { margin: 0 0 6px; font-weight: 600; }
 #team-start textarea, #team-direction textarea { margin: 0; font-size: 14px; }
-#team-brief { min-height: 92px; max-height: 35dvh; }
+#team-brief { display: block; min-height: clamp(200px, 42dvh, 480px); max-height: max(200px, 65dvh); }
 #team-start .attachment-list { padding-inline: 0; }
 .team-setup-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; margin-top: 8px; }
 .team-setup-hint, #team-setup-status, #team-status { font-size: 12px; color: var(--muted); }
 .team-setup-hint, #team-setup-status { margin: 8px 0 0; }
 #team-setup-status.error { color: var(--attachment-error, #ffb4a6); }
 #team-setup-status:empty, #team-status:empty { display: none; }
-#team-setup-back { margin-top: 12px; }
-.team-setup-actions button, #team-setup-back, #team-stop, #team-back, #team-direction button { font-size: 12px; padding: 6px 10px; }
+button.team-icon:not([hidden]) { display: grid; place-items: center; flex: none; width: 40px; height: 40px; padding: 0; border-radius: 50%; }
+button.team-icon.secondary:not(:disabled):hover { background: color-mix(in srgb, var(--panel), var(--border) 45%); }
 #team-stop { margin-top: 8px; }
 #team-roles:not([hidden]) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 #team-roles .team-card { display: grid; justify-items: center; align-content: start; gap: 4px; min-width: 0; padding: 8px 4px; text-align: center; background: var(--panel); font-size: 12px; line-height: 1.25; overflow-wrap: anywhere; }
@@ -42,10 +45,18 @@
 @keyframes team-bob { 50% { transform: translateY(-1px); } }
 @keyframes team-blink { 93%, 97% { fill: #1f2d2f; } }
 @media (prefers-reduced-motion: reduce) { .team-card .team-pet :is(g, .pet-eye, .pet-key) { animation: none !important; } }
-#team-worktrees { margin-top: 8px; font-size: 12px; color: var(--muted); }
-#team-worktrees summary { cursor: pointer; }
-#team-paths { white-space: pre-wrap; overflow-wrap: anywhere; }
-.chat-page main:is(.team-viewing, :has(#team-setup:not([hidden]))) :is(#conversation, #chat-rail, #subchat-origin) { display: none; }
+#team-workspace { margin-top: 8px; font-size: 12px; color: var(--muted); }
+#team-workspace summary { cursor: pointer; }
+#team-paths, #team-result-workspace { overflow-wrap: anywhere; }
+.chat-page main:is(.team-viewing, :has(:is(#team-setup, #team-result):not([hidden]))) :is(#conversation, #chat-rail, #subchat-origin) { display: none; }
+#team-result .team-setup-content { margin-block: 0 auto; }
+.team-result-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.team-result-heading h1 { margin: 4px 0; font-size: clamp(26px, 4vw, 38px); }
+.team-result-heading .team-eyebrow, .team-result-note { color: var(--muted); font-size: 13px; }
+.team-result-heading .team-eyebrow { letter-spacing: .14em; font-weight: 700; margin: 0; }
+#team-result h2 { margin: 16px 0 8px; }
+#team-result pre { overflow: auto; margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+#team-result-diff { max-height: 55dvh; }
 #team-conversation:not([hidden]) { grid-area: 2 / transcript / span 2 / -1; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; }
 .team-heading { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; justify-content: space-between; padding: 8px 16px; border-bottom: 1px solid var(--border); }
 .team-heading h2 { margin: 0; font-size: 15px; }

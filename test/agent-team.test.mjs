@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setImmediate as turn, setTimeout as delay } from "node:timers/promises";
 import { JSDOM } from "jsdom";
-import { createAgentTeam, prepareTeamWorktrees, resolveTeamModel, teamThinkingLevel, teamWritePath } from "../src/agent-team.ts";
+import { createAgentTeam, inspectTeamWorkspace, prepareTeamWorkspace, resolveTeamModel, teamThinkingLevel, teamWritePath } from "../src/agent-team.ts";
 import { teamReportType } from "../src/chat-transcript.ts";
 import { startChatServer } from "../src/server.ts";
 import { startChatPage } from "../web/app.js";
@@ -22,12 +22,14 @@ test("team model is exactly OpenAI GPT-6 Luna at high effort, with no fallback",
   assert.throws(() => resolveTeamModel([luna], () => ["medium"]), /must support high/);
 });
 
-const paths = { backend: "/tmp/back", frontend: "/tmp/front", head: "base" };
-function mockTeam({ prepare = async () => paths, saveAttachments } = {}) {
+const paths = { cwd: "/tmp/shared-team", head: "base" };
+const exampleChanges = { files: " M api.js\n?? ui.js", diff: "diff --git a/api.js b/api.js\n+<img src=x>\n+renderPanel()", truncated: false };
+function mockTeam({ prepare = async ({ workspace }) => workspace ?? paths, saveAttachments, inspectWorkspace = async () => exampleChanges } = {}) {
   const calls = [];
   const disposed = [];
-  const completed = [];
-  const team = createAgentTeam({ prepare, saveAttachments, onComplete: (result) => completed.push(result), openWorker: async (opts) => {
+  let openedWorkers = 0;
+  const team = createAgentTeam({ prepare, saveAttachments, inspectWorkspace, openWorker: async (opts) => {
+    const worker = ++openedWorkers;
     let listener, resolve;
     const abort = () => { resolve?.(); return Promise.resolve(); };
     return {
@@ -37,7 +39,7 @@ function mockTeam({ prepare = async () => paths, saveAttachments } = {}) {
       prompt(text, options) {
         return new Promise((done) => {
           resolve = done;
-          calls.push({ ...opts, text, options,
+          calls.push({ ...opts, worker, text, options,
             event: (event) => listener(event),
             finish(status, report) {
               listener?.({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: JSON.stringify({ status, report }) }] } });
@@ -48,11 +50,11 @@ function mockTeam({ prepare = async () => paths, saveAttachments } = {}) {
       },
     };
   } });
-  return { team, calls, disposed, completed };
+  return { team, calls, disposed };
 }
 
-test("hands off reports, runs both implementers, pauses after two attempts, and resumes only on direction", async () => {
-  const { team, calls, disposed, completed } = mockTeam();
+test("hands off one shared workspace, pauses after two attempts, and resumes before the next implementer", async () => {
+  const { team, calls, disposed } = mockTeam();
   team.start("Split the UI and server responsibility.");
   await turn();
   assert.equal(calls[0].writable, false);
@@ -62,32 +64,36 @@ test("hands off reports, runs both implementers, pauses after two attempts, and 
   assert.match(calls[1].text, /Acceptance criteria/);
   calls[1].finish("done", "Backend owns API; frontend owns the panel.");
   await turn();
-  assert.deepEqual(calls.slice(2).map(({ cwd, writable }) => [cwd, writable]), [[paths.backend, true], [paths.frontend, true]]);
+  assert.deepEqual(calls.map(({ cwd, writable }) => [cwd, writable]), [[paths.cwd, false], [paths.cwd, false], [paths.cwd, true]]);
   assert.match(calls[2].text, /Backend owns API/);
   calls[2].finish("retry", "First approach failed");
   await turn();
-  calls[4].finish("retry", "No change after reading the loader");
-  calls[3].finish("done", "Panel is ready");
+  calls[3].finish("retry", "No change after reading the loader");
   await turn();
   const backend = team.snapshot("backend").roles.find(({ id }) => id === "backend");
   assert.equal(backend.status, "paused");
   assert.match(backend.report, /Two attempts.*No change/);
-  assert.equal(calls.length, 5, "review must not start while the backend is paused");
+  assert.equal(calls.length, 4, "frontend must not start while the backend is paused");
   assert.throws(() => team.resume("backend", backend.pause + 1, "Use the old route"), /not waiting/);
   team.resume("backend", backend.pause, "Use the old route");
   assert.throws(() => team.resume("backend", backend.pause, "Duplicate direction"), /not waiting/);
-  assert.match(calls[5].text, /User direction: Use the old route/);
-  calls[5].finish("done", "API is ready");
   await turn();
-  assert.match(calls[6].text, /backend: API is ready/);
+  assert.match(calls[4].text, /User direction: Use the old route/);
+  calls[4].finish("done", "API is ready");
+  await turn();
+  assert.match(calls[5].text, /backend: API is ready/);
+  assert.match(calls[5].text, /Current workspace changes \(Git status\):\n M api\.js/);
+  calls[5].finish("done", "Panel is ready");
+  await turn();
   assert.match(calls[6].text, /frontend: Panel is ready/);
-  assert.deepEqual(completed, [], "there is no final report before the architect finishes review");
-  calls[6].finish("done", "Manual integration and tests remain");
+  assert.equal(team.snapshot().result, undefined, "the combined result is not ready without review");
+  calls[6].finish("done", "Tests still need to run");
   await turn();
   assert.equal(team.snapshot().phase, "done");
-  assert.equal(disposed.length, 4);
+  assert.deepEqual(team.snapshot().result, exampleChanges);
+  assert.equal(disposed.length, 0, "keep role sessions available for feedback");
   team.close();
-  assert.deepEqual(completed, [{ review: "Manual integration and tests remain", worktrees: paths }]);
+  assert.equal(disposed.length, 4);
 });
 
 test("two identical tool errors pause without making another model turn", async () => {
@@ -104,7 +110,7 @@ test("two identical tool errors pause without making another model turn", async 
   team.close();
 });
 
-test("Git worktrees share only committed HEAD and reject writes outside their own tree", async (t) => {
+test("the shared worktree starts from committed HEAD, exposes the combined diff, and limits writes", async (t) => {
   const repo = await mkdtemp(join(tmpdir(), "team-test-repo-"));
   t.after(() => rm(repo, { recursive: true, force: true }));
   const git = (...args) => execFileSync("git", ["-C", repo, ...args], { stdio: "pipe" });
@@ -113,12 +119,18 @@ test("Git worktrees share only committed HEAD and reject writes outside their ow
   git("add", "app.txt");
   git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "feat: add fixture");
   await writeFile(join(repo, "app.txt"), "unstaged user changes");
-  const { backend, frontend } = await prepareTeamWorktrees(repo);
-  t.after(() => rm(dirname(backend), { recursive: true, force: true }));
-  const root = await realpath(backend);
-  const other = await realpath(frontend);
+  const workspace = await prepareTeamWorkspace(repo);
+  t.after(() => rm(dirname(workspace.cwd), { recursive: true, force: true }));
+  const root = await realpath(workspace.cwd);
+  const other = await realpath(repo);
+  assert.equal(await readFile(join(root, "app.txt"), "utf8"), "base");
   await writeFile(await teamWritePath(root, "app.txt"), "backend edits");
-  assert.equal(await readFile(join(other, "app.txt"), "utf8"), "base");
+  await writeFile(await teamWritePath(root, "ui.txt"), "frontend uses backend edits");
+  const result = await inspectTeamWorkspace(workspace, true);
+  assert.match(result.files, / M app\.txt\n\?\? ui\.txt/);
+  assert.match(result.diff, /\+backend edits/);
+  assert.match(result.diff, /\+frontend uses backend edits/);
+  assert.equal(result.truncated, false);
   assert.equal(await readFile(join(repo, "app.txt"), "utf8"), "unstaged user changes");
   await symlink(other, join(root, "escape"), "dir");
   await symlink(join(other, "new.txt"), join(root, "dangling"));
@@ -144,6 +156,32 @@ test("team API requires the live chat token and same-origin POSTs; close dispose
   assert.equal(team.snapshot().phase, "stopped");
 });
 
+test("closing and reopening the browser view keeps the running team and workspace", async (t) => {
+  const { team, calls, disposed } = mockTeam();
+  t.after(team.close);
+  const chat = { getBranch: () => [], isIdle: () => true, team };
+  const open = async () => {
+    const listener = await startChatServer({ chat, closeTeamOnClose: false });
+    t.after(listener.close);
+    const url = new URL(listener.url);
+    return (path, body) => fetch(url.origin + path, {
+      headers: { Authorization: `Bearer ${url.hash.slice(1)}`, Origin: url.origin, "Content-Type": "application/json" },
+      ...(body && { method: "POST", body: JSON.stringify(body) }),
+    });
+  };
+  const first = await open();
+  assert.equal((await first("/api/team", { action: "start", brief: "One task" })).status, 202);
+  assert.equal((await first("/api/close", {})).status, 200);
+  const second = await open();
+  const snapshot = await (await second("/api/team?role=po")).json();
+  assert.equal(snapshot.phase, "active");
+  assert.equal(snapshot.round, 1);
+  assert.deepEqual(snapshot.workspace, paths);
+  assert.match(snapshot.messages[0].text, /One task/);
+  assert.equal(calls.length, 1);
+  assert.equal(disposed.length, 0);
+});
+
 const screenshot = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgZGIGAAAOAAfXb+R4AAAAAElFTkSuQmCC";
 async function until(condition, message) {
   for (let attempt = 0; attempt < 100; attempt++) {
@@ -153,14 +191,15 @@ async function until(condition, message) {
   assert.fail(message);
 }
 
-test("served Teams view sends pasted images and dropped text through the authenticated runner", async (t) => {
+test("served Teams view sends attachments, shows the combined result, and gives feedback to the same workers", async (t) => {
   const prepared = [];
   const { team, calls } = mockTeam({ prepare: async (options) => {
     prepared.push(options);
     if (prepared.length === 1) throw new Error("Could not prepare the test worktrees.");
-    return paths;
+    return options.workspace ?? paths;
   } });
-  const opened = await startChatServer({ chat: { getBranch: () => [], isIdle: () => true, team } });
+  const branch = [{ id: "main-user", type: "message", message: { role: "user", content: "Private unrelated Main chat text" } }];
+  const opened = await startChatServer({ chat: { getBranch: () => branch, isIdle: () => true, team } });
   t.after(opened.close);
   const url = new URL(opened.url);
   for (const asset of ["/app.js", "/chat/page.js", "/chat/team.js", "/chat/team-pets.js", "/chat/team.css"]) {
@@ -172,12 +211,29 @@ test("served Teams view sends pasted images and dropped text through the authent
   window.fetch = (path, opts = {}) => fetch(url.origin + path, { ...opts,
     headers: { ...opts.headers, ...(opts.method === "POST" ? { Origin: url.origin } : {}) },
   });
+  const polls = [];
+  const originalSetTimeout = window.setTimeout.bind(window);
+  window.setTimeout = (fn, ms, ...args) => ms === 1000 && fn.name === "poll" ? polls.push(fn) : originalSetTimeout(fn, ms, ...args);
   await startChatPage(window, { loadNotes: async () => undefined });
   const $ = (id) => window.document.getElementById(id);
   await until(() => !$("team-view-toggle").hidden, "Teams toggle not ready");
-  $("chat-input").value = "Unsent main draft";
-  $("team-view-toggle").click();
+  const toggle = $("team-view-toggle");
+  const composer = $("chat-input");
+  composer.value = "Unsent main draft";
+  assert.equal(toggle.parentElement.id, "session-title-pill");
+  assert.equal(toggle.getAttribute("aria-label"), "Open Teams");
+  for (const id of ["team-toggle", "team-back", "team-setup-back"]) assert.equal($(id), null);
+  for (const [id, label] of [["team-view-toggle", "Open Teams"], ["team-attach", "Attach files"], ["team-submit", "Start team"]]) {
+    assert.equal($(id).getAttribute("aria-label"), label);
+    assert.equal($(id).textContent.trim(), "");
+    assert.ok($(id).querySelector("svg[aria-hidden=true]"));
+  }
+  toggle.click();
+  assert.equal(toggle.getAttribute("aria-label"), "Return to main chat");
+  assert.equal(toggle.getAttribute("aria-expanded"), "true");
   assert.equal($("team-setup").hidden, false);
+  assert.equal($("team-panel").hidden, true);
+  assert.ok($("team-brief").rows >= 10);
   $("team-brief").value = "Build the status screen";
   $("team-brief").dispatchEvent(new window.Event("input"));
   const drop = new window.Event("drop", { cancelable: true });
@@ -189,10 +245,13 @@ test("served Teams view sends pasted images and dropped text through the authent
   $("team-brief").dispatchEvent(paste);
   await until(() => $("team-attachments").children.length === 2 && !$("team-attach").disabled, "Image attachment not ready");
 
-  $("team-setup-back").click();
+  toggle.click();
+  assert.equal(toggle.getAttribute("aria-label"), "Open Teams");
+  assert.equal(toggle.getAttribute("aria-expanded"), "false");
   assert.equal($("team-setup").hidden, true);
-  assert.equal($("chat-input").value, "Unsent main draft");
-  $("team-toggle").click();
+  assert.equal($("chat-input"), composer, "the same main composer remains mounted");
+  assert.equal(composer.value, "Unsent main draft");
+  toggle.click();
   assert.equal($("team-brief").value, "Build the status screen");
   assert.equal($("team-attachments").children.length, 2);
   $("team-submit").click();
@@ -204,21 +263,80 @@ test("served Teams view sends pasted images and dropped text through the authent
   assert.equal(calls.length, 0);
   $("team-submit").click();
   await until(() => calls.length === 1 && $("team-setup").hidden, "Start did not reach the runner and show team status");
-  assert.deepEqual(prepared, [{ hasImages: true }, { hasImages: true }]);
+  assert.deepEqual(prepared, [{ hasImages: true, workspace: undefined }, { hasImages: true, workspace: undefined }]);
+  assert.equal($("team-panel").hidden, false);
   assert.equal($("team-roles").hidden, false);
-  assert.equal($("chat-input").value, "Unsent main draft");
+  assert.equal(composer.value, "Unsent main draft");
   calls[0].finish("done", "Scope approved");
   await turn();
   calls[1].finish("done", "Design ready");
   await turn();
+  assert.equal(calls.length, 3);
+  calls[2].finish("done", "Backend edited");
+  await turn();
   assert.equal(calls.length, 4);
   for (const call of calls) {
+    assert.doesNotMatch(call.text, /Private unrelated Main chat text|Unsent main draft/);
     assert.match(call.text, /Build the status screen/);
     assert.match(call.text, /Attached file: "acceptance\.md" ---\nUse a teal outline\./);
     assert.deepEqual(call.options.images, [{ type: "image", mimeType: "image/png", data: screenshot }]);
   }
   // Role transcripts stay small and don't retransmit attachment bytes.
   assert.doesNotMatch(JSON.stringify(team.snapshot("po").messages), /Use a teal outline|iVBORw0KGgo/);
+  calls[3].finish("done", "Frontend wired");
+  await turn();
+  calls[4].finish("done", "Reviewed both changes");
+  await turn();
+  await polls.shift()();
+  await until(() => !$("team-result").hidden, "Combined result did not open");
+  assert.match($("team-result-workspace").textContent, /shared-team/);
+  assert.match($("team-result-files").textContent, /api\.js[\s\S]+ui\.js/);
+  assert.match($("team-result-diff").textContent, /<img src=x>/);
+  assert.equal($("team-result-diff").querySelector("img"), null);
+  $("team-feedback").click();
+  assert.equal($("team-result").hidden, true);
+  assert.equal($("team-setup").hidden, false);
+  assert.equal($("team-submit").getAttribute("aria-label"), "Send feedback");
+  $("team-brief").value = "Make the status easier to read";
+  $("team-brief").dispatchEvent(new window.Event("input"));
+  $("team-submit").click();
+  await until(() => calls.length === 6 && $("team-setup").hidden, "Feedback did not reach the runner");
+  assert.deepEqual(prepared[2], { hasImages: false, workspace: paths });
+  assert.equal(calls[5].worker, calls[0].worker);
+  assert.match(calls[5].text, /Build the status screen[\s\S]+User feedback for round 2:\nMake the status easier to read/);
+  assert.equal(calls[5].options.images, undefined, "do not resend past round attachments");
+  assert.match(JSON.stringify(team.snapshot("po").messages), /Scope approved/, "the role transcript is retained");
+});
+
+test("the composer shows its stop icon while the team is preparing worktrees", async (t) => {
+  const dom = new JSDOM(await readFile(new URL("../web/index.html", import.meta.url), "utf8"));
+  t.after(() => dom.window.close());
+  const { window } = dom;
+  const $ = (id) => window.document.getElementById(id);
+  const prep = Promise.withResolvers();
+  const { team, calls } = mockTeam({ prepare: () => prep.promise });
+  t.after(() => { team.close(); prep.resolve(paths); });
+  const ui = mountAgentTeam(window, { onViewChange() {}, async api(_path, body) {
+    if (body?.action === "start") team.start(body.brief, body.attachments);
+    if (body?.action === "stop") team.close();
+    return team.snapshot();
+  } });
+  await ui.refresh();
+  $("team-view-toggle").click();
+  $("team-brief").value = "Build the status screen";
+  $("team-brief").dispatchEvent(new window.Event("input"));
+  $("team-submit").click();
+  await turn();
+  assert.equal($("team-submit").hidden, true);
+  assert.equal($("team-cancel-start").hidden, false);
+  assert.equal($("team-panel").hidden, true);
+  $("team-cancel-start").click();
+  await turn();
+  prep.resolve(paths);
+  await turn();
+  assert.equal(team.snapshot().phase, "stopped");
+  assert.equal(calls.length, 0);
+  assert.match($("team-status").textContent, /Team stopped/);
 });
 
 test("invalid team attachments fail before preparation and large text uses a private local path", async (t) => {
@@ -242,7 +360,7 @@ test("invalid team attachments fail before preparation and large text uses a pri
   assert.ok(calls[0].text.length < 2000, "Large contents should not be sent inline");
 });
 
-test("a completed team report arrives in the main transcript as an attributed non-branchable message", async (t) => {
+test("legacy team reports remain readable in the main transcript without becoming branchable", async (t) => {
   const branch = [{ id: "previous", type: "message", message: { role: "assistant", content: "I’m ready." } }];
   const opened = await startChatServer({ chat: { getBranch: () => branch, isIdle: () => true } });
   t.after(opened.close);
@@ -285,9 +403,11 @@ test("the sidebar opens a pet's transcript and routes direction only to its paus
   } });
   await ui.refresh();
   assert.equal(d.getElementById("team-attention").textContent, "1 role needs your input");
-  d.getElementById("team-toggle").click();
+  assert.equal(d.getElementById("team-attention-dot").hidden, false);
+  const toggle = d.getElementById("team-view-toggle");
+  toggle.click();
   assert.equal(d.querySelectorAll(".team-card svg").length, 5);
-  const [, po, backend] = d.querySelectorAll(".team-card");
+  const [lead, po, backend] = d.querySelectorAll(".team-card");
   const thread = d.getElementById("team-transcript");
   backend.click();
   await turn();
@@ -302,7 +422,14 @@ test("the sidebar opens a pet's transcript and routes direction only to its paus
   d.getElementById("team-direction").dispatchEvent(new dom.window.Event("submit", { cancelable: true }));
   await turn();
   assert.deepEqual(posts, [{ action: "resume", role: "po", pause: 1, direction: "Keep the smaller scope" }]);
-  d.getElementById("team-back").click();
+  lead.click();
   assert.equal(ui.viewingTeam(), false);
   assert.equal(d.getElementById("team-conversation").hidden, true);
+  assert.equal(d.getElementById("team-panel").hidden, false);
+  backend.click();
+  toggle.click();
+  assert.equal(ui.viewingTeam(), false);
+  assert.equal(d.getElementById("team-conversation").hidden, true);
+  assert.equal(d.getElementById("team-panel").hidden, true);
+  assert.equal(d.getElementById("chat-tools-content").hidden, false);
 });

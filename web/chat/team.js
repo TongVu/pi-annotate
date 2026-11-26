@@ -2,14 +2,18 @@ import { teamPet } from "./team-pets.js";
 
 const labels = { queued: "Queued", working: "Working", paused: "Needs you", done: "Done", stopped: "Stopped" };
 
-export function mountAgentTeam(window, { api, attachmentUi, onViewChange }) {
+export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setTooltip = (target, text) => { target.title = text; } }) {
   const { document } = window;
   const $ = (id) => document.getElementById(id);
-  const bar = $("team-bar"), toggle = $("team-toggle"), panel = $("team-panel"), viewToggle = $("team-view-toggle");
+  const panel = $("team-panel"), viewToggle = $("team-view-toggle");
+  const toolsToggle = $("chat-tools-toggle"), notes = $("chat-tools-content");
   const roles = $("team-roles"), transcript = $("team-transcript");
   const setup = $("team-setup"), start = $("team-start"), submit = $("team-submit"), pick = $("team-attach"), files = $("team-files");
-  const direction = $("team-direction"), stop = $("team-stop"), brief = $("team-brief"), input = $("team-input");
-  const attachmentList = $("team-attachments");
+  const direction = $("team-direction"), stop = $("team-stop"), cancelStart = $("team-cancel-start");
+  const brief = $("team-brief"), input = $("team-input");
+  const attachmentList = $("team-attachments"), resultView = $("team-result");
+  const feedbackButton = $("team-feedback");
+  let composingFeedback = false, displayedRound = 0;
   let attachments = [], readingFiles = false, fileError = "";
   $("team-setup-pets").innerHTML = ["po", "backend", "frontend", "architect"].map(teamPet).join("");
   const cards = new Map(), drafts = new Map();
@@ -33,20 +37,18 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange }) {
 
   function togglePanel(open) {
     opened = open;
-    if (open && $("chat-tools-toggle").getAttribute("aria-expanded") === "false") $("chat-tools-toggle").click();
-    panel.hidden = !open;
-    document.querySelector("#chat-tools > #chat-tools-content").hidden = open;
-    for (const button of [toggle, viewToggle]) button.setAttribute("aria-expanded", String(open));
-    if (!open) setRole(undefined);
+    const label = open ? "Return to main chat" : "Open Teams";
+    viewToggle.setAttribute("aria-expanded", String(open));
+    viewToggle.setAttribute("aria-label", label);
+    setTooltip(viewToggle, label);
+    if (!open) {
+      if (snapshot?.phase === "done") composingFeedback = false;
+      setRole(undefined);
+    }
     render();
     if (!setup.hidden) brief.focus();
   }
-  for (const button of [toggle, viewToggle]) button.addEventListener("click", () => togglePanel(!opened));
-  $("team-setup-back").addEventListener("click", () => { togglePanel(false); viewToggle.focus(); });
-  $("team-back").addEventListener("click", () => {
-    setRole(undefined);
-    cards.get("lead")?.focus();
-  });
+  viewToggle.addEventListener("click", () => togglePanel(!opened));
 
   function card(id, name) {
     if (cards.has(id)) return cards.get(id);
@@ -60,6 +62,7 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange }) {
     state.className = "team-card-state";
     button.append(title, state);
     button.addEventListener("click", () => {
+      if (id === "lead" && snapshot?.phase === "done") { togglePanel(false); viewToggle.focus(); return; }
       setRole(id === "lead" ? undefined : id);
       if (id !== "lead") transcript.focus({ preventScroll: true });
     });
@@ -70,18 +73,30 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange }) {
 
   function syncSetup() {
     const phase = snapshot?.phase;
-    const show = opened && !saved && (phase === "idle" || phase === "starting");
-    const changed = setup.hidden === show;
+    const visible = opened && !saved;
+    const show = visible && (phase === "idle" || phase === "starting" || (phase === "done" && composingFeedback));
+    const showResult = visible && phase === "done" && !!snapshot.result && !show && !selected;
+    const changed = setup.hidden === show || resultView.hidden === showResult;
+    const restoreFocus = !setup.hidden && !show && !saved && setup.contains(document.activeElement);
     setup.hidden = !show;
+    resultView.hidden = !showResult;
+    const showPanel = opened && !saved && !show;
+    if (showPanel && panel.hidden && toolsToggle.getAttribute("aria-expanded") === "false") toolsToggle.click();
+    panel.hidden = !showPanel;
+    notes.hidden = showPanel;
     if (changed) onViewChange();
+    if (restoreFocus) viewToggle.focus();
     const locked = pending || phase === "starting" || readingFiles;
     brief.readOnly = locked;
     pick.disabled = files.disabled = locked;
+    cancelStart.hidden = phase !== "starting";
+    cancelStart.disabled = pending;
+    submit.hidden = !cancelStart.hidden;
     submit.disabled = locked || (!brief.value.trim() && !attachments.length);
     for (const button of attachmentList.querySelectorAll("button")) button.disabled = locked;
     const problem = actionError || snapshot?.issue || fileError;
     const status = $("team-setup-status");
-    status.textContent = problem || (phase === "starting" ? "Preparing worktrees…" : readingFiles ? "Reading files…" : "");
+    status.textContent = problem || (phase === "starting" ? "Preparing the shared workspace…" : readingFiles ? "Reading files…" : "");
     status.classList.toggle("error", Boolean(problem));
   }
 
@@ -135,22 +150,32 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange }) {
 
   function render() {
     if (!snapshot) return;
-    const { phase, issue, worktrees, messages } = snapshot;
-    if (["active", "done"].includes(phase) && (brief.value || attachments.length)) {
+    const { phase, round, issue, workspace, result, messages } = snapshot;
+    if (round > displayedRound) {
+      displayedRound = round;
+      composingFeedback = false;
       brief.value = "";
       attachments = [];
       renderAttachments();
     }
     syncSetup();
+    if (result) {
+      $("team-round").textContent = `TEAMS · ROUND ${round}`;
+      $("team-result-workspace").textContent = workspace.cwd;
+      $("team-result-files").textContent = result.files || "No code changes.";
+      $("team-result-diff").textContent = result.diff || "No patch to display.";
+      $("team-result-truncated").hidden = !result.truncated;
+    }
     const waiting = snapshot.roles.filter(({ status }) => status === "paused").length;
     const attention = waiting ? `${waiting} ${waiting === 1 ? "role needs" : "roles need"} your input` : "";
     if ($("team-attention").textContent !== attention) $("team-attention").textContent = attention;
+    $("team-attention-dot").hidden = !waiting;
     roles.hidden = ["idle", "starting"].includes(phase);
-    stop.hidden = !["starting", "active"].includes(phase);
-    $("team-status").textContent = actionError || issue || ({ idle: "Write a brief in Teams to get started.", starting: "Preparing worktrees…", done: "Review complete. See the final report in Main chat. Changes are not integrated.", stopped: "Team stopped. Any worktree changes are retained." })[phase] || "";
-    if (worktrees && $("team-worktrees").hidden) {
-      $("team-worktrees").hidden = false;
-      $("team-paths").textContent = `Backend: ${worktrees.backend}\nFrontend: ${worktrees.frontend}`;
+    stop.hidden = phase !== "active";
+    $("team-status").textContent = actionError || issue || (phase === "stopped" ? "Team stopped. The workspace was retained." : "");
+    if (workspace && $("team-workspace").hidden) {
+      $("team-workspace").hidden = false;
+      $("team-paths").textContent = workspace.cwd;
     }
     if (roles.hidden) return;
     card("lead", "Main chat").setAttribute("aria-current", String(!selected));
@@ -200,7 +225,7 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange }) {
       const result = await api(`/api/team?${query}`);
       if (sequence !== request || version !== selection || saved) return;
       supported = true;
-      bar.hidden = viewToggle.hidden = false;
+      viewToggle.hidden = false;
       if (result.roles) {
         snapshot = result;
         render();
@@ -229,7 +254,19 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange }) {
   start.addEventListener("submit", (event) => {
     event.preventDefault();
     if (submit.disabled) return;
-    void act({ action: "start", brief: brief.value.trim(), ...(attachments.length ? { attachments } : {}) }, submit);
+    void act({ action: composingFeedback ? "feedback" : "start", brief: brief.value.trim(), ...(attachments.length ? { attachments } : {}) }, submit);
+  });
+  feedbackButton.addEventListener("click", () => {
+    if (snapshot?.phase !== "done") return;
+    composingFeedback = true;
+    actionError = fileError = "";
+    $("team-setup-title").textContent = "Feedback for the team";
+    $("team-setup-description").textContent = "The same roles will continue from the latest changes in the shared workspace.";
+    brief.placeholder = "What should change in this result?";
+    submit.setAttribute("aria-label", "Send feedback");
+    setTooltip(submit, "Send feedback");
+    syncSetup();
+    brief.focus();
   });
   direction.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -242,20 +279,20 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange }) {
       if (drafts.get(id) === text) drafts.delete(id);
     });
   });
-  stop.addEventListener("click", () => void act({ action: "stop" }, stop));
+  for (const button of [stop, cancelStart]) button.addEventListener("click", () => void act({ action: "stop" }, button));
 
   return {
     refresh,
-    viewingTeam: () => Boolean(selected) || !setup.hidden,
-    hasDraft: () => (["idle", "starting"].includes(snapshot?.phase) && Boolean(brief.value.trim() || attachments.length || readingFiles)) || Boolean(input.value.trim()) || [...drafts.values()].some((draft) => draft.trim()),
+    viewingTeam: () => Boolean(selected) || !setup.hidden || !resultView.hidden,
+    hasDraft: () => (["idle", "starting", "done"].includes(snapshot?.phase) && Boolean(brief.value.trim() || attachments.length || readingFiles)) || Boolean(input.value.trim()) || [...drafts.values()].some((draft) => draft.trim()),
     setSavedView(value) {
       if (saved === value) return;
       saved = value;
       if (saved) {
         viewToggle.hidden = true;
-        setRole(undefined);
+        togglePanel(false);
       } else {
-        bar.hidden = viewToggle.hidden = !supported;
+        viewToggle.hidden = !supported;
         void refresh(true);
       }
       syncSetup();

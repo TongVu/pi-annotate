@@ -90,15 +90,17 @@ chat before sending again. Live chat was verified with Pi 1.5.2.
 
 ## Agent team
 
-In a live chat, click **Teams** in the chat toolbar (or **Team** in the notes sidebar) to open the team setup screen. Enter a brief, attach text files or screenshots if needed, and click **Start team**. Files can be picked, pasted, or dropped. The setup draft is separate from the main chat draft and survives switching views. The product owner scopes the task, the architect hands off a design, and the backend and frontend implementers can edit in parallel. The architect then reviews the two results and posts a final report in **Main chat** with the outcome, remaining checks, and worktree paths. The report is included in saved chat history once the main chat has a user or Pi message; posting it doesn’t start a new model turn. Click a pixel pet to see that role’s conversation and tool activity; click **Main chat** to return to your original conversation and draft.
+Click the **two-person icon** in a live chat’s title bar. Enter a brief, use the paperclip to attach files, and click the **up arrow** to start. The chat bubble returns to Main chat without clearing either draft. Only the brief, attachments, and feedback or blocker directions you send explicitly in Teams go to the team. Main chat messages are not forwarded. Role handoffs and task inputs are sent to the configured team model provider.
 
-**Needs you** marks a paused role. Open it to read the report, enter direction, and click **Resume role**. A blocked role waits; two unsuccessful completion attempts or repeated identical tool errors also stop it. Another implementer can finish an already-running turn, but no new phase starts until the blocker is resolved.
+The product owner scopes the task, then the architect designs the change. The backend and frontend implementers take turns editing **one shared Git workspace** from committed HEAD. At each handoff the next role gets the current file status and reads the actual changes. The architect reviews the result in that same workspace. Product owner and architect are read-only, and none of the roles has a shell. All four require **GPT-6 Luna with high thinking effort**, independently of Main chat.
 
-All four team roles use **GPT-6 Luna with high thinking effort**, independently of the main chat. If that model or effort is unavailable, the team does not start. Both worktrees start from **committed HEAD**, not your uncommitted changes. The product owner and architect have read-only tools; each implementer can write only to its own worktree. Workers don’t have a shell, so run the tests yourself. There is no automatic commit, merge, or push. Use **Worktree paths** to find the changes, review and integrate them yourself, and remove the worktrees with `git worktree remove` when no longer needed.
+Click a pixel pet to inspect that role’s conversation and tool activity. **Needs you** means work is paused for human direction. Open that role, read the blocker, and use its resume button. Two unsuccessful completion attempts or repeated identical tool failures also pause the role. No new stage starts until the blocker is resolved.
 
-Attachments go to the team roles as task context using the same file types and size limits as the chat composer. Large text uploads are saved locally and passed by path. Images require image input to be enabled in Pi. Start team returns to the main chat with live role cards only after setup succeeds; rejected starts leave the brief and files in the draft.
+After review, **Team result** shows the shared workspace, changed files, and a bounded combined diff. Click the speech bubble with a plus to send feedback to the same workers and workspace. The checkout is not merged into your branch. Review and run the project’s checks from the shared workspace before integrating it; the runner does not execute the team’s new code or start a preview automatically.
 
-Keep the live tab open while the team runs. Closing or reloading it cancels the team when Pi detects the disconnect. Role conversations are temporary; worktree edits remain under the Pi agent directory. **Stop team** cancels the remaining turns without deleting edits. Teams send the brief and role handoffs to your configured model provider.
+Files can be picked, pasted, or dropped with the same limits as the chat composer. Large text uploads are saved locally and passed by path. Images require image input to be enabled in Pi. Rejected starts leave the brief and files in the draft.
+
+Closing the browser or reopening with `/chat` does not stop the team while that Pi session is running. **Stop team** ends it explicitly. Ending or switching the Pi session clears the live role state; the workspace stays under the Pi agent directory. There is no automatic commit, merge, push, or deletion. Remove a workspace with `git worktree remove` after you no longer need it.
 
 ## Chat dashboard
 
@@ -320,11 +322,11 @@ HTML/link/image safety, and jsdom browser interactions across formatted text,
 paragraphs, lists, entities, emoji, and code blocks. They do not prove native
 selection or visual layout in a real browser.
 
-To try the real Teams page and attachment API without running a model or changing
-Git, run `node docs/mockups/team-setup-preview.mjs` and open the printed loopback
-URL. Add a brief, a text file, and an image. Start the team and check the final
-report in Main chat for the received file counts. The preview simulates only
-agent replies and worktree creation, not the page or attachment handling.
+To try the real Teams page and runner without calling a model, run
+`node docs/mockups/team-setup-preview.mjs` and open the printed loopback URL.
+Start the team, inspect its combined changes, then give feedback and compare the
+next round in the same workspace. Simulated workers write demo files in a
+temporary Git repository. No files in your checkout are edited.
 
 ### Verification so far
 
