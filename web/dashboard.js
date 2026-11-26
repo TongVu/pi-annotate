@@ -32,6 +32,15 @@ const statuses = {
   saved: "Saved",
   connected: "Connected · status unavailable",
 };
+const petCaptions = {
+  working: "Typing",
+  ready: "Ready",
+  error: "Needs help",
+  disconnected: "Asleep",
+  "terminal-working": "Working in Terminal",
+  saved: "On the shelf",
+  connected: "Status unavailable",
+};
 const disconnectedHint = (terminalWorking) => `${terminalWorking ? "Working" : "Running"} in Terminal · No chat tab connected`;
 const actions = {
   focus: "Go to tab",
@@ -150,13 +159,23 @@ function bookmarkButton(session) {
   return button;
 }
 
+function petStage({ status, terminalWorking }) {
+  const reaction = status === "disconnected" && terminalWorking ? "terminal-working" : status;
+  const stage = $("pet-stage").content.firstElementChild.cloneNode(true);
+  stage.dataset.pet = reaction;
+  stage.querySelector(".pet-caption").textContent = petCaptions[reaction];
+  return stage;
+}
+
 function cards(cwd, items, namesById) {
   const section = el("section", "section");
   const grid = el("div", "grid");
   if (view !== "project") section.append(el("h2", "", projectName(cwd)), el("p", "directory", cwd || "No saved directory"));
   for (const session of items) {
     const card = el("article", "card");
-    card.append(pill(session.status, undefined, Boolean(session.terminalWorking)), el("h3", "", session.name));
+    const heading = el("header", "card-heading");
+    heading.append(pill(session.status, "", Boolean(session.terminalWorking)), el("h3", "", session.name));
+    card.append(heading);
     const parent = namesById.get(session.parentId);
     if (parent) {
       const lineage = el("p", "clone-lineage");
@@ -174,7 +193,7 @@ function cards(cwd, items, namesById) {
       setTooltip(when, new Date(session.modified).toLocaleString());
     }
     row.append(when, actionButton(session));
-    card.append(row);
+    card.append(petStage(session), row);
     grid.append(card);
   }
   section.append(grid);

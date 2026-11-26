@@ -83,6 +83,61 @@ test("dashboard still loads sessions when an existing Pi listener serves unbundl
   assert.equal(dom.window.document.querySelector("#legend .codex-quota").hidden, true);
 });
 
+test("dashboard pet stages follow session status without changing card actions", async (t) => {
+  const html = await readFile(new URL("../web/dashboard.html", import.meta.url), "utf8");
+  const script = await readFile(new URL("../web/dashboard.js", import.meta.url), "utf8");
+  const dom = new JSDOM(html, { url: "http://127.0.0.1:3456/#dashboard-test", runScripts: "outside-only" });
+  t.after(() => dom.window.close());
+  const { document } = dom.window;
+  const cases = [
+    ["working", "focus", false, "working"],
+    ["ready", "focus", false, "ready"],
+    ["error", "focus", false, "error"],
+    ["disconnected", "reopen", false, "disconnected"],
+    ["disconnected", "reopen", true, "terminal-working"],
+    ["saved", "resume", false, "saved"],
+    ["connected", "manual-tab", false, "connected"],
+  ];
+  const sessions = cases.map(([status, action, terminalWorking, name]) => ({
+    ...saved, id: name, name, preview: "Session preview", status, action, terminalWorking, modified: +saved.modified,
+  }));
+  const requests = [];
+  dom.window.fetch = async (path, options) => {
+    if (path === "/api/open") requests.push(JSON.parse(options.body));
+    else assert.match(path, /^\/api\/dashboard(?:\?refresh=1)?$/);
+    return { ok: true, json: async () => ({ sessions }) };
+  };
+  dom.window.eval(script);
+  await waitFor(() => document.querySelectorAll(".card .pet-stage").length === cases.length);
+
+  const cardFor = (id) => document.querySelector(`.card button.open[data-id="${id}"]`).closest(".card");
+  for (const [status, , , reaction] of cases) {
+    const card = cardFor(reaction);
+    const stage = card.querySelector(".pet-stage");
+    assert.equal(stage.dataset.pet, reaction);
+    assert.equal(stage.getAttribute("aria-hidden"), "true");
+    assert.equal(stage.previousElementSibling.textContent, "Session preview");
+    assert.equal(stage.nextElementSibling.querySelector("button.open").dataset.id, reaction);
+    const indicator = card.querySelector(".pill");
+    assert.ok(indicator.querySelector(`.dot.${status}`));
+    assert.equal(indicator.textContent, "", "the status indicator has no visible label");
+    assert.equal(indicator.nextElementSibling, card.querySelector("h3"), "the dot and title share the heading");
+  }
+  assert.match(cardFor("ready").querySelector(".open").getAttribute("aria-label"), /\(Ready to chat\)$/);
+  assert.match(document.querySelector(".stat[data-status-filter=disconnected]").textContent, /Disconnected/);
+  assert.equal(document.querySelector(".stat[data-status-filter=disconnected] b").textContent, "2");
+  assert.match(document.getElementById("legend").textContent, /Ready to chat/);
+
+  sessions[3].terminalWorking = true;
+  document.getElementById("refresh").click();
+  await waitFor(() => cardFor("disconnected").querySelector(".pet-stage").dataset.pet === "terminal-working");
+  const card = cardFor("disconnected");
+  assert.equal(card.querySelector(".open").textContent, "Reopen chat");
+  card.querySelector(".pet-stage").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+  assert.deepEqual(requests, [{ id: "disconnected", intent: "open" }]);
+  await waitFor(() => cardFor("disconnected").querySelector(".open").getAttribute("aria-disabled") === "false");
+});
+
 test("dashboard copies the selected project's exact directory path", async (t) => {
   const cwd = "/work/Project with spaces";
   const dashboard = await fixture(t, { list: async () => [{ ...saved, cwd }, { ...saved, id: "other" }] });

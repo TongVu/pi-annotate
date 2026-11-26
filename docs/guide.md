@@ -112,6 +112,11 @@ Pulsing amber and green dots mark working and ready chats, respectively.
 A hollow green ring marks a Pi session still running in Terminal without a connected chat tab.
 It pulses amber during a turn but stays in the **Disconnected** count. A filled gray dot
 marks a saved session that isn't running. Status updates even when the chat tab is in the background.
+Each session card also has a **Pet Stage**: the robot types while working,
+celebrates when ready, signals an error, or dozes when disconnected and idle.
+A disconnected session still working in Terminal shows the typing robot.
+Saved sessions show a still archive box. The stage respects your system’s
+reduced-motion setting.
 The status legend shows **5-hour · N% left** when the local Codex CLI or the CLI
 bundled with the macOS ChatGPT app reports a five-hour quota. The badge uses the
 account signed into Codex, not Pi's context usage, and refreshes about once a minute.

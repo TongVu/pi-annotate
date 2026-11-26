@@ -71,6 +71,35 @@
       <footer id="legend" class="legend" aria-label="Status legend"></footer>
     </main>
   </div>
+  <template id="pet-stage">
+    <div class="pet-stage" aria-hidden="true">
+      <span class="pet-shadow"></span>
+      <svg class="pet-sprite" viewBox="0 -2 22 19" focusable="false">
+        <g class="pet-robot">
+          <g class="pet-antenna"><rect class="pet-shade" x="10.6" y="1.1" width=".8" height="3"/><rect class="pet-lamp" x="9.8" y="0" width="2.4" height="1.8"/></g>
+          <path class="pet-shade" d="M6 13h2v2.5H6zM14 13h2v2.5h-2z"/>
+          <path class="pet-body" d="M5 5h12v1h1v7h-1v1H5v-1H4V6h1z"/>
+          <path class="pet-shade" d="M16.8 7h1.2v6h-1.2z"/>
+          <rect class="pet-screen" x="5.7" y="7" width="10.6" height="4.2"/>
+          <path class="pet-eyes" d="M7.3 7.9h1.65v2.25H7.3zM13.05 7.9h1.65v2.25h-1.65z"/>
+          <path class="pet-face pet-happy" d="m7 9.45 1.15-1.15 1.15 1.15m3.4 0 1.15-1.15L15 9.45"/>
+          <path class="pet-face pet-cross" d="m7.2 8 1.85 1.9m0-1.9-1.85 1.9M13 8l1.85 1.9m0-1.9L13 9.9"/>
+          <path class="pet-face pet-sleep" d="M7.2 9.35h2m3.6 0h2"/>
+          <g><rect class="pet-led" x="8.3" y="12" width="1" height="1"/><rect class="pet-led" x="10.5" y="12" width="1" height="1"/><rect class="pet-led" x="12.7" y="12" width="1" height="1"/></g>
+          <path class="pet-hat" d="M8 2.6h6v1h1v1.9h2v.7h1v.9h-3V6.8H7v.3H4v-.9h1v-.7h2V3.6h1z"/>
+          <path class="pet-brim" d="M7 4.75h8v.75H7zM5 6.5h2v.6H5zm10 0h2v.6h-2z"/>
+          <rect class="pet-body pet-arm-left" x="1.9" y="8.9" width="2.2" height="2"/>
+          <rect class="pet-body pet-arm-right" x="17.9" y="8.9" width="2.2" height="2"/>
+          <g class="pet-keyboard"><rect class="pet-screen" x="5.1" y="13.25" width="11.8" height="1.9"/><path class="pet-key" d="M6 13.65h1v.6H6zm1.5 0h1v.6h-1zm1.5 0h1v.6H9zm1.5 0h1v.6h-1zm1.5 0h1v.6h-1zm1.5 0h1v.6h-1zm1.5 0h1v.6h-1z"/></g>
+          <g class="pet-alarm"><path fill="currentColor" d="M17.7 1h3v3h-3z"/><path fill="white" d="M18.9 1.4h.6v1.2h-.6zm0 1.65h.6v.55h-.6z"/></g>
+          <path class="pet-sleep-mark" fill="currentColor" d="M16.8 1h2.3v.52L17.6 3h1.5v.52h-2.3V3l1.5-1.48h-1.5z"/>
+        </g>
+        <g class="pet-archive"><path class="pet-hat" d="M5 8h12v7.5H5z"/><path class="pet-brim" d="M4.5 7h13v2.4h-13z"/><path fill="currentColor" d="M9 10.5h4v1H9z"/></g>
+      </svg>
+      <span class="pet-caption"></span>
+      <span class="pet-indicators"></span>
+    </div>
+  </template>
   <dialog id="new-chat-dialog" aria-labelledby="new-chat-heading">
     <form id="new-chat-form" method="dialog">
       <h2 id="new-chat-heading">Create new chat</h2>
