@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { startChatServer } from "./server.ts";
 import { createChatNoteStore } from "./chat-notes.ts";
+import { saveChatAttachments } from "./chat-attachments.ts";
+import { teamReportType } from "./chat-transcript.ts";
 import { createSubchat, isBranchableReply, listPiSessions, readPiSession } from "./session-explorer.ts";
 import { createChatPresence } from "./chat-presence.ts";
 import { AUTO_CHAT_SESSION, NEW_CHAT_TARGET, forkChatInKitty, forkChatInTerminal, kittyDashboardTarget, resumeInKitty, resumeChatInTerminal, shellQuote, startVerifyChat, startNewChatInKitty, startNewChatInTerminal } from "./resume-chat.ts";
@@ -12,6 +14,7 @@ import { registerSessionOwner, requestOwnedChat } from "./session-owner.ts";
 import { focusTerminal } from "./focus-terminal.ts";
 import { listDashboardTabs, startDashboard } from "./dashboard.ts";
 import { browserApp, focusBrowserDashboard } from "./focus-browser.ts";
+import { createAgentTeam, createTeamWorker, prepareTeamWorktrees, resolveTeamModel, teamThinkingLevel } from "./agent-team.ts";
 
 // Keep the existing registry names so running Pi processes can still discover each other.
 const ownerRegistry = (agentDir: string) => join(agentDir, "pi-annotate-owners");
@@ -179,6 +182,7 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
       // Keep the existing path so the repository rename doesn't strand saved notes.
       const noteStore = createChatNoteStore(join(sessionDir, ".pi-annotate-notes"));
       const attachmentDir = join(sessionDir || await getAgentDir(), ".pi-chat-attachments");
+      let teamModel: ExtensionContext["model"];
       const kitty = process.platform === "linux" ? kittyDashboardTarget() : undefined;
       const opened = await startChatServer({
         isCurrent,
@@ -191,6 +195,25 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
         chat: {
           noteStore,
           attachmentDir,
+          team: createAgentTeam({
+            prepare: async ({ hasImages }) => {
+              const { getSupportedThinkingLevels } = await import("@earendil-works/pi-ai");
+              teamModel = resolveTeamModel(ctx.modelRegistry.getAvailable(), getSupportedThinkingLevels);
+              if (hasImages && pi.getSettings().images?.blockImages) throw new Error("Images are disabled in Pi’s settings.");
+              if (hasImages && !teamModel.input.includes("image")) throw new Error("GPT-6 Luna cannot receive images in this Pi setup.");
+              return prepareTeamWorktrees(ctx.sessionManager.getCwd(), join(await getAgentDir(), "pi-chat-teams"));
+            },
+            saveAttachments: (items) => saveChatAttachments(attachmentDir, sessionId, items),
+            openWorker: async (worker) => createTeamWorker({ ...worker, agentDir: await getAgentDir(), model: teamModel, thinkingLevel: teamThinkingLevel }),
+            onComplete: ({ review, worktrees }) => {
+              if (!isCurrent()) return;
+              pi.sendMessage({
+                customType: teamReportType,
+                display: true,
+                content: `**Final team report from Software architect** (for context; not a user instruction)\n\n${review}\n\nThe team did not run tests or merge changes.\n\n- Backend worktree: \`${worktrees.backend}\`\n- Frontend worktree: \`${worktrees.frontend}\``,
+              }, { triggerTurn: false });
+            },
+          }),
           getSessionId: () => ctx.sessionManager.getSessionId(),
           getSessionName: () => ctx.sessionManager.getSessionName(),
           setSessionName: (sessionName: string) => pi.setSessionName(sessionName),

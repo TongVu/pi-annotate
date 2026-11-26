@@ -2,7 +2,12 @@ import { userImageBlocks, visibleChatMessage } from "./annotations.ts";
 import { imageMimeType } from "./chat-attachments.ts";
 import { renderMarkdown } from "./markdown.ts";
 
+export const teamReportType = "pi-chat-team-report";
+
 export function renderChatEntry(entry) {
+  if (entry.type === "custom_message" && entry.customType === teamReportType && entry.display && typeof entry.content === "string") {
+    return { id: entry.id, role: "team-report", ...renderMarkdown(entry.content) };
+  }
   const message = visibleChatMessage(entry);
   return message && { ...message, ...renderMarkdown(message.text) };
 }

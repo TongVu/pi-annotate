@@ -6,6 +6,7 @@
   <title>Pi Chat</title>
   <link id="app-favicon" rel="icon" href="/favicon.ico" type="image/x-icon">
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/chat/team.css">
   <script type="module" src="/app.js"></script>
 </head>
 <body>
@@ -55,6 +56,7 @@
         <button id="session-title-text" type="button" aria-haspopup="dialog"></button>
         <h2 id="saved-title" hidden></h2>
         <button id="focus-terminal" type="button" class="secondary" aria-label="Switch to Terminal" title="Switch to Terminal"><span aria-hidden="true">🕹️</span></button>
+        <button id="team-view-toggle" type="button" class="secondary" aria-expanded="false" aria-controls="team-panel" hidden>Teams</button>
         <button id="chat-tools-toggle" type="button" class="secondary panel-toggle" aria-label="Collapse notes and annotations" title="Collapse notes and annotations" aria-expanded="true" aria-controls="chat-tools">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <rect x="3" y="4" width="18" height="16" rx="2"/>
@@ -145,7 +147,51 @@
       <p id="saved-status" role="status"></p>
       <div id="saved-response" tabindex="0" aria-label="Saved conversation"></div>
     </section>
+    <section id="team-setup" aria-labelledby="team-setup-title" hidden>
+      <div class="team-setup-content">
+        <div class="team-setup-intro">
+          <div><p class="team-eyebrow">TEAMS</p><h1 id="team-setup-title">A team for the task</h1><p>Give the team a goal. Add notes or screenshots for context.</p></div>
+          <div id="team-setup-pets" aria-hidden="true"></div>
+        </div>
+        <form id="team-start">
+          <label for="team-brief">What should the team work on?</label>
+          <textarea id="team-brief" rows="4" maxlength="32000" placeholder="Describe the task and what a good result looks like…"></textarea>
+          <input id="team-files" type="file" multiple hidden>
+          <ul id="team-attachments" class="attachment-list" aria-label="Files in the team draft" hidden></ul>
+          <div class="team-setup-actions">
+            <button id="team-attach" type="button" class="secondary">Attach files</button>
+            <button id="team-submit" type="submit" disabled>Start team</button>
+          </div>
+          <p class="team-setup-hint">Up to 10 text files or PNG, JPEG, GIF, and WebP images. GPT-6 Luna · high effort. Edits stay in separate Git worktrees until you integrate them.</p>
+          <p id="team-setup-status" role="status"></p>
+        </form>
+        <button id="team-setup-back" type="button" class="secondary">← Back to chat</button>
+      </div>
+    </section>
+    <section id="team-conversation" aria-labelledby="team-role-title" hidden>
+      <div class="team-heading">
+        <h2 id="team-role-title"></h2>
+        <button id="team-back" type="button" class="secondary">Back to main chat</button>
+      </div>
+      <div id="team-transcript" tabindex="0" aria-label="Role transcript"></div>
+      <form id="team-direction" hidden>
+        <p id="team-report" role="status"></p>
+        <label for="team-input">Your direction</label>
+        <textarea id="team-input" rows="2" maxlength="8000" required></textarea>
+        <button type="submit">Resume role</button>
+      </form>
+    </section>
     <aside id="chat-tools" aria-label="Chat tools">
+      <div id="team-bar" hidden>
+        <button id="team-toggle" type="button" class="secondary" aria-controls="team-panel" aria-expanded="false">Team</button>
+        <span id="team-attention" role="status"></span>
+      </div>
+      <section id="team-panel" aria-label="Agent team" hidden>
+        <div id="team-roles" role="group" aria-label="Team roles" hidden></div>
+        <p id="team-status" role="status"></p>
+        <details id="team-worktrees" hidden><summary>Worktree paths</summary><div id="team-paths"></div></details>
+        <button id="team-stop" type="button" class="secondary" hidden>Stop team</button>
+      </section>
       <div id="chat-tools-content">
         <section id="chat-note" aria-labelledby="chat-note-title" hidden>
           <div class="chat-note-heading">

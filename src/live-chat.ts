@@ -11,7 +11,7 @@ function validateSessionName(name) {
   return name.trim();
 }
 
-export function createLiveChat({ noteStore, attachmentDir, getSessionId, getSessionName, setSessionName, getBranch, onBranch, isIdle, getContextUsage, getModelSettings, setModelSettings, onCompact, getStoppableRequestId, onStop, onSend }) {
+export function createLiveChat({ noteStore, attachmentDir, getSessionId, getSessionName, setSessionName, getBranch, onBranch, isIdle, getContextUsage, getModelSettings, setModelSettings, onCompact, getStoppableRequestId, onStop, onSend, team }) {
   const rendered = new Map();
   const requests = new Map();
   let inFlight = false;
@@ -51,7 +51,7 @@ export function createLiveChat({ noteStore, attachmentDir, getSessionId, getSess
       const messages = branch.slice(index + 1).map(render).filter(Boolean);
       const state = status(branch);
       const origin = after === null && subchatOrigin(branch, getSessionId?.());
-      reply(200, { ...(origin ? { subchatOrigin: origin } : {}), mode: "chat", protocol: 2, annotationImages: true, sessionId: getSessionId?.(), sessionName: getSessionName?.(), cursor: branch.at(-1)?.id ?? null, messages, busy: state === "working", failed: state === "error", stoppableRequestId: stoppableRequestId(), contextUsage: getContextUsage?.(), canCompact: typeof onCompact === "function" && branch.some((entry) => entry.type === "message" && entry.message.role === "user") });
+      reply(200, { ...(origin ? { subchatOrigin: origin } : {}), mode: "chat", protocol: 2, annotationImages: true, team: team ? true : undefined, sessionId: getSessionId?.(), sessionName: getSessionName?.(), cursor: branch.at(-1)?.id ?? null, messages, busy: state === "working", failed: state === "error", stoppableRequestId: stoppableRequestId(), contextUsage: getContextUsage?.(), canCompact: typeof onCompact === "function" && branch.some((entry) => entry.type === "message" && entry.message.role === "user") });
     },
     async modelSettings(reply, checkCurrent, change?) {
       if (!getModelSettings || (change && !setModelSettings)) {

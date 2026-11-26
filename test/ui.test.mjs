@@ -676,7 +676,8 @@ test("clicking the live chat title opens renaming and updates the browser tab", 
   const title = f.$("session-title-text");
   const terminal = f.$("focus-terminal");
   assert.equal(pill.hidden, false);
-  assert.deepEqual([...pill.querySelectorAll("button")], [f.$("open-dashboard"), title, terminal, f.$("chat-tools-toggle"), f.$("explorer-toggle")]);
+  assert.equal(f.$("team-view-toggle").hidden, true, "servers without team support do not expose the Teams control");
+  assert.deepEqual([...pill.querySelectorAll("button:not([hidden])")], [f.$("open-dashboard"), title, terminal, f.$("chat-tools-toggle"), f.$("explorer-toggle")]);
   assert.equal(title.getAttribute("aria-haspopup"), "dialog");
   assert.equal(title.getAttribute("aria-label"), `Rename ${sessionName}`);
   assert.equal(title.textContent, sessionName);
