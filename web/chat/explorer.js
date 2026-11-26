@@ -13,6 +13,8 @@ export function mountExplorer(window, { api, status, setTooltip, hideMessagePrev
 
   const explorer = $("chat-explorer");
   const explorerToggle = $("explorer-toggle");
+  const sessionSearch = $("session-search");
+  const searchToggle = $("session-search-toggle");
   const sessionFilter = $("session-filter");
   const refreshSessions = $("refresh-sessions");
   const openSavedButton = $("open-saved-chat");
@@ -292,14 +294,33 @@ export function mountExplorer(window, { api, status, setTooltip, hideMessagePrev
     revealCurrentChat();
   }
 
+  function setSearchOpen(open) {
+    sessionSearch.hidden = !open;
+    searchToggle.setAttribute("aria-expanded", String(open));
+    if (open) {
+      sessionFilter.focus();
+    } else if (sessionFilter.value) {
+      sessionFilter.value = "";
+      searchProjects = projectView();
+      renderSessionList();
+    }
+  }
+
+  function closeSearch() {
+    setSearchOpen(false);
+    searchToggle.focus();
+  }
+
   function setExplorerOpen(open) {
     explorer.hidden = !open;
     explorerToggle.setAttribute("aria-expanded", String(open));
     document.body.classList.toggle("explorer-open", open);
     if (open) {
-      sessionFilter.focus();
+      searchToggle.focus();
       if (!catalog) void loadSessions();
       void refreshActivity(true);
+    } else {
+      setSearchOpen(false);
     }
   }
 
@@ -346,8 +367,17 @@ export function mountExplorer(window, { api, status, setTooltip, hideMessagePrev
   explorerToggle.addEventListener("click", () => setExplorerOpen(explorer.hidden));
   explorer.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
-    setExplorerOpen(false);
-    explorerToggle.focus();
+    event.preventDefault();
+    if (!sessionSearch.hidden) {
+      closeSearch();
+    } else {
+      setExplorerOpen(false);
+      explorerToggle.focus();
+    }
+  });
+  searchToggle.addEventListener("click", () => {
+    if (sessionSearch.hidden) setSearchOpen(true);
+    else closeSearch();
   });
   sessionFilter.addEventListener("input", () => {
     searchProjects = projectView();

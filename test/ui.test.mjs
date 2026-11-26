@@ -905,10 +905,10 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.ok(controls.parentElement.firstElementChild === controls, "view-mode pill replaces the old heading position");
   assert.equal(f.$("session-filter").getAttribute("aria-label"), "Search chats by name or directory");
   assert.ok(f.$("session-filter").closest(".session-search").querySelector('svg[aria-hidden="true"]'));
-  assert.deepEqual([...controls.querySelectorAll("button")].map((button) => button.getAttribute("aria-label")), ["Collapse all", "Show current chat in explorer", "Expand all", "Refresh chats"]);
+  assert.deepEqual([...controls.querySelectorAll("button")].map((button) => button.getAttribute("aria-label")), ["Collapse all", "Show current chat in explorer", "Expand all", "Refresh chats", "Search chats"]);
   assert.ok(controls.querySelector('[data-action="show-current"] svg path'));
   assert.ok(controls.querySelector('[data-action="show-current"] svg circle'));
-  assert.equal(controls.querySelectorAll('svg[aria-hidden="true"]').length, 4);
+  assert.equal(controls.querySelectorAll('svg[aria-hidden="true"]').length, 5);
   const setMode = (mode) => {
     const button = controls.querySelector(`[data-mode="${mode}"]`);
     button.click();
@@ -923,14 +923,34 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.equal(scrolled.length, 1, "the pin control scrolls the current chat into view");
   assert.equal(scrolled[0].block, "nearest");
   const filter = f.$("session-filter");
+  const searchToggle = f.$("session-search-toggle");
+  const searchPanel = f.$("session-search");
+  assert.equal(searchPanel.hidden, true);
+  assert.equal(searchToggle.getAttribute("aria-expanded"), "false");
+  assert.equal(searchToggle.getAttribute("aria-controls"), searchPanel.id);
+  searchToggle.click();
+  assert.equal(searchPanel.hidden, false);
+  assert.equal(searchToggle.getAttribute("aria-expanded"), "true");
+  assert.equal(f.window.document.activeElement, filter);
   const search = (value) => {
     filter.value = value;
     filter.dispatchEvent(new f.window.Event("input"));
   };
   search("BETA renovate");
   assert.equal(list.querySelector("details").open, true, "search reveals matches in a collapsed project");
-  search("");
+  searchToggle.click();
+  assert.equal(searchPanel.hidden, true);
+  assert.equal(searchToggle.getAttribute("aria-expanded"), "false");
+  assert.equal(filter.value, "");
   assert.equal(list.querySelector('summary[data-tooltip="/work/beta"]').parentElement.open, false);
+  searchToggle.click();
+  search("beta renovate");
+  filter.dispatchEvent(new f.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  assert.equal(f.$("chat-explorer").hidden, false);
+  assert.equal(searchPanel.hidden, true);
+  assert.equal(filter.value, "");
+  assert.equal(f.window.document.activeElement, searchToggle);
+  searchToggle.click();
   search("beta renovate");
   assert.equal(list.querySelectorAll(".session-open").length, 1);
   const saved = list.querySelector(".session-open");
@@ -972,6 +992,8 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.equal(f.$("chat-explorer").hidden, true);
   explorerToggle.click();
   assert.equal(f.$("chat-explorer").hidden, false);
+  assert.equal(searchPanel.hidden, true);
+  assert.equal(filter.value, "");
   assert.equal(f.window.document.querySelector("main").classList.contains("chat-tools-collapsed"), true);
   assert.equal(f.$("chat-send").disabled, true);
   await f.poll();
