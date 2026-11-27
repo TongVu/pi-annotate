@@ -117,12 +117,13 @@ export function mountTranscript(window, { fetchImage, isViewingLive, isCommentOp
   function renderTurn(message, session) {
     const turn = document.createElement("section");
     const assistant = message.role === "assistant";
-    turn.className = `chat-turn ${assistant ? "assistant-turn" : "user-turn"}`;
+    const teamReport = message.role === "team-report";
+    turn.className = `chat-turn ${teamReport ? "team-report-turn" : assistant ? "assistant-turn" : "user-turn"}`;
     turn.dataset.entryId = message.id;
     const content = document.createElement("div");
-    if (assistant) {
+    if (assistant || teamReport) {
       const label = document.createElement("h2");
-      label.textContent = "Pi";
+      label.textContent = teamReport ? "Software architect · Team report" : "Pi";
       turn.append(label);
     } else {
       turn.setAttribute("aria-label", "Your message");
@@ -139,7 +140,7 @@ export function mountTranscript(window, { fetchImage, isViewingLive, isCommentOp
       content.textContent = message.text;
     }
     if (message.text || message.html || assistant) turn.append(content);
-    if (!assistant) appendTranscriptImages(turn, message, session);
+    if (message.role === "user") appendTranscriptImages(turn, message, session);
     if (assistant && !session && message.canBranch) {
       const branch = document.createElement("button");
       branch.type = "button";

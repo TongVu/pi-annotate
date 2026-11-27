@@ -94,6 +94,20 @@ in the browser; retrying the unchanged send checks the same request rather than
 starting another turn. If Pi never confirms it, check the terminal and reopen the
 chat before sending again. Live chat was verified with Pi 1.5.2.
 
+## Agent team
+
+Click **🎮** in a live chat’s title bar to open Teams. Enter a brief, use the paperclip to attach files, and click the **up arrow** to start. The chat bubble returns to Main chat without clearing either draft. Only the brief, attachments, and feedback or blocker directions you send explicitly in Teams go to the team. Main chat messages are not forwarded. Role handoffs and task inputs are sent to the configured team model provider.
+
+The product owner scopes the task, then the architect designs the change. The backend and frontend implementers take turns editing **one shared Git workspace** from committed HEAD. At each handoff the next role gets the current file status and reads the actual changes. The architect reviews the result in that same workspace. Product owner and architect are read-only, and none of the roles has a shell. All four require **GPT-6 Luna with high thinking effort**, independently of Main chat.
+
+Click a pixel pet to inspect that role’s conversation and tool activity. **Needs you** means work is paused for human direction. Open that role, read the blocker, and use its resume button. Two unsuccessful completion attempts or repeated identical tool failures also pause the role. No new stage starts until the blocker is resolved.
+
+After review, **Team result** shows the shared workspace, changed files, and a bounded combined diff. Click the speech bubble with a plus to send feedback to the same workers and workspace. The checkout is not merged into your branch. Review and run the project’s checks from the shared workspace before integrating it; the runner does not execute the team’s new code or start a preview automatically.
+
+Files can be picked, pasted, or dropped with the same limits as the chat composer. Large text uploads are saved locally and passed by path. Images require image input to be enabled in Pi. Rejected starts leave the brief and files in the draft.
+
+Closing the browser or reopening with `/chat` does not stop the team while that Pi session is running. **Stop team** ends it explicitly. Ending or switching the Pi session clears the live role state; the workspace stays under the Pi agent directory. There is no automatic commit, merge, push, or deletion. Remove a workspace with `git worktree remove` after you no longer need it.
+
 ## Chat dashboard
 
 Run `pi --dashboard` from your shell. From a running Pi session, `/chat dashboard`
@@ -339,6 +353,12 @@ invalidation, duplicate/retry behavior, mocked Pi commands, Markdown rendering,
 HTML/link/image safety, and jsdom browser interactions across formatted text,
 paragraphs, lists, entities, emoji, and code blocks. They do not prove native
 selection or visual layout in a real browser.
+
+To try the real Teams page and runner without calling a model, run
+`node docs/mockups/team-setup-preview.mjs` and open the printed loopback URL.
+Start the team, inspect its combined changes, then give feedback and compare the
+next round in the same workspace. Simulated workers write demo files in a
+temporary Git repository. No files in your checkout are edited.
 
 ### Verification so far
 

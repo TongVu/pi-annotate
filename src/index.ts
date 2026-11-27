@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { startChatServer } from "./server.ts";
 import { createChatNoteStore } from "./chat-notes.ts";
+import { saveChatAttachments } from "./chat-attachments.ts";
 import { createSubchat, isBranchableReply, listPiSessions, readPiSession } from "./session-explorer.ts";
 import { createChatPresence } from "./chat-presence.ts";
 import { AUTO_CHAT_SESSION, NEW_CHAT_TARGET, forkChatInKitty, forkChatInTerminal, kittyDashboardTarget, resumeInKitty, resumeChatInTerminal, shellQuote, startVerifyChat, startNewChatInKitty, startNewChatInTerminal } from "./resume-chat.ts";
@@ -13,6 +14,7 @@ import { focusTerminal } from "./focus-terminal.ts";
 import { listDashboardTabs, startDashboard } from "./dashboard.ts";
 import { browserApp, focusBrowserDashboard } from "./focus-browser.ts";
 import { canArchiveSessions, trashExpiredArchives } from "./session-archive.ts";
+import { createAgentTeam, createTeamWorker, prepareTeamWorkspace, resolveTeamModel, teamThinkingLevel } from "./agent-team.ts";
 
 // Keep the existing registry names so running Pi processes can still discover each other.
 const ownerRegistry = (agentDir: string) => join(agentDir, "pi-annotate-owners");
@@ -41,6 +43,7 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
 } = {}) {
   pi.registerFlag("dashboard", { type: "boolean", default: false, description: "Open the Pi Chat dashboard at startup" });
   let active: Awaited<ReturnType<typeof startChatServer>> | undefined;
+  let sessionTeam: { id: string; team: ReturnType<typeof createAgentTeam> } | undefined;
   let dashboard: ReturnType<typeof startDashboard> | undefined;
   let archiveTimer: ReturnType<typeof setInterval> | undefined;
   let archiveSweep: Promise<void> | undefined;
@@ -77,10 +80,15 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
     active?.close();
     active = undefined;
   };
+  const closeTeam = () => {
+    sessionTeam?.team.close();
+    sessionTeam = undefined;
+  };
   pi.on("session_shutdown", async () => {
     clearInterval(archiveTimer);
     archiveTimer = undefined;
     stop();
+    closeTeam();
     ownerGeneration++;
     const owner = sessionOwner;
     sessionOwner = undefined;
@@ -186,9 +194,27 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
       // Keep the existing path so the repository rename doesn't strand saved notes.
       const noteStore = createChatNoteStore(join(sessionDir, ".pi-annotate-notes"));
       const attachmentDir = join(sessionDir || await getAgentDir(), ".pi-chat-attachments");
+      // A /chat listener is only a view. Team state belongs to the running Pi session.
+      if (!isCurrent()) return;
+      if (sessionTeam?.id !== sessionId) {
+        closeTeam();
+        let teamModel: ExtensionContext["model"];
+        sessionTeam = { id: sessionId, team: createAgentTeam({
+          prepare: async ({ hasImages, workspace }) => {
+            const { getSupportedThinkingLevels } = await import("@earendil-works/pi-ai");
+            teamModel = resolveTeamModel(ctx.modelRegistry.getAvailable(), getSupportedThinkingLevels);
+            if (hasImages && pi.getSettings().images?.blockImages) throw new Error("Images are disabled in Pi’s settings.");
+            if (hasImages && !teamModel.input.includes("image")) throw new Error("GPT-6 Luna cannot receive images in this Pi setup.");
+            return workspace ?? prepareTeamWorkspace(ctx.sessionManager.getCwd(), join(await getAgentDir(), "pi-chat-teams"));
+          },
+          saveAttachments: (items) => saveChatAttachments(attachmentDir, sessionId, items),
+          openWorker: async (worker) => createTeamWorker({ ...worker, agentDir: await getAgentDir(), model: teamModel, thinkingLevel: teamThinkingLevel }),
+        }) };
+      }
       const kitty = process.platform === "linux" ? kittyDashboardTarget() : undefined;
       const opened = await startChatServer({
         isCurrent,
+        closeTeamOnClose: false,
         onClose: () => {
           if (generation === currentGeneration) {
             generation++;
@@ -198,6 +224,7 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
         chat: {
           noteStore,
           attachmentDir,
+          team: sessionTeam.team,
           getSessionId: () => ctx.sessionManager.getSessionId(),
           getSessionName: () => ctx.sessionManager.getSessionName(),
           setSessionName: (sessionName: string) => pi.setSessionName(sessionName),
@@ -302,6 +329,7 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
   };
 
   pi.on("session_start", async (event, ctx) => {
+    if (sessionTeam && sessionTeam.id !== ctx.sessionManager.getSessionId()) closeTeam();
     if (ctx.mode === "tui" && canArchiveSessions && !archiveTimer) {
       const sweep = () => {
         archiveSweep ??= getAgentDir().then((dir) => trashExpiredArchives(archiveRoot(dir)))

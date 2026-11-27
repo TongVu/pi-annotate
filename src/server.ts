@@ -20,6 +20,9 @@ const assets = {
   "/chat/annotations.js": ["chat/annotations.js", "text/javascript; charset=utf-8"],
   "/chat/attachments.js": ["chat/attachments.js", "text/javascript; charset=utf-8"],
   "/chat/notes.js": ["chat/notes.js", "text/javascript; charset=utf-8"],
+  "/chat/team.js": ["chat/team.js", "text/javascript; charset=utf-8"],
+  "/chat/team-pets.js": ["chat/team-pets.js", "text/javascript; charset=utf-8"],
+  "/chat/team.css": ["chat/team.css", "text/css; charset=utf-8"],
   "/style.css": ["style.css", "text/css; charset=utf-8", "tooltips.css"],
   "/favicon.ico": ["favicon.ico", "image/x-icon"],
   "/logo.png": ["logo.png", "image/png"],
@@ -45,7 +48,7 @@ function readBody(req, limit) {
 }
 
 /** Loopback only; session operations are delegated to Pi, with no cookies or CORS. */
-export async function startChatServer({ chat, onClose, isCurrent = () => true, ttlMs = 30 * 60_000 }) {
+export async function startChatServer({ chat, onClose, isCurrent = () => true, ttlMs = 30 * 60_000, closeTeamOnClose = true }) {
   const live = createLiveChat(chat);
   const presence = chat.presence;
   const explorer = chat.explorer && createChatCatalog(chat.explorer, presence);
@@ -86,6 +89,26 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
         return;
       }
       const url = new URL(req.url, origin);
+      if (chat.team && url.pathname === "/api/team") {
+        if (req.method === "GET") {
+          const role = url.searchParams.get("role") ?? undefined;
+          const data = chat.team.snapshot(role);
+          if (url.searchParams.get("revision") === String(data.revision)) reply(200, { revision: data.revision });
+          else reply(200, data);
+          return;
+        }
+        if (req.method === "POST") {
+          if (!isSameOriginJson(req.headers, origin)) return reply(403, { error: "Expected a same-origin JSON request." });
+          const body = JSON.parse((await readBody(req, CHAT_BODY_LIMIT)).toString("utf8"));
+          if (!checkCurrent()) return;
+          if (body?.action === "start" || body?.action === "feedback") chat.team.start(body.brief, body.attachments, body.action === "feedback");
+          else if (body?.action === "resume") chat.team.resume(body.role, body.pause, body.direction);
+          else if (body?.action === "stop") chat.team.close();
+          else throw new Error("Unknown team action.");
+          reply(202, { ok: true });
+          return;
+        }
+      }
       if (live && req.method === "GET" && url.pathname === "/api/note") {
         const note = await live.readNote();
         if (checkCurrent()) reply(200, note);
@@ -272,6 +295,7 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
     server.close();
     server.closeAllConnections();
     void presence?.close();
+    if (closeTeamOnClose) chat.team?.close();
     onClose?.();
   };
   const timer = setTimeout(close, ttlMs);

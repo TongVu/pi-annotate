@@ -93,6 +93,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   let originReplyId;
   let cursor = null;
   let notes;
+  let team;
   const appTitle = "Pi Chat";
   let liveTitle = appTitle;
   let chatTitleStatus = "⚪";
@@ -337,7 +338,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
       dashboardButton.disabled = false;
     }
   });
-  const isViewingLive = () => !explorer.isSaved();
+  const isViewingLive = () => !explorer.isSaved() && !team?.viewingTeam();
   const attachmentUi = mountAttachmentUi(window, setTooltip);
   const composer = mountComposerDraft(window, {
     sender, attachmentUi, status, setTooltip,
@@ -364,7 +365,8 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     isConnected: () => connected,
     transcript,
     onViewChange() {
-      (explorer.isSaved() ? $("chat-rail") : $("chat-form")).before(chatHeading);
+      team?.setSavedView(explorer.isSaved());
+      placeChatHeading();
       updateSubchatOriginVisibility();
       annotations.hideSelectionAction();
       updateControls();
@@ -375,12 +377,22 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     },
   });
 
+  function placeChatHeading() {
+    // The live toolbar is above the composer. Views that hide the composer need
+    // the same toolbar outside the live conversation so the return control stays usable.
+    const next = explorer.isSaved() || team?.viewingTeam() ? $("chat-rail") : $("chat-form");
+    if (next.previousElementSibling === chatHeading) return;
+    const focused = document.activeElement;
+    next.before(chatHeading);
+    if (chatHeading.contains(focused)) focused.focus({ preventScroll: true });
+  }
+
   function startChat(data, mountChatNotes) {
     // Older servers silently ignore the new attachments field on messages with a caption.
     if (data.protocol !== 2) throw new Error("Pi's chat server is outdated. Run /reload, then /chat in Pi.");
     document.body.classList.add("chat-page");
     mountPanelResizers(window);
-    $("chat-form").before(chatHeading);
+    placeChatHeading();
     sessionTitlePill.hidden = false;
     const shortcuts = new Map([
       ["Digit1", focusTerminalButton],
@@ -420,6 +432,15 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     }, { once: true });
     updateChat(data);
     status("");
+    if (data.team === true) void import("./team.js").then(({ mountAgentTeam }) => {
+      team = mountAgentTeam(window, { api, attachmentUi, setTooltip, onViewChange() {
+        placeChatHeading();
+        annotations.hideSelectionAction();
+        updateControls();
+      } });
+      team.setSavedView(explorer.isSaved());
+      void team.refresh();
+    }).catch(() => {}); // Older listeners don't serve the optional team assets.
     async function poll() {
       try {
         const wasConnected = connected;
@@ -429,6 +450,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
         if (sendsAtPollStart === sender.accepted) updateChat(data);
         if (!wasConnected) explorer.refreshConnection();
         explorer.pollActivity();
+        void team?.refresh();
       } catch (error) {
         const wasConnected = connected;
         connected = false;
@@ -443,7 +465,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   }
 
   window.addEventListener("beforeunload", (event) => {
-    if (composer.hasDraft() || annotations.hasDraft() || notes?.hasPendingAttachments()) {
+    if (composer.hasDraft() || annotations.hasDraft() || notes?.hasPendingAttachments() || team?.hasDraft()) {
       event.preventDefault();
       event.returnValue = "";
     }
