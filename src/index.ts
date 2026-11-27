@@ -12,11 +12,13 @@ import { registerSessionOwner, requestOwnedChat } from "./session-owner.ts";
 import { focusTerminal } from "./focus-terminal.ts";
 import { listDashboardTabs, startDashboard } from "./dashboard.ts";
 import { browserApp, focusBrowserDashboard } from "./focus-browser.ts";
+import { canArchiveSessions, trashExpiredArchives } from "./session-archive.ts";
 
 // Keep the existing registry names so running Pi processes can still discover each other.
 const ownerRegistry = (agentDir: string) => join(agentDir, "pi-annotate-owners");
 const presenceRegistry = (agentDir: string) => join(agentDir, "pi-annotate-live");
 const dashboardRegistry = (agentDir: string) => join(agentDir, "pi-chat-dashboards");
+const archiveRoot = (agentDir: string) => join(agentDir, "pi-chat", "archive");
 const agentDirPath = async () => (await import("@earendil-works/pi-coding-agent")).getAgentDir();
 
 function openPage(url: string, userAgent?: string): Promise<void> {
@@ -40,6 +42,8 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
   pi.registerFlag("dashboard", { type: "boolean", default: false, description: "Open the Pi Chat dashboard at startup" });
   let active: Awaited<ReturnType<typeof startChatServer>> | undefined;
   let dashboard: ReturnType<typeof startDashboard> | undefined;
+  let archiveTimer: ReturnType<typeof setInterval> | undefined;
+  let archiveSweep: Promise<void> | undefined;
   let sessionOwner: Awaited<ReturnType<typeof registerSessionOwner>> | undefined;
   let ownerGeneration = 0;
   let generation = 0;
@@ -74,6 +78,8 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
     active = undefined;
   };
   pi.on("session_shutdown", async () => {
+    clearInterval(archiveTimer);
+    archiveTimer = undefined;
     stop();
     ownerGeneration++;
     const owner = sessionOwner;
@@ -103,6 +109,7 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
       presenceDir: presenceRegistry(agentDir),
       ownerDir: ownerRegistry(agentDir),
       bookmarkDir: join(agentDir, "pi-chat-bookmarks"),
+      archiveDir: canArchiveSessions ? archiveRoot(agentDir) : undefined,
       tabRegistry: registry,
       verifyChat: process.platform === "darwin" || kitty ? (cwd, name) => startVerifyChat(cwd, name, fileURLToPath(import.meta.url), agentDir, kitty) : undefined,
       focusTerminal,
@@ -295,6 +302,14 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
   };
 
   pi.on("session_start", async (event, ctx) => {
+    if (ctx.mode === "tui" && canArchiveSessions && !archiveTimer) {
+      const sweep = () => {
+        archiveSweep ??= getAgentDir().then((dir) => trashExpiredArchives(archiveRoot(dir)))
+          .catch(() => {}).finally(() => { archiveSweep = undefined; });
+      };
+      sweep();
+      archiveTimer = setInterval(sweep, 60 * 60 * 1000).unref();
+    }
     if (event.reason === "startup" && pi.getFlag("dashboard") === true) {
       if (ctx.mode === "tui") await showDashboardInTerminal(ctx);
       // An empty launcher isn't a disconnected chat.

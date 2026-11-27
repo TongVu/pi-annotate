@@ -15,6 +15,7 @@ const codexQuota = el("span", "codex-quota");
 codexQuota.tabIndex = 0;
 codexQuota.hidden = true;
 const bookmarkView = document.querySelector('[data-view="bookmarks"]');
+const archiveView = $("archive-view");
 const createChatButton = $("create-chat");
 const focusTerminalButton = $("focus-terminal");
 const newChatDialog = $("new-chat-dialog");
@@ -67,6 +68,8 @@ let chosenProject;
 let activeProjectOption;
 const pending = new Set();
 const savingBookmarks = new Set();
+const archiving = new Set();
+const restoring = new Set();
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -117,6 +120,34 @@ function actionButton(session, inSidebar = false) {
   return node;
 }
 
+function sessionStorageButton({ id, name }, place, label, shape, busy) {
+  const button = el("button", `${place}-session`);
+  button.type = "button";
+  button.dataset.id = id;
+  button.dataset.place = place;
+  button.setAttribute("aria-label", `${label}: ${name}`);
+  button.setAttribute("aria-disabled", String(busy));
+  setTooltip(button, label);
+  const ns = "http://www.w3.org/2000/svg";
+  const icon = document.createElementNS(ns, "svg");
+  for (const [name, value] of Object.entries({ width: 16, height: 16, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", "stroke-width": 1.3, "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" })) {
+    icon.setAttribute(name, value);
+  }
+  const path = document.createElementNS(ns, "path");
+  path.setAttribute("d", shape);
+  icon.append(path);
+  button.append(icon);
+  return button;
+}
+
+function sidebarSession(session) {
+  const link = actionButton(session, true);
+  if (!session.canArchive) return link;
+  const row = el("div", "session-with-archive");
+  row.append(link, sessionStorageButton(session, "archive", "Archive", "M2.5 4h11M6 4V2h4v2M4 4l.7 10h6.6L12 4M7 7v4m2-4v4", archiving.has(session.id)));
+  return row;
+}
+
 function sidebar(groups) {
   const nodes = [];
   for (const [cwd, items] of groups) {
@@ -128,7 +159,7 @@ function sidebar(groups) {
     setTooltip(heading, cwd);
     if (selected) heading.setAttribute("aria-current", "true");
     heading.append(el("span", "truncate", projectName(cwd)), el("span", "meta", items.length));
-    group.append(heading, ...items.map((session) => actionButton(session, true)));
+    group.append(heading, ...items.map(sidebarSession));
     nodes.push(group);
   }
   $("projects").replaceChildren(...nodes);
@@ -136,6 +167,32 @@ function sidebar(groups) {
     if (button.dataset.view === view) button.setAttribute("aria-current", "true");
     else button.removeAttribute("aria-current");
   }
+}
+
+function renderArchive(archived) {
+  if (!archiveView) return;
+  archiveView.hidden = archived === undefined;
+  const list = $("archived-sessions");
+  const empty = $("archive-empty");
+  const items = archived ?? [];
+  $("archive-count").textContent = archived ? items.length : "";
+  empty.hidden = items.length > 0;
+  empty.textContent = archived === null ? "Could not load the archive." : "No archived chats yet.";
+  const focused = document.activeElement?.dataset;
+  list.hidden = items.length === 0;
+  list.replaceChildren(...items.map(({ id, name, cwd, archivedAt }) => {
+    const item = el("li");
+    const details = el("span", "meta");
+    const date = new Date(archivedAt);
+    const time = el("time", "", date.toLocaleDateString());
+    time.dateTime = date.toISOString();
+    if (cwd) details.append(`${projectName(cwd)} · `);
+    details.append(time);
+    item.append(el("span", "", name), details);
+    if (id) item.append(sessionStorageButton({ id, name }, "restore", "Restore", "M2.5 4v4h4M2.5 8l2-2a5.5 5.5 0 1 1 1 8", restoring.has(id)));
+    return item;
+  }));
+  if (focused?.place === "restore") (restoreButton(focused.id) ?? archiveView.querySelector("summary")).focus({ preventScroll: true });
 }
 
 function bookmarkButton(session) {
@@ -212,6 +269,7 @@ function cards(cwd, items, namesById) {
 function render() {
   hideTooltip();
   const focused = document.activeElement?.dataset;
+  const archiveProject = focused?.place === "archive" ? document.activeElement.closest(".project")?.querySelector(".project-heading")?.dataset.project : undefined;
   createChatButton.disabled = !projects.length;
   if (view === "project" && !projects.includes(project) && !sessions.some(({ cwd }) => cwd === project)) {
     view = "all";
@@ -275,7 +333,8 @@ function render() {
   } else if (focused?.id !== undefined || focused?.project !== undefined) {
     const replacement = [...document.querySelectorAll("button[data-id], button[data-project]")].find(({ dataset }) =>
       focused.id !== undefined ? dataset.id === focused.id && dataset.place === focused.place : dataset.project === focused.project);
-    (replacement ?? (view === "bookmarks" ? bookmarkView : undefined))?.focus({ preventScroll: true });
+    const fallback = archiveProject === undefined ? undefined : [...document.querySelectorAll(".project-heading")].find(({ dataset }) => dataset.project === archiveProject);
+    (replacement ?? fallback ?? (view === "bookmarks" ? bookmarkView : undefined))?.focus({ preventScroll: true });
   }
 }
 
@@ -326,6 +385,7 @@ async function refresh(force = false) {
         projects = result.projects ?? [...new Set(sessions.map(({ cwd }) => cwd).filter(Boolean))];
         focusTerminalButton.hidden = result.canFocusTerminal !== true;
         bookmarkView.hidden = result.supportsBookmarks !== true;
+        renderArchive(result.archived);
         render();
       }
       if (force) notice("Dashboard refreshed.");
@@ -337,6 +397,45 @@ async function refresh(force = false) {
     }
   })().finally(() => { refreshInFlight = undefined; });
   return refreshInFlight;
+}
+
+async function archiveChat(id) {
+  if (!sessions.some((session) => session.id === id && session.canArchive) || archiving.has(id)) return;
+  archiving.add(id);
+  render();
+  try {
+    const result = await api("/api/session/archive", { id });
+    await refreshInFlight;
+    await refresh();
+    notice(result.message);
+  } catch (error) {
+    notice(error.message, true);
+  } finally {
+    archiving.delete(id);
+    render();
+  }
+}
+
+function restoreButton(id) {
+  return [...document.querySelectorAll(".restore-session")].find(({ dataset }) => dataset.id === id);
+}
+
+async function restoreChat(button) {
+  const { id } = button.dataset;
+  if (restoring.has(id)) return;
+  restoring.add(id);
+  button.setAttribute("aria-disabled", "true");
+  try {
+    const result = await api("/api/session/restore", { id });
+    await refreshInFlight;
+    await refresh();
+    notice(result.message);
+  } catch (error) {
+    notice(error.message, true);
+  } finally {
+    restoring.delete(id);
+    restoreButton(id)?.setAttribute("aria-disabled", "false");
+  }
 }
 
 async function toggleBookmark(id) {
@@ -520,6 +619,8 @@ document.addEventListener("click", (event) => {
     button.disabled = true;
     void api("/api/session/verify", { id }).then(result => notice(result.message), error => notice(error.message, true)).finally(() => { button.disabled = false; });
   } else if (place === "bookmark") void toggleBookmark(id);
+  else if (place === "archive") void archiveChat(id);
+  else if (place === "restore") void restoreChat(button);
   else if (id !== undefined) void openChat(id);
   else if (cwd !== undefined || next) {
     if (view !== (next || "project") || project !== cwd) statusFilter = undefined;

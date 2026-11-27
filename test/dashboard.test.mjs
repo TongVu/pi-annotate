@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -79,6 +79,7 @@ test("dashboard still loads sessions when an existing Pi listener serves unbundl
   assert.equal(card.querySelector("button").title, saved.name);
   assert.equal(card.querySelector(".bookmark"), null);
   assert.equal(dom.window.document.querySelector('[data-view="bookmarks"]').hidden, true);
+  assert.equal(dom.window.document.getElementById("archive-view").hidden, true);
   assert.equal(dom.window.document.getElementById("create-chat").disabled, false);
   assert.equal(dom.window.document.querySelector("#legend .codex-quota").hidden, true);
 });
@@ -534,6 +535,92 @@ test("dashboard bookmarks toggle without opening chats and filter the grouped vi
   assert.deepEqual(labels(".card h3"), [other.name]);
   assert.deepEqual(writes, [["/api/session/bookmark", { id: saved.id, bookmarked: true }],
     ["/api/session/bookmark", { id: other.id, bookmarked: true }], ["/api/session/bookmark", { id: saved.id, bookmarked: false }]]);
+});
+
+test("sidebar archives and restores a closed chat without opening it or overwriting a transcript", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-dashboard-archive-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const archiveDir = join(dir, "archive");
+  const source = join(dir, "sessions");
+  await mkdir(source);
+  const session = { ...saved, path: join(source, "saved.jsonl"), modified: new Date() };
+  const transcript = JSON.stringify({ type: "session", id: session.id });
+  await writeFile(session.path, transcript);
+  const dashboard = await fixture(t, { archiveDir, project: session.cwd, list: async () => await stat(session.path).then(() => [session], () => []) });
+  const archive = (body) => dashboard.request("/api/session/archive", body);
+  assert.equal((await archive({ id: session.id, path: session.path })).status, 400);
+  assert.equal((await archive({ id: "missing" })).status, 404);
+  const owner = await registerSessionOwner(dashboard.ownerDir, session, async () => assert.fail("Archive must not attach"));
+  t.after(() => owner.close());
+  assert.equal((await dashboard.sessions())[0].canArchive, undefined);
+  assert.equal((await archive({ id: session.id })).status, 409);
+  assert.equal(await readFile(session.path, "utf8"), transcript);
+  await owner.close();
+
+  const asset = async (path) => (await fetch(dashboard.url.origin + path)).text();
+  const dom = new JSDOM(await asset("/"), { url: dashboard.url.href, runScripts: "outside-only" });
+  t.after(() => dom.window.close());
+  const writes = [];
+  dom.window.fetch = (path, options) => {
+    const body = options.body && JSON.parse(options.body);
+    if (body) writes.push([path, body]);
+    return dashboard.request(path, body);
+  };
+  dom.window.eval(await asset("/dashboard.js"));
+  const { document, MouseEvent } = dom.window;
+  const button = await waitFor(() => document.querySelector("#projects .archive-session"));
+  const archiveView = document.getElementById("archive-view");
+  const archiveToggle = archiveView.querySelector("summary");
+  const archiveList = document.getElementById("archived-sessions");
+  assert.equal(archiveView.hidden, false);
+  assert.equal(archiveView.open, false);
+  archiveToggle.click();
+  assert.equal(archiveView.open, true);
+  assert.match(document.getElementById("archive-empty").textContent, /No archived chats/);
+  assert.equal(button.getAttribute("aria-label"), `Archive: ${session.name}`);
+  assert.equal(button.previousElementSibling.querySelector(".meta").textContent, "now");
+  button.focus();
+  button.querySelector("path").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  await waitFor(() => !document.querySelector("#projects .session-link"));
+  assert.equal(document.activeElement, document.querySelector(".project-heading"));
+  assert.match(document.getElementById("message").textContent, /Session archived/);
+  assert.deepEqual(writes, [["/api/session/archive", { id: session.id }]]);
+  assert.deepEqual(await dashboard.sessions(), []);
+  await assert.rejects(stat(session.path), { code: "ENOENT" });
+  const [entry] = await readdir(archiveDir);
+  assert.equal(await readFile(join(archiveDir, entry, "saved.jsonl"), "utf8"), transcript);
+  assert.equal(await readFile(join(archiveDir, entry, "original-path.txt"), "utf8"), session.path);
+  assert.equal(archiveView.open, true);
+  assert.equal(document.getElementById("archive-count").textContent, "1");
+  assert.equal(archiveList.querySelector("li > span").textContent, session.name);
+  assert.match(archiveList.querySelector("li .meta").textContent, /project · /);
+  assert.equal(Date.parse(archiveList.querySelector("time").dateTime), Number(entry.slice(0, 13)));
+  const restore = (body) => dashboard.request("/api/session/restore", body);
+  assert.equal((await restore({ id: entry, path: session.path })).status, 400);
+  assert.equal((await restore({ id: `../${entry}` })).status, 404);
+  const restoreButton = archiveList.querySelector(".restore-session");
+  assert.equal(restoreButton.getAttribute("aria-label"), `Restore: ${session.name}`);
+  archiveToggle.click();
+  assert.equal(archiveView.open, false);
+  archiveToggle.click();
+  await writeFile(session.path, "Do not overwrite this file");
+  restoreButton.focus();
+  restoreButton.click();
+  await waitFor(() => /Nothing was overwritten/.test(document.getElementById("message").textContent));
+  assert.equal(await readFile(session.path, "utf8"), "Do not overwrite this file");
+  assert.equal(await readFile(join(archiveDir, entry, "saved.jsonl"), "utf8"), transcript);
+  assert.equal(document.getElementById("archive-count").textContent, "1");
+  await rm(source, { recursive: true });
+  archiveList.querySelector(".restore-session").querySelector("path").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  await waitFor(() => document.getElementById("archive-count").textContent === "0");
+  assert.equal(archiveView.open, true);
+  assert.equal(document.activeElement, archiveToggle);
+  assert.equal(archiveList.children.length, 0);
+  assert.equal(await readFile(session.path, "utf8"), transcript);
+  assert.deepEqual(await readdir(archiveDir), []);
+  assert.equal((await dashboard.sessions())[0].name, session.name);
+  assert.deepEqual(writes, [["/api/session/archive", { id: session.id }],
+    ["/api/session/restore", { id: entry }], ["/api/session/restore", { id: entry }]]);
 });
 
 test("dashboard creates a fresh chat only in a listed project and stays available", async (t) => {

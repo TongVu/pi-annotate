@@ -8,6 +8,7 @@ import { readCodexQuota, type CodexQuota } from "./codex-quota.ts";
 import { canFocusBrowser, focusBrowserChat } from "./focus-browser.ts";
 import { isLocalRequest, isSameOriginJson, setLocalPageHeaders } from "./loopback-http.ts";
 import { shellQuote } from "./resume-chat.ts";
+import { archiveSession, listArchivedSessions, restoreArchivedSession } from "./session-archive.ts";
 import { listOwnedSessions, requestOwnedChat } from "./session-owner.ts";
 import { readWebAsset } from "./web-assets.ts";
 
@@ -25,6 +26,7 @@ type Options = {
   presenceDir: string;
   ownerDir: string;
   bookmarkDir: string;
+  archiveDir?: string;
   tabRegistry?: string;
   project?: string;
   resume?: (session: SavedChat) => Promise<void | false>;
@@ -55,15 +57,16 @@ export async function listDashboardTabs(registry: string) {
   return tabs;
 }
 
-export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir, tabRegistry, project, resume, createChat, verifyChat, canFocus = canFocusBrowser, focus = focusBrowserChat, focusTerminal, readQuota = readCodexQuota }: Options) {
+export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir, archiveDir, tabRegistry, project, resume, createChat, verifyChat, canFocus = canFocusBrowser, focus = focusBrowserChat, focusTerminal, readQuota = readCodexQuota }: Options) {
   const token = randomBytes(32).toString("hex");
   const tabId = randomBytes(16).toString("hex");
   const tabPath = `/?dashboard=${tabId}`;
   let origin: string;
   let closed = false;
-  let listing: Promise<SavedChat[]> | undefined;
+  let listing: Promise<[SavedChat[], Awaited<ReturnType<typeof listArchivedSessions>> | null | undefined]> | undefined;
   let listAgain = 0;
   const opening = new Map<string, number>();
+  const archiving = new Set<string>();
   const verifying = new Set<string>();
   let creating = false;
   let codexQuota: CodexQuota | undefined;
@@ -81,16 +84,17 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
     // Pi's session index may read every session file. Poll the lightweight live markers more often.
     if (!listing || Date.now() >= listAgain || (refresh && listAgain !== Infinity)) {
       listAgain = Infinity;
-      listing = list().finally(() => { listAgain = Date.now() + 10_000; });
+      listing = Promise.all([list(), archiveDir ? listArchivedSessions(archiveDir).catch(() => null) : undefined])
+        .finally(() => { listAgain = Date.now() + 10_000; });
     }
-    const [sessions, peers, owners] = await Promise.all([listing, listLiveChats(presenceDir), listOwnedSessions(ownerDir)]);
+    const [[sessions, archived], peers, owners] = await Promise.all([listing, listLiveChats(presenceDir), listOwnedSessions(ownerDir)]);
     // The startup guard is only needed until Pi registers. Its browser tab can then be closed and reopened immediately.
     for (const { id } of owners) if (Number.isFinite(opening.get(id))) opening.delete(id);
     // The launch directory is a project even before its first session exists.
     const projects = new Set([project, ...[...sessions, ...peers, ...owners].map(({ cwd }) => cwd)]
       .filter((cwd): cwd is string => typeof cwd === "string" && isAbsolute(cwd)));
     return {
-      projects,
+      projects, archived,
       saved: new Map(sessions.map((session) => [session.id, session])),
       live: new Map(peers.map((session) => [session.id, session])),
       owned: new Map(owners.map((session) => [session.id, session])),
@@ -118,7 +122,7 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
       const browserSwitcher = process.platform === "linux" && /(?:Chrome|Edg)\//.test(agent);
       if (req.method === "GET" && ["/api/dashboard", "/api/dashboard?refresh=1"].includes(req.url ?? "")) {
         refreshQuota();
-        const [{ saved, live, owned, projects }, markers] = await Promise.all([
+        const [{ saved, live, owned, projects, archived }, markers] = await Promise.all([
           discover(req.url.endsWith("?refresh=1")),
           readdir(bookmarkDir).catch((error) => {
             if (error.code === "ENOENT") return [];
@@ -141,6 +145,7 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
             preview: preview !== name ? preview : "",
             modified: session?.modified.getTime() ?? null,
             bookmarked: bookmarks.size > 0 && bookmarks.has(bookmarkKey(id)),
+            canArchive: archiveDir && session && !peer && !owner && (opening.get(id) ?? 0) <= Date.now() ? true : undefined,
             status: peer ? peer.status ?? "connected" : owner ? "disconnected" : "saved",
             terminalWorking: !peer && owner?.working ? true : undefined,
             canVerify: verifyChat && (peer?.cwd || owner?.cwd || session?.cwd) ? true : undefined,
@@ -148,13 +153,15 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
               : owner ? "reopen" : session?.cwd ? (resume ? "resume" : "manual-resume") : "unavailable",
           };
         });
-        return reply(200, { projects: [...projects].sort(), sessions, supportsBookmarks: true, browserSelect: browserSwitcher || undefined, canFocusTerminal: focusTerminal ? true : undefined, codexQuotaLeft: codexQuota?.left, codexQuotaResetsAt: codexQuota?.resetsAt });
+        return reply(200, { projects: [...projects].sort(), sessions, archived, supportsBookmarks: true, browserSelect: browserSwitcher || undefined, canFocusTerminal: focusTerminal ? true : undefined, codexQuotaLeft: codexQuota?.left, codexQuotaResetsAt: codexQuota?.resetsAt });
       }
       const newChat = req.url === "/api/session/new";
       const verify = req.url === "/api/session/verify";
       const focusHost = req.url === "/api/focus-terminal";
       const bookmark = req.url === "/api/session/bookmark";
-      if (req.method === "POST" && (newChat || verify || focusHost || bookmark || req.url === "/api/open")) {
+      const archive = req.url === "/api/session/archive";
+      const restore = req.url === "/api/session/restore";
+      if (req.method === "POST" && (newChat || verify || focusHost || bookmark || archive || restore || req.url === "/api/open")) {
         if (!isSameOriginJson(req.headers, origin)) {
           return reply(403, { error: "Expected a same-origin JSON request." });
         }
@@ -164,6 +171,43 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
           if (raw.length > 4096) return reply(413, { error: "Request is too large." });
         }
         const body = JSON.parse(raw);
+        if (restore) {
+          const id = body?.id;
+          if (typeof id !== "string" || !id || Object.keys(body).length !== 1) return reply(400, { error: "Choose an archived session to restore." });
+          if (!archiveDir) return reply(501, { error: "Session archiving is unavailable on this dashboard." });
+          if (closed) return;
+          try {
+            if (!await restoreArchivedSession(archiveDir, id)) {
+              return reply(404, { error: "This chat is no longer in the archive. It may already be restored or in the system Trash." });
+            }
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+              return reply(409, { error: "A file already exists at the restore location. Nothing was overwritten." });
+            }
+            throw error;
+          }
+          listing = undefined;
+          return reply(200, { message: "Session restored to its original project." });
+        }
+        if (archive) {
+          const id = body?.id;
+          if (typeof id !== "string" || !id || Object.keys(body).length !== 1) return reply(400, { error: "Choose a saved session to archive." });
+          if (!archiveDir) return reply(501, { error: "Session archiving is unavailable on this dashboard." });
+          if (archiving.has(id)) return reply(409, { error: "This session is already being archived." });
+          archiving.add(id);
+          try {
+            const { saved, live, owned } = await discover(true);
+            if (closed) return;
+            if (live.has(id) || owned.has(id) || (opening.get(id) ?? 0) > Date.now()) {
+              return reply(409, { error: "Close the Pi session in Terminal before archiving it." });
+            }
+            const session = saved.get(id);
+            if (!session) return reply(404, { error: "This saved session is no longer on the dashboard." });
+            await archiveSession(archiveDir, session);
+            listing = undefined;
+            return reply(200, { message: "Session archived. It will be moved to your system Trash after 30 days." });
+          } finally { archiving.delete(id); }
+        }
         if (bookmark) {
           const { id, bookmarked } = body ?? {};
           if (typeof id !== "string" || !id || typeof bookmarked !== "boolean" || Object.keys(body).length !== 2) {
@@ -236,6 +280,7 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
         const { id, intent } = body;
         const { live, saved, owned } = await discover();
         if (closed) return;
+        if (archiving.has(id)) return reply(409, { error: "This session is being archived." });
         const peer = live.get(id);
         if (intent !== "select" && !!peer !== (intent === "focus")) {
           return reply(409, { error: "That chat’s connection changed. Check its updated status and try again." });

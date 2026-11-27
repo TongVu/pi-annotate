@@ -114,6 +114,28 @@ chats. **Bookmarks** shows only the chats you’ve bookmarked, grouped by projec
 Hover over a session card or use keyboard focus to reveal its top-right bookmark
 button (always visible on touch screens). Click it again to remove the bookmark.
 Bookmarks stay visible on marked cards and survive dashboard and machine restarts.
+
+On Ubuntu and macOS, hover or tab to a saved chat in the left sidebar to reveal
+**Archive** in place of its age (the icon is always visible on touch screens).
+Close a running Pi session before archiving it. Archiving moves the transcript
+out of the session list into `pi-chat/archive/` under the Pi agent directory
+(normally `~/.pi/agent/pi-chat/archive/`). Expand **Archive** under **Views**
+to see archived chats, newest first, with their project and archive date. The
+section starts collapsed and keeps archived chats out of the Projects list.
+Hover over an archived chat or tab to its **Restore** button to return it to
+its original project without opening it. If a file already exists there, Pi Chat
+leaves both files untouched.
+
+Pi Chat checks for expired archives when interactive Pi starts and hourly while
+it runs, even if the dashboard is closed. Once an archive is 30 days old (counted
+from when you archived it), Pi Chat moves it to the system Trash. If Pi isn't
+running, the next launch catches up. On Ubuntu this uses `gio trash`; if the
+system Trash is unavailable, Pi Chat leaves the archive in place and retries
+later. Pi Chat never empties the system Trash. To recover a chat once it is in
+the OS Trash, recover the archive folder using the OS, then move the `.jsonl`
+file to the location recorded in `original-path.txt` without overwriting an
+existing file.
+
 Pulsing amber and green dots mark working and ready chats, respectively.
 A hollow green ring marks a Pi session still running in Terminal without a connected chat tab.
 It pulses amber during a turn but stays in the **Disconnected** count. A filled gray dot

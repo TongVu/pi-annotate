@@ -17,6 +17,11 @@
           <button class="nav-item" type="button" data-view="all" aria-current="true">All sessions</button>
           <button class="nav-item" type="button" data-view="attention">Needs attention</button>
           <button class="nav-item" type="button" data-view="bookmarks" hidden>Bookmarks</button>
+          <details id="archive-view" hidden>
+            <summary class="nav-item">Archive <span id="archive-count" class="meta"></span></summary>
+            <p id="archive-empty" class="meta" hidden></p>
+            <ul id="archived-sessions" aria-label="Archived chats" tabindex="0" hidden></ul>
+          </details>
         </nav>
       </div>
       <div class="side-scroll">
