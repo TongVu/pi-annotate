@@ -734,6 +734,64 @@ test("dashboard creates a fresh chat only in a listed project and stays availabl
   assert.deepEqual(calls, [cwd, project]);
 });
 
+test("dashboard forks only catalogued saved sessions into an existing directory without resuming them", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "pi-dashboard-fork-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const source = { ...saved, path: join(root, "source.jsonl") };
+  const cwd = join(root, "another project's workspace");
+  await mkdir(cwd);
+  await writeFile(source.path, "saved transcript");
+  const starting = Promise.withResolvers();
+  const finish = Promise.withResolvers();
+  const calls = [];
+  const dashboard = await fixture(t, {
+    list: async () => [source],
+    archiveDir: join(root, "archive"),
+    resume: async () => assert.fail("a fork must not resume the source"),
+    forkChat: async (session) => { calls.push(session); starting.resolve(); await finish.promise; },
+  });
+  t.after(finish.resolve);
+  const unsaved = await registerSessionOwner(dashboard.ownerDir, { id: "unsaved", cwd: source.cwd }, async () => assert.fail("a fork must not attach to an owner"));
+  t.after(unsaved.close);
+  const [listed, terminalOnly] = await dashboard.sessions();
+  assert.equal(listed.canForkDirectory, true);
+  assert.equal(listed.path, undefined);
+  assert.equal(terminalOnly.id, "unsaved");
+  assert.equal(terminalOnly.canForkDirectory, undefined);
+  const endpoint = "/api/session/fork-directory";
+  const post = (body) => dashboard.request(endpoint, body);
+  const body = { id: source.id, cwd };
+  assert.equal((await fetch(dashboard.url.origin + endpoint, { method: "POST" })).status, 401);
+  assert.equal((await fetch(dashboard.url.origin + endpoint, { method: "POST", headers: {
+    Authorization: `Bearer ${dashboard.token}`, Origin: "https://elsewhere.example", "Content-Type": "application/json",
+  }, body: JSON.stringify(body) })).status, 403);
+  assert.equal((await post({ ...body, id: "unsaved" })).status, 404);
+  assert.equal((await post({ ...body, path: source.path })).status, 400, "the source file path is not a client input");
+  for (const invalid of ["relative", `${cwd}\u0000`, source.path, join(root, "missing")]) {
+    assert.equal((await post({ ...body, cwd: invalid })).status, 400);
+  }
+  assert.deepEqual(calls, []);
+  const launched = post(body);
+  await starting.promise;
+  assert.equal((await post(body)).status, 409);
+  assert.equal((await dashboard.request("/api/session/archive", { id: source.id })).status, 409, "do not archive the source while a fork is starting");
+  finish.resolve();
+  assert.equal((await launched).status, 202);
+  assert.deepEqual(calls, [{ ...source, cwd }]);
+  assert.equal(await readFile(source.path, "utf8"), "saved transcript");
+});
+
+test("verify starts an independent reviewer with only the selected worktree and display name", async (t) => {
+  const calls = [];
+  const dashboard = await fixture(t, { verifyChat: async (...args) => { calls.push(args); } });
+  assert.equal((await dashboard.sessions())[0].canVerify, true);
+  const post = body => dashboard.request('/api/session/verify', body);
+  assert.equal((await post({ id: saved.id, prompt: 'history' })).status, 400);
+  assert.equal((await post({ id: 'missing' })).status, 404);
+  assert.equal((await post({ id: saved.id })).status, 202);
+  assert.deepEqual(calls, [[saved.cwd, saved.name]]);
+});
+
 test("dashboard offers a manual start command when Terminal automation is unavailable", async (t) => {
   const dashboard = await fixture(t);
   const response = await dashboard.request("/api/session/new", { cwd: saved.cwd });
@@ -1075,17 +1133,6 @@ test("Create new chat completes known projects by name or path and submits only 
   assert.equal(q("#heading").textContent, "one", "creating a chat does not leave the current dashboard view");
 });
 
-test("verify starts an independent reviewer with only the selected worktree and display name", async (t) => {
-  const calls = [];
-  const dashboard = await fixture(t, { verifyChat: async (...args) => { calls.push(args); } });
-  assert.equal((await dashboard.sessions())[0].canVerify, true);
-  const post = body => dashboard.request('/api/session/verify', body);
-  assert.equal((await post({ id: saved.id, prompt: 'history' })).status, 400);
-  assert.equal((await post({ id: 'missing' })).status, 404);
-  assert.equal((await post({ id: saved.id })).status, 202);
-  assert.deepEqual(calls, [[saved.cwd, saved.name]]);
-});
-
 test("Verify agent clicks launch the reviewer, not the card's open action", async (t) => {
   const html = await readFile(new URL('../web/dashboard.html', import.meta.url), 'utf8');
   const script = await readFile(new URL('../web/dashboard.js', import.meta.url), 'utf8');
@@ -1101,4 +1148,61 @@ test("Verify agent clicks launch the reviewer, not the card's open action", asyn
   (await waitFor(() => dom.window.document.querySelector('.card .verify-agent'))).click();
   await waitFor(() => dom.window.document.querySelector('#message').textContent === 'Starting reviewer');
   assert.deepEqual(posts, [['/api/session/verify', { id: saved.id }]]);
+});
+
+test("the dashboard sidebar timestamp action opens a fork picker, not the source chat", async (t) => {
+  const source = { ...saved, modified: +saved.modified, status: "saved", action: "resume", canForkDirectory: true, canArchive: true };
+  const unsaved = { ...source, id: "unsaved", name: "Without a transcript", modified: null, canForkDirectory: undefined };
+  const projects = [saved.cwd, "/work/known-destination"];
+  const html = await readFile(new URL("../web/dashboard.html", import.meta.url), "utf8");
+  const script = await readFile(new URL("../web/dashboard.js", import.meta.url), "utf8");
+  const dom = new JSDOM(html, { url: "http://127.0.0.1:3456/#dashboard-test", runScripts: "outside-only" });
+  t.after(() => dom.window.close());
+  dom.window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  dom.window.HTMLDialogElement.prototype.close = function () { this.open = false; };
+  const posts = [];
+  dom.window.fetch = async (path, init) => {
+    if (path === "/api/dashboard") return { ok: true, json: async () => ({ projects, sessions: [source, unsaved] }) };
+    assert.equal(path, "/api/session/fork-directory");
+    posts.push(JSON.parse(init.body));
+    return posts.length === 1 ? { ok: false, json: async () => ({ error: "That destination directory is unavailable." }) }
+      : { ok: true, json: async () => ({ message: "Starting the fork" }) };
+  };
+  dom.window.eval(`${tooltipScript}\n${script}`);
+  const { document } = dom.window;
+  const q = (selector) => document.querySelector(selector);
+  const action = await waitFor(() => q(`.sidebar-session .session-age button[data-id="${source.id}"]`));
+  assert.equal(action.closest(".session-age").querySelector(".meta").textContent, "now");
+  assert.ok(action.closest(".sidebar-session").querySelector(".archive-session"), "forking must not replace the Archive action");
+  assert.equal(q('.session-age button[data-id="unsaved"]'), null);
+  assert.equal(q('.card .fork-directory'), null);
+  action.focus();
+  assert.equal(q(".message-preview").textContent, "Fork chat into another directory");
+  action.click();
+  const dialog = q("#new-chat-dialog");
+  const field = q("#new-chat-project");
+  assert.equal(dialog.open, true);
+  assert.equal(document.activeElement, field);
+  assert.match(q("#directory-fork-description").textContent, /Saved work.*stays/);
+  assert.deepEqual(posts, [], "clicking the icon does not open or fork immediately");
+  q('[role="option"][data-cwd="/work/known-destination"]').click();
+  assert.equal(field.value, "/work/known-destination");
+  const submit = () => q("#new-chat-form").dispatchEvent(new dom.window.Event("submit", { cancelable: true }));
+  submit();
+  await waitFor(() => q("#new-chat-error").textContent);
+  assert.equal(dialog.open, true);
+  field.value = "/work/known";
+  field.dispatchEvent(new dom.window.Event("input"));
+  assert.equal(q("#new-chat-projects").childElementCount, 1);
+  const enter = new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+  assert.equal(field.dispatchEvent(enter), true, "Enter submits the pasted path instead of silently selecting a fuzzy match");
+  assert.equal(field.value, "/work/known");
+  assert.equal(q("#submit-new-chat").disabled, false);
+  submit();
+  submit();
+  await waitFor(() => !dialog.open);
+  assert.deepEqual(posts, [{ id: source.id, cwd: "/work/known-destination" }, { id: source.id, cwd: field.value }]);
+  assert.equal(q("#message").textContent, "Starting the fork");
+  q("#create-chat").click();
+  assert.equal(q("#new-chat-heading").textContent, "Create new chat", "the shared picker returns to create mode");
 });

@@ -123,9 +123,11 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
       focusTerminal,
       ...(process.platform === "darwin" ? {
         resume: (session) => resumeChatInTerminal(session, fileURLToPath(import.meta.url), agentDir),
+        forkChat: (session) => forkChatInTerminal(session, fileURLToPath(import.meta.url), agentDir),
         createChat: (cwd) => startNewChatInTerminal(cwd, fileURLToPath(import.meta.url), agentDir),
       } : kitty ? {
         resume: (session) => resumeInKitty(session, fileURLToPath(import.meta.url), agentDir, kitty),
+        forkChat: (session) => forkChatInKitty(session, fileURLToPath(import.meta.url), agentDir, kitty),
         createChat: (cwd) => startNewChatInKitty(cwd, fileURLToPath(import.meta.url), agentDir, kitty),
       } : {}),
     });

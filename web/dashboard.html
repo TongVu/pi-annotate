@@ -105,10 +105,17 @@
       <span class="pet-indicators"></span>
     </div>
   </template>
-  <dialog id="new-chat-dialog" aria-labelledby="new-chat-heading">
+  <template id="fork-directory-icon">
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M20 13v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h4l2 2h2"/>
+      <path d="m13 13 8-8m-5 0h5v5"/>
+    </svg>
+  </template>
+  <dialog id="new-chat-dialog" aria-labelledby="new-chat-heading" aria-describedby="directory-fork-description">
     <form id="new-chat-form" method="dialog">
       <h2 id="new-chat-heading">Create new chat</h2>
-      <label for="new-chat-project">Which project should the chat be in?</label>
+      <p id="directory-fork-description" hidden>The original chat stays in its current directory.</p>
+      <label id="new-chat-project-label" for="new-chat-project">Which project should the chat be in?</label>
       <div class="project-picker">
         <input id="new-chat-project" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="new-chat-projects" placeholder="Search by project name or path" autocomplete="off" spellcheck="false" autofocus>
         <ul id="new-chat-projects" role="listbox" aria-label="Matching projects" hidden></ul>

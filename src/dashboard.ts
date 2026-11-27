@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import type { SessionInfo } from "@earendil-works/pi-coding-agent";
 import { listLiveChats } from "./chat-presence.ts";
@@ -30,6 +30,7 @@ type Options = {
   tabRegistry?: string;
   project?: string;
   resume?: (session: SavedChat) => Promise<void | false>;
+  forkChat?: (session: SavedChat) => Promise<void>;
   verifyChat?: (cwd: string, name?: string) => Promise<void>;
   createChat?: (cwd: string) => Promise<void | false>;
   canFocus?: typeof canFocusBrowser;
@@ -57,7 +58,7 @@ export async function listDashboardTabs(registry: string) {
   return tabs;
 }
 
-export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir, archiveDir, tabRegistry, project, resume, createChat, verifyChat, canFocus = canFocusBrowser, focus = focusBrowserChat, focusTerminal, readQuota = readCodexQuota }: Options) {
+export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir, archiveDir, tabRegistry, project, resume, forkChat, createChat, verifyChat, canFocus = canFocusBrowser, focus = focusBrowserChat, focusTerminal, readQuota = readCodexQuota }: Options) {
   const token = randomBytes(32).toString("hex");
   const tabId = randomBytes(16).toString("hex");
   const tabPath = `/?dashboard=${tabId}`;
@@ -68,6 +69,7 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
   const opening = new Map<string, number>();
   const archiving = new Set<string>();
   const verifying = new Set<string>();
+  const forking = new Set<string>();
   let creating = false;
   let codexQuota: CodexQuota | undefined;
   let nextQuotaRead = 0;
@@ -150,6 +152,7 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
             terminalWorking: !peer && owner?.working ? true : undefined,
             stopTarget: !peer && owner?.stopTarget && owner.stopTarget.pid !== process.pid ? owner.stopTarget.key : undefined,
             canVerify: verifyChat && (peer?.cwd || owner?.cwd || session?.cwd) ? true : undefined,
+            canForkDirectory: forkChat && session?.path ? true : undefined,
             action: peer ? (peer.tab && canFocus(agent) ? "focus" : peer.tab && browserSwitcher ? "browser-tab" : "manual-tab")
               : owner ? "reopen" : session?.cwd ? (resume ? "resume" : "manual-resume") : "unavailable",
           };
@@ -158,12 +161,13 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
       }
       const newChat = req.url === "/api/session/new";
       const verify = req.url === "/api/session/verify";
+      const forkDirectory = req.url === "/api/session/fork-directory";
       const focusHost = req.url === "/api/focus-terminal";
       const bookmark = req.url === "/api/session/bookmark";
       const archive = req.url === "/api/session/archive";
       const restore = req.url === "/api/session/restore";
       const stop = req.url === "/api/session/stop";
-      if (req.method === "POST" && (newChat || verify || focusHost || bookmark || archive || restore || stop || req.url === "/api/open")) {
+      if (req.method === "POST" && (newChat || verify || forkDirectory || focusHost || bookmark || archive || restore || stop || req.url === "/api/open")) {
         if (!isSameOriginJson(req.headers, origin)) {
           return reply(403, { error: "Expected a same-origin JSON request." });
         }
@@ -213,6 +217,7 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
           if (typeof id !== "string" || !id || Object.keys(body).length !== 1) return reply(400, { error: "Choose a saved session to archive." });
           if (!archiveDir) return reply(501, { error: "Session archiving is unavailable on this dashboard." });
           if (archiving.has(id)) return reply(409, { error: "This session is already being archived." });
+          if (forking.has(id)) return reply(409, { error: "Wait for the chat fork to start before archiving the source." });
           archiving.add(id);
           try {
             const { saved, live, owned } = await discover(true);
@@ -265,6 +270,30 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
             await verifyChat(cwd, live.get(id)?.name || saved.get(id)?.name || owned.get(id)?.name);
             return reply(202, { message: "Starting an independent reviewer. A new chat tab will open when Pi is ready." });
           } finally { verifying.delete(id); }
+        }
+        if (forkDirectory) {
+          const { id, cwd } = body ?? {};
+          if (typeof id !== "string" || !id || typeof cwd !== "string" || !isAbsolute(cwd) ||
+              /[\u0000-\u001f\u007f]/.test(cwd) || Object.keys(body).length !== 2) {
+            return reply(400, { error: "Choose a saved chat and enter an absolute directory path." });
+          }
+          if (!forkChat) return reply(501, { error: "Forking is unavailable for this dashboard." });
+          if (forking.has(id)) return reply(409, { error: "Pi is already forking this chat. Check Terminal." });
+          if (archiving.has(id)) return reply(409, { error: "This session is being archived." });
+          forking.add(id);
+          try {
+            const { saved } = await discover(true);
+            const session = saved.get(id);
+            if (!session?.path) return reply(404, { error: "This chat has no saved session to fork. Refresh the dashboard." });
+            if (!await stat(cwd).then((entry) => entry.isDirectory(), () => false)) {
+              return reply(400, { error: "That destination directory is unavailable." });
+            }
+            if (closed) return;
+            await forkChat({ ...session, cwd });
+            return reply(202, { message: "Starting the fork in Terminal. A chat tab will open when Pi is ready." });
+          } finally {
+            forking.delete(id);
+          }
         }
         if (newChat) {
           const cwd = body?.cwd;

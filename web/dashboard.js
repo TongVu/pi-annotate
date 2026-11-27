@@ -25,6 +25,7 @@ const noProjectMatches = $("new-chat-no-projects");
 const newChatError = $("new-chat-error");
 const submitNewChat = $("submit-new-chat");
 const cancelNewChat = $("cancel-new-chat");
+const forkLabel = "Fork chat into another directory";
 const statuses = {
   working: "In progress",
   ready: "Ready to chat",
@@ -63,7 +64,8 @@ let statusFilter;
 let lastData;
 let refreshInFlight;
 let connected = false;
-let creatingChat = false;
+let startingChat = false;
+let forkSource;
 let chosenProject;
 let activeProjectOption;
 const pending = new Set();
@@ -117,7 +119,7 @@ function actionButton(session, inSidebar = false) {
   const { status, terminalWorking } = session;
   node.setAttribute("aria-label", `${label}: ${session.name} (${statuses[status]}${terminalWorking ? " · Working in Terminal" : ""})`);
   setTooltip(node, status === "disconnected" ? `${session.name} · ${disconnectedHint(terminalWorking)}` : session.name);
-  if (inSidebar) node.append(dot(status, terminalWorking), el("span", "truncate", session.name), el("span", "meta", age(session.modified)));
+  if (inSidebar) node.append(dot(status, terminalWorking), el("span", "truncate", session.name));
   return node;
 }
 
@@ -142,14 +144,26 @@ function sessionIconButton({ id, name }, place, label, shape, busy) {
 }
 
 function sidebarSession(session) {
-  const link = actionButton(session, true);
-  const stop = session.status === "disconnected" && session.stopTarget;
-  if (!stop && !session.canArchive) return link;
-  const row = el("div", "session-with-action");
-  const button = stop
-    ? sessionIconButton(session, "stop", "Stop Pi session", "M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM6 6l4 4m0-4-4 4", stopping.has(session.id) || pending.has(session.id))
-    : sessionIconButton(session, "archive", "Archive", "M2.5 4h11M6 4V2h4v2M4 4l.7 10h6.6L12 4M7 7v4m2-4v4", archiving.has(session.id));
-  row.append(link, button);
+  const row = el("div", "sidebar-session");
+  const timestamp = el("div", "session-age");
+  timestamp.append(el("span", "meta", age(session.modified)));
+  if (session.canForkDirectory) {
+    const button = el("button", "fork-directory");
+    button.type = "button";
+    button.dataset.id = session.id;
+    button.dataset.place = "fork";
+    button.setAttribute("aria-label", `${forkLabel}: ${session.name}`);
+    button.setAttribute("aria-haspopup", "dialog");
+    setTooltip(button, forkLabel);
+    button.append($("fork-directory-icon").content.cloneNode(true));
+    timestamp.append(button);
+  }
+  row.append(actionButton(session, true), timestamp);
+  if (session.status === "disconnected" && session.stopTarget) {
+    row.append(sessionIconButton(session, "stop", "Stop Pi session", "M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM6 6l4 4m0-4-4 4", stopping.has(session.id) || pending.has(session.id)));
+  } else if (session.canArchive) {
+    row.append(sessionIconButton(session, "archive", "Archive", "M2.5 4h11M6 4V2h4v2M4 4l.7 10h6.6L12 4M7 7v4m2-4v4", archiving.has(session.id)));
+  }
   return row;
 }
 
@@ -559,15 +573,26 @@ function chooseProject(cwd) {
   hideProjectCompletions();
 }
 
-createChatButton.addEventListener("click", () => {
-  chooseProject(view === "project" && projects.includes(project) ? project : undefined);
+function openDirectoryDialog(source) {
+  hideTooltip();
+  forkSource = source;
+  $("new-chat-heading").textContent = source ? forkLabel : "Create new chat";
+  const description = $("directory-fork-description");
+  description.hidden = !source;
+  description.textContent = source ? `“${source.name}” stays in its current directory. The fork starts a new chat with its history.` : "";
+  $("new-chat-project-label").textContent = source ? "Choose a project or paste an absolute directory path" : "Which project should the chat be in?";
+  noProjectMatches.textContent = source ? "No known projects match this path." : "No projects match your search.";
+  submitNewChat.textContent = source ? "Fork chat" : "Create chat";
+  chooseProject(!source && view === "project" && projects.includes(project) ? project : undefined);
   newChatDialog.showModal();
   newChatProject.focus();
   if (!chosenProject) showProjectCompletions();
-});
+}
+
+createChatButton.addEventListener("click", () => openDirectoryDialog());
 newChatProject.addEventListener("input", () => {
   chosenProject = undefined;
-  submitNewChat.disabled = true;
+  submitNewChat.disabled = !forkSource || !newChatProject.value.trim();
   newChatError.textContent = "";
   showProjectCompletions();
 });
@@ -589,7 +614,8 @@ newChatProject.addEventListener("keydown", (event) => {
       : down ? newChatProjects.firstElementChild : newChatProjects.lastElementChild;
     highlightProject(option);
   } else if (event.key === "Enter" && !newChatProjects.hidden) {
-    const option = activeProjectOption ?? (newChatProjects.childElementCount === 1 ? newChatProjects.firstElementChild : null);
+    // In fork mode, Enter can submit a pasted path without selecting a fuzzy match.
+    const option = activeProjectOption ?? (!forkSource && newChatProjects.childElementCount === 1 ? newChatProjects.firstElementChild : null);
     if (option) {
       event.preventDefault();
       chooseProject(option.dataset.cwd);
@@ -600,12 +626,13 @@ newChatProject.addEventListener("keydown", (event) => {
   }
 });
 cancelNewChat.addEventListener("click", () => newChatDialog.close());
-newChatDialog.addEventListener("cancel", (event) => { if (creatingChat) event.preventDefault(); });
+newChatDialog.addEventListener("cancel", (event) => { if (startingChat) event.preventDefault(); });
 $("new-chat-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const cwd = chosenProject;
-  if (creatingChat || !cwd || newChatProject.value !== cwd) return;
-  if (!projects.includes(cwd)) {
+  const source = forkSource;
+  const cwd = newChatProject.value;
+  if (!newChatDialog.open || startingChat || !cwd.trim() || (!source && cwd !== chosenProject)) return;
+  if (!source && !projects.includes(cwd)) {
     chooseProject(undefined);
     newChatError.textContent = "That project is no longer available. Choose another project.";
     newChatProject.focus();
@@ -613,19 +640,20 @@ $("new-chat-form").addEventListener("submit", async (event) => {
     return;
   }
   hideProjectCompletions();
-  creatingChat = newChatProject.disabled = submitNewChat.disabled = cancelNewChat.disabled = true;
+  startingChat = newChatProject.disabled = submitNewChat.disabled = cancelNewChat.disabled = true;
   submitNewChat.textContent = "Starting…";
   newChatError.textContent = "";
   try {
-    const result = await api("/api/session/new", { cwd });
+    const result = source ? await api("/api/session/fork-directory", { id: source.id, cwd }) : await api("/api/session/new", { cwd });
     newChatDialog.close();
-    notice(result.message || "Open a fresh Pi session in this project.", false, result.command);
+    notice(result.message || (source ? "Opening the fork in another directory." : "Open a fresh Pi session in this project."), false, result.command);
     void refresh();
   } catch (error) {
     newChatError.textContent = error.message;
   } finally {
-    creatingChat = newChatProject.disabled = submitNewChat.disabled = cancelNewChat.disabled = false;
-    submitNewChat.textContent = "Create chat";
+    startingChat = newChatProject.disabled = submitNewChat.disabled = cancelNewChat.disabled = false;
+    submitNewChat.textContent = source ? "Fork chat" : "Create chat";
+    if (newChatDialog.open) newChatProject.focus();
   }
 });
 
@@ -647,7 +675,10 @@ document.addEventListener("click", (event) => {
   else if (place === "archive") void archiveChat(id);
   else if (place === "stop") void stopChat(id);
   else if (place === "restore") void restoreChat(button);
-  else if (id !== undefined) void openChat(id);
+  else if (place === "fork") {
+    const source = sessions.find((item) => item.id === id && item.canForkDirectory);
+    if (source) openDirectoryDialog(source);
+  } else if (id !== undefined) void openChat(id);
   else if (cwd !== undefined || next) {
     if (view !== (next || "project") || project !== cwd) statusFilter = undefined;
     view = next || "project";

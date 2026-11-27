@@ -67,10 +67,12 @@ test("Terminal resume command quotes paths, opts in to browser startup, and send
   await writeFile(path, "saved session");
   await writeFile(pi, `#!/bin/sh\nprintf '%s\n' "$PWD" "$PI_CODING_AGENT_DIR" "$PI_ANNOTATE_AUTO_CHAT_SESSION" "$@"\n`, { mode: 0o755 });
   const args = terminalResumeArgs({ id: "saved-id", cwd, path }, pi, extension, agentDir);
-  const fork = terminalForkArgs({ cwd, path }, pi, extension, agentDir);
-  assert.match(fork[2], /PI_ANNOTATE_AUTO_CHAT_SESSION=fork/);
-  assert.match(fork[2], /--fork/);
-  assert.match(fork[2], /--extension/);
+  const target = join(root, "another project's $(literal) workspace");
+  await mkdir(target);
+  const fork = terminalForkArgs({ cwd: target, path }, pi, extension, agentDir);
+  const forked = spawnSync("/bin/sh", ["-c", fork[2]], { cwd, encoding: "utf8" });
+  assert.equal(forked.status, 0, forked.stderr);
+  assert.deepEqual(forked.stdout.trimEnd().split("\n"), [target, agentDir, "fork", "--fork", path, "--extension", extension]);
   assert.equal(args[0], "-e");
   assert.match(args[1], /tell application "Terminal"/);
   assert.ok(!args[1].includes(path), "the AppleScript source is fixed; the shell command is an argument");
