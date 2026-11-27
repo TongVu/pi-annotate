@@ -21,9 +21,10 @@ article { min-width: 0; padding: 30px 40px 80px; }
 #response ul, #response ol { padding-left: 1.5em; margin: 0 0 1em; }
 #response li { margin-bottom: .35em; } #response li > p { margin-bottom: .5em; }
 #response a { color: var(--text); text-decoration-color: var(--accent); text-underline-offset: 3px; }
-#response code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .88em; padding: .15em .35em; background: var(--panel); border-radius: 4px; white-space: pre-wrap; }
-#response pre { padding: 16px; margin: 0 0 1em; overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 9px; line-height: 1.5; }
-#response pre code { padding: 0; white-space: pre; overflow-wrap: normal; }
+#response code, .annotation-comment code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .88em; padding: .15em .35em; background: var(--panel); border-radius: 4px; white-space: pre-wrap; }
+#response code:not(pre code), .annotation-comment code:not(pre code) { background: #0b3159; color: #fff; border-radius: 6px; }
+#response pre, .annotation-comment pre { padding: 16px; margin: 0 0 1em; overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 9px; line-height: 1.5; }
+#response pre code, .annotation-comment pre code { padding: 0; white-space: pre; overflow-wrap: normal; }
 #response blockquote { max-height: none; overflow: visible; white-space: normal; }
 #response hr { border: 0; border-top: 1px solid var(--border); margin: 1.5em 0; }
 #response table { display: block; max-width: 100%; overflow: auto; border-collapse: collapse; margin: 0 0 1em; }
@@ -73,7 +74,12 @@ h2 { font-size: 17px; margin: 0 0 16px; }
 ol { padding-left: 20px; margin: 0; }
 #annotations > li { position: relative; padding: 32px 0 20px 6px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
 blockquote { margin: 0 0 12px; padding-left: 12px; border-left: 3px solid var(--accent); color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow: auto; }
-#annotations li p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+.annotation-comment { overflow-wrap: anywhere; line-height: 1.5; }
+.annotation-comment > :first-child { margin-top: 0; }
+.annotation-comment > :last-child { margin-bottom: 0; }
+.annotation-comment-source { white-space: pre-wrap; }
+.annotation-comment :is(ul, ol) { padding-inline-start: 1.5em; }
+.annotation-comment table { display: block; overflow: auto; }
 .actions { display: flex; gap: 10px; justify-content: flex-end; }
 dialog { width: min(560px, calc(100vw - 32px)); max-height: 85vh; overflow: auto; background: var(--panel); color: var(--text); padding: 24px; border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 20px 80px #0007; }
 #comment-dialog { width: min(560px, calc(100vw - 32px)); height: min(85dvh, 900px); max-height: 85dvh; overflow: hidden; padding: 20px 22px; }

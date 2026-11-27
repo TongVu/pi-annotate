@@ -350,7 +350,10 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     isConnected: () => connected,
     onActionChange: refreshChatUi,
   });
-  const annotations = mountAnnotationDraft(window, { sender, attachmentUi, status, setTooltip, isViewingLive });
+  const annotations = mountAnnotationDraft(window, {
+    sender, attachmentUi, status, setTooltip, isViewingLive,
+    renderMarkdown: (markdown) => api("/api/markdown", { markdown }),
+  });
   const transcript = mountTranscript(window, {
     fetchImage: (query) => window.fetch(`/api/image?${query}`, { headers: { Authorization: `Bearer ${token}` } }),
     isViewingLive, isCommentOpen: () => annotations.isDialogOpen() || branchDialog.open,

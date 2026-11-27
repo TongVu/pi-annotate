@@ -267,6 +267,7 @@ test("chat dots jump to user turns; failed questions are kept, accepted question
       const questions = renderMarkdown("Questions about assistant response a1:\n\n### 1\n> Old\n\nWhy `old`?");
       return json(chatResponse("a2", [{ id: "u2", role: "user", ...questions }, assistant("a2", "**New** reply")]));
     }
+    if (path === "/api/markdown") return json(renderMarkdown(body.markdown));
     assert.equal(path, "/api/chat");
     posts.push(body);
     if (posts.length === 1) return json({ error: "Pi is busy" }, 409);
@@ -1559,10 +1560,52 @@ test("the composer stops its active reply and restores text and attachments befo
   assert.equal(input.value, "", "a normally completed reply does not restore its draft");
 });
 
+test("queued annotation questions render Markdown without changing their quote or source", async (t) => {
+  const quote = "<b>Passage</b>";
+  const question = "Why `Downloads`?\n\n- **First**\n- Second\n\n<script>bad()</script>";
+  const fallback = "`Still editable`";
+  const sent = [];
+  const f = await fixture(t, { chatFetch: async (path, body) => {
+    if (path === "/api/response") return { ok: true, json: async () => ({
+      mode: "chat", protocol: 2, cursor: "a1", busy: false,
+      messages: [{ id: "a1", role: "assistant", ...renderMarkdown(quote) }],
+    }) };
+    if (path === "/api/markdown") return body.markdown === fallback
+      ? { ok: false, status: 503, json: async () => ({ error: "Unavailable" }) }
+      : { ok: true, json: async () => renderMarkdown(body.markdown) };
+    assert.equal(path, "/api/chat");
+    sent.push(body.annotations[0]);
+    return { ok: true, json: async () => ({ ok: true }) };
+  } });
+  const list = f.$("annotations");
+  const preview = () => list.querySelector(".annotation-comment");
+  f.select(0, quote.length, f.$("response").querySelector("[data-response-id]"));
+  f.$("annotate-selection").click();
+  f.add(question);
+  await tick();
+  assert.equal(list.querySelector("blockquote").textContent, quote);
+  assert.equal(list.querySelector("blockquote b"), null);
+  assert.equal(preview().querySelector("code").textContent, "Downloads");
+  assert.equal(preview().querySelector("li strong").textContent, "First");
+  assert.match(preview().textContent, /<script>bad\(\)<\/script>/);
+  assert.equal(preview().querySelector("script"), null);
+  assert.equal(sent.length, 0);
+  list.querySelector('[aria-label="Edit annotation"]').click();
+  assert.equal(f.$("comment").value, question);
+  f.add(fallback);
+  await tick();
+  assert.equal(preview().textContent, fallback, "a render failure leaves the source readable");
+  f.$("send").click();
+  await tick();
+  assert.deepEqual(sent, [{ responseId: "a1", start: 0, end: quote.length, quote, comment: fallback }]);
+  assert.equal(list.children.length, 0);
+});
+
 test("sending either draft leaves the other one unsent", async (t) => {
   const posts = [];
   const reply = { id: "a1", role: "assistant", ...renderMarkdown("Some answer.") };
   const f = await fixture(t, { chatFetch: async (path, body) => {
+    if (path === "/api/markdown") return { ok: true, json: async () => renderMarkdown(body.markdown) };
     if (body) posts.push(body);
     return { ok: true, json: async () => body ? { ok: true } : {
       mode: "chat", protocol: 2, cursor: reply.id, messages: path.includes("?") ? [] : [reply], busy: false,
@@ -1736,6 +1779,7 @@ test("live annotations can paste and pick images, edit them, and retry without t
       mode: "chat", protocol: 2, annotationImages: true, cursor: "a1", busy: false,
       messages: [{ id: "a1", role: "assistant", ...renderMarkdown("Choose a **passage**.") }],
     }) };
+    if (path === "/api/markdown") return { ok: true, json: async () => renderMarkdown(body.markdown) };
     assert.equal(path, "/api/chat");
     posts.push(body);
     return { ok: posts.length > 1, json: async () => posts.length > 1 ? { ok: true } : { error: "Pi is busy" } };

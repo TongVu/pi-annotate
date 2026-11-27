@@ -1,4 +1,4 @@
-export function mountAnnotationDraft(window, { sender, attachmentUi, status, setTooltip, isViewingLive }) {
+export function mountAnnotationDraft(window, { sender, attachmentUi, status, setTooltip, isViewingLive, renderMarkdown }) {
   const { document, Node } = window;
   const $ = (id) => document.getElementById(id);
   const { renderAttachmentList, readAttachment, checkAttachmentLimits, isPreviewImage } = attachmentUi;
@@ -10,6 +10,7 @@ export function mountAnnotationDraft(window, { sender, attachmentUi, status, set
   const save = $("save-annotation");
   const send = $("send");
   let annotations = [];
+  const previews = new WeakMap();
   let annotationImagesSupported = false;
   let annotationFiles = [];
   let readingAnnotationFiles = false;
@@ -78,8 +79,20 @@ export function mountAnnotationDraft(window, { sender, attachmentUi, status, set
       item.className = "annotation-item";
       const quote = document.createElement("blockquote");
       quote.textContent = annotation.quote;
-      const text = document.createElement("p");
-      text.textContent = annotation.comment;
+      const text = document.createElement("div");
+      text.className = "annotation-comment";
+      const source = document.createElement("p");
+      source.className = "annotation-comment-source";
+      source.textContent = annotation.comment;
+      text.append(source);
+      if (!previews.has(annotation)) {
+        previews.set(annotation, renderMarkdown(annotation.comment).catch(() => {
+          previews.delete(annotation);
+        }));
+      }
+      void previews.get(annotation).then((preview) => {
+        if (text.isConnected && typeof preview?.html === "string" && preview.html) text.innerHTML = preview.html;
+      });
       const actions = document.createElement("div");
       actions.className = "annotation-actions";
       for (const action of [
