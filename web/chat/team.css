@@ -1,4 +1,5 @@
 #team-view-toggle { position: relative; }
+#team-view-toggle .team-mode-icon { font-size: 17px; line-height: 1; }
 #team-view-toggle[aria-expanded="false"] .chat-mode-icon,
 #team-view-toggle[aria-expanded="true"] .team-mode-icon,
 .session-title-pill:has(#team-view-toggle[aria-expanded="true"]) #chat-tools-toggle { display: none; }

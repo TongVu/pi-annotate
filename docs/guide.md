@@ -90,7 +90,7 @@ chat before sending again. Live chat was verified with Pi 1.5.2.
 
 ## Agent team
 
-Click the **two-person icon** in a live chat’s title bar. Enter a brief, use the paperclip to attach files, and click the **up arrow** to start. The chat bubble returns to Main chat without clearing either draft. Only the brief, attachments, and feedback or blocker directions you send explicitly in Teams go to the team. Main chat messages are not forwarded. Role handoffs and task inputs are sent to the configured team model provider.
+Click **🎮** in a live chat’s title bar to open Teams. Enter a brief, use the paperclip to attach files, and click the **up arrow** to start. The chat bubble returns to Main chat without clearing either draft. Only the brief, attachments, and feedback or blocker directions you send explicitly in Teams go to the team. Main chat messages are not forwarded. Role handoffs and task inputs are sent to the configured team model provider.
 
 The product owner scopes the task, then the architect designs the change. The backend and frontend implementers take turns editing **one shared Git workspace** from committed HEAD. At each handoff the next role gets the current file status and reads the actual changes. The architect reviews the result in that same workspace. Product owner and architect are read-only, and none of the roles has a shell. All four require **GPT-6 Luna with high thinking effort**, independently of Main chat.
 

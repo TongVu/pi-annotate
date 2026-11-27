@@ -18,7 +18,7 @@ await writeFile(join(repo, "api.js"), 'export const status = { label: "Not start
 git("add", "api.js");
 git("-c", "user.name=Preview", "-c", "user.email=preview@example.invalid", "commit", "-m", "chore: seed preview fixture");
 const branch = [{ id: "preview-intro", type: "message", message: { role: "assistant", content:
-  "**Teams preview · simulated workers.** Click the **two-person icon** in the title bar. Write a brief and press the **up arrow**. The simulated implementers edit two files in one temporary Git checkout. Open the combined result, then use the **speech bubble with a plus** to send feedback to the same team. No model requests or changes to your repository." } }];
+  "**Teams preview · simulated workers.** Click **🎮** in the title bar. Write a brief and press the **up arrow** to start. The simulated implementers edit two files in one temporary Git checkout. Open the combined result, then use the **speech bubble with a plus** to send feedback to the same team. No model requests or changes to your repository." } }];
 const team = createAgentTeam({
   prepare: async ({ workspace }) => workspace ?? prepareTeamWorkspace(repo, scratch),
   saveAttachments: (items) => saveChatAttachments(scratch, "preview", items),
