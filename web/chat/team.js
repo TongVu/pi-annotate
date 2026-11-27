@@ -6,7 +6,7 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
   const { document } = window;
   const $ = (id) => document.getElementById(id);
   const panel = $("team-panel"), viewToggle = $("team-view-toggle");
-  const toolsToggle = $("chat-tools-toggle"), notes = $("chat-tools-content");
+  const notes = $("chat-tools-content");
   const roles = $("team-roles"), transcript = $("team-transcript");
   const setup = $("team-setup"), start = $("team-start"), submit = $("team-submit"), pick = $("team-attach"), files = $("team-files");
   const direction = $("team-direction"), stop = $("team-stop"), cancelStart = $("team-cancel-start");
@@ -15,7 +15,6 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
   const feedbackButton = $("team-feedback");
   let composingFeedback = false, displayedRound = 0;
   let attachments = [], readingFiles = false, fileError = "";
-  $("team-setup-pets").innerHTML = ["po", "backend", "frontend", "architect"].map(teamPet).join("");
   const cards = new Map(), drafts = new Map();
   let selected, saved = false, opened = false, supported = false, unavailable = false;
   let snapshot, pending = false, actionError = "", selection = 0;
@@ -80,8 +79,7 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
     const restoreFocus = !setup.hidden && !show && !saved && setup.contains(document.activeElement);
     setup.hidden = !show;
     resultView.hidden = !showResult;
-    const showPanel = opened && !saved && !show;
-    if (showPanel && panel.hidden && toolsToggle.getAttribute("aria-expanded") === "false") toolsToggle.click();
+    const showPanel = opened && !saved;
     panel.hidden = !showPanel;
     notes.hidden = showPanel;
     if (changed) onViewChange();
@@ -170,20 +168,23 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
     const attention = waiting ? `${waiting} ${waiting === 1 ? "role needs" : "roles need"} your input` : "";
     if ($("team-attention").textContent !== attention) $("team-attention").textContent = attention;
     $("team-attention-dot").hidden = !waiting;
-    roles.hidden = ["idle", "starting"].includes(phase);
+    const preStart = phase === "idle" || phase === "starting";
+    roles.hidden = false;
     stop.hidden = phase !== "active";
     $("team-status").textContent = actionError || issue || (phase === "stopped" ? "Team stopped. The workspace was retained." : "");
     if (workspace && $("team-workspace").hidden) {
       $("team-workspace").hidden = false;
       $("team-paths").textContent = workspace.cwd;
     }
-    if (roles.hidden) return;
-    card("lead", "Main chat").setAttribute("aria-current", String(!selected));
+    const lead = card("lead", "Main chat");
+    lead.hidden = preStart;
+    lead.setAttribute("aria-current", String(!preStart && !selected));
     for (const role of snapshot.roles) {
       const button = card(role.id, role.name);
-      button.setAttribute("aria-current", String(role.id === selected));
-      button.dataset.state = role.status;
-      button.querySelector(".team-card-state").textContent = labels[role.status];
+      button.disabled = preStart;
+      button.setAttribute("aria-current", String(!preStart && role.id === selected));
+      button.dataset.state = preStart ? "not-started" : role.status;
+      button.querySelector(".team-card-state").textContent = preStart ? "Not started" : labels[role.status];
     }
     const role = snapshot.roles.find(({ id }) => id === selected);
     if (!role) return;

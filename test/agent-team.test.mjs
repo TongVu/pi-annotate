@@ -191,6 +191,20 @@ async function until(condition, message) {
   assert.fail(message);
 }
 
+function assertPreStartRoster(document) {
+  const roster = document.getElementById("team-roles");
+  const cards = [...roster.querySelectorAll(".team-card:not([hidden])")];
+  assert.equal(roster.closest("#team-panel").hidden, false);
+  assert.equal(roster.hidden, false);
+  assert.deepEqual(cards.map((card) => card.querySelector("strong").textContent), [
+    "Product owner", "Backend implementer", "Frontend implementer", "Software architect",
+  ]);
+  for (const card of cards) {
+    assert.equal(card.querySelector(".team-card-state").textContent, "Not started");
+    assert.equal(card.disabled, true, "there is no role transcript to open yet");
+  }
+}
+
 test("served Teams view sends attachments, shows the combined result, and gives feedback to the same workers", async (t) => {
   const prepared = [];
   const { team, calls } = mockTeam({ prepare: async (options) => {
@@ -232,7 +246,9 @@ test("served Teams view sends attachments, shows the combined result, and gives 
   assert.equal(toggle.getAttribute("aria-label"), "Return to main chat");
   assert.equal(toggle.getAttribute("aria-expanded"), "true");
   assert.equal($("team-setup").hidden, false);
-  assert.equal($("team-panel").hidden, true);
+  assertPreStartRoster(window.document);
+  assert.equal($("team-submit").parentElement.parentElement, $("team-attach").parentElement);
+  assert.equal($("team-attach").nextElementSibling, $("team-submit").parentElement, "Attach files sits immediately before the start/stop action slot");
   assert.ok($("team-brief").rows >= 10);
   $("team-brief").value = "Build the status screen";
   $("team-brief").dispatchEvent(new window.Event("input"));
@@ -249,6 +265,7 @@ test("served Teams view sends attachments, shows the combined result, and gives 
   assert.equal(toggle.getAttribute("aria-label"), "Open Teams");
   assert.equal(toggle.getAttribute("aria-expanded"), "false");
   assert.equal($("team-setup").hidden, true);
+  assert.equal($("team-panel").hidden, true);
   assert.equal($("chat-input"), composer, "the same main composer remains mounted");
   assert.equal(composer.value, "Unsent main draft");
   toggle.click();
@@ -265,7 +282,9 @@ test("served Teams view sends attachments, shows the combined result, and gives 
   await until(() => calls.length === 1 && $("team-setup").hidden, "Start did not reach the runner and show team status");
   assert.deepEqual(prepared, [{ hasImages: true, workspace: undefined }, { hasImages: true, workspace: undefined }]);
   assert.equal($("team-panel").hidden, false);
-  assert.equal($("team-roles").hidden, false);
+  assert.deepEqual([...$("team-roles").querySelectorAll(".team-card:not([hidden]):not(:disabled) strong")].map((name) => name.textContent), [
+    "Main chat", "Product owner", "Backend implementer", "Frontend implementer", "Software architect",
+  ]);
   assert.equal(composer.value, "Unsent main draft");
   calls[0].finish("done", "Scope approved");
   await turn();
@@ -329,7 +348,7 @@ test("the composer shows its stop icon while the team is preparing worktrees", a
   await turn();
   assert.equal($("team-submit").hidden, true);
   assert.equal($("team-cancel-start").hidden, false);
-  assert.equal($("team-panel").hidden, true);
+  assertPreStartRoster(window.document);
   $("team-cancel-start").click();
   await turn();
   prep.resolve(paths);

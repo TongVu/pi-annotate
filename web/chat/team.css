@@ -6,22 +6,21 @@
 #team-attention-dot:not([hidden]) { position: absolute; inset: 2px 2px auto auto; width: 7px; height: 7px; border-radius: 50%; background: var(--team-warning, #e0ad70); }
 #chat-tools #chat-tools-content[hidden] { display: none; }
 #team-panel { overflow: auto; min-height: 0; padding: 2px 2px 12px; color: var(--text); }
-.chat-page main:has(#team-setup:not([hidden])) { --chat-tools-width: 0px; --turn-rail-width: 0px; }
-.chat-page main:has(#team-setup:not([hidden])) #chat-tools { display: none; }
+.chat-page main:has(#team-view-toggle[aria-expanded="true"]) { --chat-tools-width: minmax(220px, 340px); --turn-rail-width: 0px; }
+.chat-page main:has(#team-view-toggle[aria-expanded="true"]) #chat-tools { display: grid; }
 :is(#team-setup, #team-result):not([hidden]) { grid-area: 2 / transcript / span 2 / -1; display: grid; min-height: 0; min-width: 0; overflow: auto; padding: clamp(14px, 3vw, 36px); }
 .team-setup-content { width: min(100%, 1040px); margin: auto; }
-.team-setup-intro { display: flex; align-items: end; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
+.team-setup-intro { margin-bottom: 18px; }
 .team-setup-intro h1 { margin: 4px 0; font-size: clamp(26px, 4vw, 38px); letter-spacing: -.035em; }
 .team-setup-intro p { margin: 0; color: var(--muted); }
 .team-setup-intro .team-eyebrow { font-size: 11px; letter-spacing: .14em; font-weight: 700; }
-#team-setup-pets { display: flex; align-items: end; gap: 6px; border-bottom: 1px solid var(--border); }
-#team-setup-pets .team-pet { width: clamp(34px, 6vw, 55px); height: auto; }
 #team-start { padding: clamp(12px, 3vw, 22px); border: 1px solid var(--border); border-radius: 16px; background: var(--panel); }
 #team-start label, #team-direction label { margin: 0 0 6px; font-weight: 600; }
 #team-start textarea, #team-direction textarea { margin: 0; font-size: 14px; }
 #team-brief { display: block; min-height: clamp(200px, 42dvh, 480px); max-height: max(200px, 65dvh); }
 #team-start .attachment-list { padding-inline: 0; }
-.team-setup-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; margin-top: 8px; }
+.team-setup-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 8px; }
+.team-submit-actions { display: flex; align-items: center; gap: 10px; }
 .team-setup-hint, #team-setup-status, #team-status { font-size: 12px; color: var(--muted); }
 .team-setup-hint, #team-setup-status { margin: 8px 0 0; }
 #team-setup-status.error { color: var(--attachment-error, #ffb4a6); }
@@ -30,9 +29,10 @@ button.team-icon:not([hidden]) { display: grid; place-items: center; flex: none;
 button.team-icon.secondary:not(:disabled):hover { background: color-mix(in srgb, var(--panel), var(--border) 45%); }
 #team-stop { margin-top: 8px; }
 #team-roles:not([hidden]) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-#team-roles .team-card { display: grid; justify-items: center; align-content: start; gap: 4px; min-width: 0; padding: 8px 4px; text-align: center; background: var(--panel); font-size: 12px; line-height: 1.25; overflow-wrap: anywhere; }
+#team-roles .team-card:not([hidden]) { display: grid; justify-items: center; align-content: start; gap: 4px; min-width: 0; padding: 8px 4px; text-align: center; background: var(--panel); font-size: 12px; line-height: 1.25; overflow-wrap: anywhere; }
 #team-roles .team-card:first-child { grid-column: 1 / -1; grid-template-columns: auto auto; justify-content: center; align-items: center; gap: 8px; }
-#team-roles .team-card:hover, #team-roles .team-card[aria-current="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--panel), var(--accent) 10%); }
+#team-roles .team-card:disabled { opacity: 1; }
+#team-roles .team-card:not(:disabled):hover, #team-roles .team-card[aria-current="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--panel), var(--accent) 10%); }
 .team-card-state { color: var(--muted); font-size: 11px; }
 .team-card[data-state="paused"] .team-card-state { color: var(--team-warning, #e0ad70); font-weight: 700; }
 .team-card:first-child .team-card-state { display: none; }

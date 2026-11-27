@@ -157,8 +157,9 @@
     <section id="team-setup" aria-labelledby="team-setup-title" hidden>
       <div class="team-setup-content">
         <div class="team-setup-intro">
-          <div><p class="team-eyebrow">TEAMS</p><h1 id="team-setup-title">A team for the task</h1><p id="team-setup-description">Give the team a goal. Add notes or screenshots for context.</p></div>
-          <div id="team-setup-pets" aria-hidden="true"></div>
+          <p class="team-eyebrow">TEAMS</p>
+          <h1 id="team-setup-title">A team for the task</h1>
+          <p id="team-setup-description">Give the team a goal. Add notes or screenshots for context.</p>
         </div>
         <form id="team-start">
           <label for="team-brief">What should the team work on?</label>
@@ -169,12 +170,14 @@
             <button id="team-attach" type="button" class="secondary team-icon" aria-label="Attach files" title="Attach files">
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.4 11-9.2 9.2a6 6 0 0 1-8.5-8.5L14.3 1.2A4 4 0 0 1 20 6.9L9.4 17.5a2 2 0 0 1-2.8-2.8l9.9-9.9"/></svg>
             </button>
-            <button id="team-cancel-start" type="button" class="secondary team-icon" aria-label="Stop team" title="Stop team" hidden>
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-            </button>
-            <button id="team-submit" type="submit" class="team-icon" aria-label="Start team" title="Start team" disabled>
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20V4m-6 6 6-6 6 6"/></svg>
-            </button>
+            <div class="team-submit-actions">
+              <button id="team-submit" type="submit" class="team-icon" aria-label="Start team" title="Start team" disabled>
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20V4m-6 6 6-6 6 6"/></svg>
+              </button>
+              <button id="team-cancel-start" type="button" class="secondary team-icon" aria-label="Stop team" title="Stop team" hidden>
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+              </button>
+            </div>
           </div>
           <p class="team-setup-hint">Up to 10 text files or PNG, JPEG, GIF, and WebP images. GPT-6 Luna · high effort. The team sees only what you send in Teams. Edits stay in a shared workspace, separate from your checkout.</p>
           <p id="team-setup-status" role="status"></p>
