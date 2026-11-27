@@ -41,11 +41,16 @@ Click **👾** in the composer to view or change this chat’s model and thinkin
 
 Click the **Context usage** ring in the composer to see Pi's estimated token usage and the model's context limit. Click **Compact chat** when Pi is idle and confirm to summarize older context without removing messages from the transcript. After compaction, Pi reports usage again after its next reply.
 
-Click the live chat title to rename the session. Use the panel icons next to
-**🕹️** to show or hide notes and annotations on the left or the chat explorer on the right.
-On narrow screens, notes and annotations sit below the chat and the explorer opens from the right edge.
-Click **🕹️** to switch to the terminal tab running that chat. It does not start
-Pi, open a new tab, or send text to the terminal.
+The live chat toolbar sits just above the divider between messages and the composer.
+Click the title to rename the session, or use the panel icons to show or hide
+notes and annotations on the left or the chat explorer on the right. On narrow
+screens, notes and annotations sit below the chat and the explorer opens from
+the right edge.
+
+With the chat tab focused, press **Ctrl+Shift+1** to switch to the terminal tab
+running that chat (same as clicking **🕹️**), **Ctrl+Shift+2** to toggle notes and
+annotations, or **Ctrl+Shift+3** to toggle the explorer. Switching to the terminal
+does not start Pi, open a new tab, or send text to the terminal.
 On macOS, use Terminal.app and allow Terminal Automation if prompted. On Linux,
 Kitty needs a local remote-control socket. For example, in `kitty.conf`, use:
 

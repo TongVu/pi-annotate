@@ -11,6 +11,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   const $ = (id) => document.getElementById(id);
   const chatToolsToggle = $("chat-tools-toggle");
   const sessionTitlePill = $("session-title-pill");
+  const chatHeading = sessionTitlePill.parentElement;
   const sessionTitleText = $("session-title-text");
   const renameSessionDialog = $("rename-session-dialog");
   const renameSessionInput = $("rename-session-input");
@@ -96,7 +97,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     chatToolsToggle.setAttribute("aria-expanded", String(!expanded));
     const label = `${expanded ? "Expand" : "Collapse"} notes and annotations`;
     chatToolsToggle.setAttribute("aria-label", label);
-    setTooltip(chatToolsToggle, label);
+    setTooltip(chatToolsToggle, `${label} (Ctrl+Shift+2)`);
   });
 
   const chatStates = {
@@ -292,6 +293,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     isConnected: () => connected,
     transcript,
     onViewChange() {
+      (explorer.isSaved() ? $("chat-rail") : $("chat-form")).before(chatHeading);
       updateSubchatOriginVisibility();
       annotations.hideSelectionAction();
       updateControls();
@@ -306,7 +308,24 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     // Older servers silently ignore the new attachments field on messages with a caption.
     if (data.protocol !== 2) throw new Error("Pi's chat server is outdated. Run /reload, then /chat in Pi.");
     document.body.classList.add("chat-page");
+    $("chat-form").before(chatHeading);
     sessionTitlePill.hidden = false;
+    const shortcuts = new Map([
+      ["Digit1", focusTerminalButton],
+      ["Digit2", chatToolsToggle],
+      ["Digit3", $("explorer-toggle")],
+    ]);
+    document.addEventListener("keydown", (event) => {
+      if (event.defaultPrevented || event.isComposing || !event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey) return;
+      const button = shortcuts.get(event.code);
+      if (!button || button.hidden || button.disabled || document.querySelector("dialog[open]")) return;
+      event.preventDefault();
+      if (event.repeat) return;
+      if (button.getAttribute("aria-expanded") === "true" && $(button.getAttribute("aria-controls"))?.contains(document.activeElement)) {
+        button.focus();
+      }
+      button.click();
+    });
     notes = mountChatNotes?.(window, { sessionId: data.sessionId, api, setTooltip, attachmentUi });
     if (!notes) {
       // A listener started before this asset was added may still serve the entry script from disk.
