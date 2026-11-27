@@ -12,7 +12,7 @@ const directory = $("directory");
 const projectPath = $("project-path");
 const projectPathStatus = $("project-path-status");
 const codexQuota = el("span", "codex-quota");
-setTooltip(codexQuota, "Codex account usage limit");
+codexQuota.tabIndex = 0;
 codexQuota.hidden = true;
 const bookmarkView = document.querySelector('[data-view="bookmarks"]');
 const createChatButton = $("create-chat");
@@ -307,7 +307,18 @@ async function refresh(force = false) {
       const quotaLabel = Number.isInteger(left) && left >= 0 && left <= 100 ? `5-hour · ${left}% left` : "";
       if (codexQuota.textContent !== quotaLabel) codexQuota.textContent = quotaLabel;
       codexQuota.hidden = !quotaLabel;
-      const key = JSON.stringify(result) + Math.floor(Date.now() / 60_000);
+      const now = Date.now();
+      let quotaTooltip = "Codex account usage limit";
+      const resetsAt = result.codexQuotaResetsAt;
+      if (Number.isSafeInteger(resetsAt) && resetsAt * 1000 > now) {
+        const remaining = Math.ceil((resetsAt * 1000 - now) / 60_000);
+        const hours = Math.floor(remaining / 60);
+        const minutes = remaining % 60;
+        const duration = [hours && `${hours}h`, minutes && `${minutes}m`].filter(Boolean).join(" ");
+        quotaTooltip += `\nResets in ${duration}`;
+      }
+      setTooltip(codexQuota, quotaTooltip);
+      const key = JSON.stringify(result) + Math.floor(now / 60_000);
       if (key !== lastData) {
         lastData = key;
         sessions = result.sessions;

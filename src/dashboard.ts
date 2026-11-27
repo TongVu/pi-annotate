@@ -4,7 +4,7 @@ import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import type { SessionInfo } from "@earendil-works/pi-coding-agent";
 import { listLiveChats } from "./chat-presence.ts";
-import { readCodexQuota } from "./codex-quota.ts";
+import { readCodexQuota, type CodexQuota } from "./codex-quota.ts";
 import { canFocusBrowser, focusBrowserChat } from "./focus-browser.ts";
 import { isLocalRequest, isSameOriginJson, setLocalPageHeaders } from "./loopback-http.ts";
 import { shellQuote } from "./resume-chat.ts";
@@ -66,14 +66,14 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
   const opening = new Map<string, number>();
   const verifying = new Set<string>();
   let creating = false;
-  let quotaLeft: number | undefined;
+  let codexQuota: CodexQuota | undefined;
   let nextQuotaRead = 0;
   function refreshQuota() {
     if (Date.now() < nextQuotaRead) return;
     nextQuotaRead = Infinity;
     // The session list should not wait for a subprocess or a network call.
-    void Promise.resolve().then(readQuota).catch(() => undefined).then((percent) => {
-      quotaLeft = percent;
+    void Promise.resolve().then(readQuota).catch(() => undefined).then((quota) => {
+      codexQuota = quota;
       nextQuotaRead = Date.now() + 60_000;
     });
   }
@@ -148,7 +148,7 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
               : owner ? "reopen" : session?.cwd ? (resume ? "resume" : "manual-resume") : "unavailable",
           };
         });
-        return reply(200, { projects: [...projects].sort(), sessions, supportsBookmarks: true, browserSelect: browserSwitcher || undefined, canFocusTerminal: focusTerminal ? true : undefined, codexQuotaLeft: quotaLeft });
+        return reply(200, { projects: [...projects].sort(), sessions, supportsBookmarks: true, browserSelect: browserSwitcher || undefined, canFocusTerminal: focusTerminal ? true : undefined, codexQuotaLeft: codexQuota?.left, codexQuotaResetsAt: codexQuota?.resetsAt });
       }
       const newChat = req.url === "/api/session/new";
       const verify = req.url === "/api/session/verify";

@@ -5,7 +5,9 @@ import { createInterface } from "node:readline";
 
 const bundledCodex = "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex";
 
-export function readCodexQuota(): Promise<number | undefined> {
+export type CodexQuota = { left: number; resetsAt?: number };
+
+export function readCodexQuota(): Promise<CodexQuota | undefined> {
   const command = process.platform === "darwin" && existsSync(bundledCodex) ? bundledCodex : "codex";
   return new Promise((resolve) => {
     const child = spawn(command, ["app-server"], {
@@ -17,10 +19,10 @@ export function readCodexQuota(): Promise<number | undefined> {
     });
     const lines = createInterface({ input: child.stdout });
     let finished = false;
-    function finish(percent?: number) {
+    function finish(quota?: CodexQuota) {
       if (finished) return;
       finished = true;
-      resolve(percent);
+      resolve(quota);
       lines.close();
       if (!child.killed && child.exitCode === null) child.kill();
     }
@@ -41,7 +43,10 @@ export function readCodexQuota(): Promise<number | undefined> {
         if (quota?.limitId && quota.limitId !== "codex") return finish();
         const window = [quota?.primary, quota?.secondary].find((entry) => entry?.windowDurationMins === 300);
         const used = window?.usedPercent;
-        finish(typeof used === "number" && Number.isFinite(used) && used >= 0 && used <= 100 ? Math.round(100 - used) : undefined);
+        if (typeof used !== "number" || !Number.isFinite(used) || used < 0 || used > 100) return finish();
+        // Codex reports the reset as a Unix timestamp in seconds.
+        const resetsAt = window?.resetsAt;
+        finish({ left: Math.round(100 - used), resetsAt: Number.isSafeInteger(resetsAt) && resetsAt > 0 ? resetsAt : undefined });
       }
     });
     send({ id: 1, method: "initialize", params: { clientInfo: { name: "pi_chat", version: "0.1.0" } } });

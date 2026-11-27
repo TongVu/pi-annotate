@@ -177,8 +177,10 @@ test("dashboard copies the selected project's exact directory path", async (t) =
   assert.equal(directory.hidden, true);
 });
 
-test("dashboard loads Codex quota without blocking sessions and displays it after Saved", async (t) => {
+test("dashboard loads Codex quota without blocking sessions and shows the reset only in its tooltip", async (t) => {
   let reads = 0;
+  const resetsAt = Math.floor(Date.now() / 1000) + 2 * 3600;
+  let now = resetsAt * 1000 - (3600 + 12 * 60 + 30) * 1000;
   let reportQuota;
   const result = new Promise((resolve) => { reportQuota = resolve; });
   const dashboard = await fixture(t, { readQuota: () => { reads++; return result; } });
@@ -190,18 +192,30 @@ test("dashboard loads Codex quota without blocking sessions and displays it afte
   assert.equal(initial.codexQuotaLeft, undefined);
   assert.equal((await state()).codexQuotaLeft, undefined);
   assert.equal(reads, 1, "dashboard polls share the in-flight read");
-  reportQuota(0);
-  assert.equal((await state()).codexQuotaLeft, 0);
+  reportQuota({ left: 0, resetsAt });
+  const quotaState = await state();
+  assert.equal(quotaState.codexQuotaLeft, 0);
+  assert.equal(quotaState.codexQuotaResetsAt, resetsAt);
 
   const asset = async (path) => (await fetch(dashboard.url.origin + path)).text();
   const dom = new JSDOM(await asset("/"), { url: dashboard.url.href, runScripts: "outside-only" });
   t.after(() => dom.window.close());
+  dom.window.Date.now = () => now;
   dom.window.fetch = (path) => dashboard.request(path);
   dom.window.eval(await asset("/dashboard.js"));
-  const badge = dom.window.document.querySelector("#legend .codex-quota");
+  const { document } = dom.window;
+  const badge = document.querySelector("#legend .codex-quota");
+  const tooltip = () => document.querySelector('[role="tooltip"]')?.textContent;
   await waitFor(() => !badge.hidden);
   assert.equal(badge.textContent, "5-hour · 0% left");
   assert.equal(badge.previousElementSibling.textContent, "Saved");
+  assert.equal(tooltip(), undefined);
+  badge.focus();
+  assert.equal(tooltip(), "Codex account usage limit\nResets in 1h 13m");
+  now = resetsAt * 1000;
+  document.getElementById("refresh").click();
+  await waitFor(() => badge.dataset.tooltip === "Codex account usage limit");
+  assert.equal(badge.textContent, "5-hour · 0% left");
   assert.equal(reads, 1, "subsequent polls use the cached quota");
 });
 
