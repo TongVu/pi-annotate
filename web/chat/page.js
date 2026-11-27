@@ -13,6 +13,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   const sessionTitlePill = $("session-title-pill");
   const chatHeading = sessionTitlePill.parentElement;
   const sessionTitleText = $("session-title-text");
+  const sessionTitleStatus = $("session-title-status");
   const renameSessionDialog = $("rename-session-dialog");
   const renameSessionInput = $("rename-session-input");
   const saveSessionName = $("save-session-name");
@@ -101,10 +102,10 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   });
 
   const chatStates = {
-    working: "Pi is working…",
-    ready: "Pi is ready for the next task.",
-    stopped: "Pi stopped. Check the terminal for details.",
-    disconnected: "Disconnected. If it persists, run /chat again in Pi.",
+    working: { label: "Working", icon: "🏗️", color: "#dc4141", detail: "Pi is working…" },
+    ready: { label: "Ready", icon: "✓", color: "#2f9b69", detail: "Pi is ready for the next task." },
+    stopped: { label: "Stopped", icon: "🚫", color: "#d99b25", detail: "Pi stopped. Check the terminal for details." },
+    disconnected: { label: "Offline", icon: "🔌", color: "#858b91", detail: "Disconnected. If it persists, run /chat again in Pi." },
   };
 
   let faviconLogo;
@@ -117,11 +118,9 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     } catch { /* Fall back to the static favicon if the logo cannot be loaded. */ }
   }
 
-  function updateFaviconStatus(state) {
+  function updateFaviconStatus(color) {
     if (!faviconLogo) return;
-    const colors = { ready: "#2f9b69", working: "#dc4141", stopped: "#d99b25", disconnected: "#858b91" };
-    const statusColor = colors[state] ?? colors.disconnected;
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><image href="${faviconLogo}" width="32" height="32"/><circle cx="26" cy="26" r="5" fill="${statusColor}" stroke="white" stroke-width="2"/></svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><image href="${faviconLogo}" width="32" height="32"/><circle cx="22" cy="22" r="10" fill="#242424"/><circle cx="22" cy="22" r="8" fill="${color}" stroke="white" stroke-width="2"/></svg>`;
     const favicon = $("app-favicon");
     favicon.type = "image/svg+xml";
     favicon.href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
@@ -132,10 +131,13 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     const indicator = $("chat-state");
     if (indicator.dataset.state === state) return;
     indicator.dataset.state = state;
-    setTooltip(indicator, chatStates[state]);
-    indicator.querySelector(".chat-state-label").textContent = chatStates[state];
-    chatTitleStatus = ({ ready: "✓ Ready", working: "🏗️", stopped: "🚫", disconnected: "🔌" })[state] ?? "🔌";
-    updateFaviconStatus(state);
+    const { label, icon, color, detail } = chatStates[state];
+    setTooltip(indicator, detail);
+    indicator.querySelector(".chat-state-label").textContent = detail;
+    sessionTitleStatus.textContent = label;
+    sessionTitleStatus.style.setProperty("--title-status-color", color);
+    chatTitleStatus = `${icon} ${label}`;
+    updateFaviconStatus(color);
     if (!explorer.isSaved()) updateLiveDocumentTitle();
   }
 

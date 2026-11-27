@@ -155,6 +155,9 @@ textarea { width: 100%; resize: vertical; background: var(--bg); color: var(--te
 #session-title-text { height: 30px; }
 #session-title-text:is(:hover, :focus-visible) { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
 #session-title-text:focus-visible { outline-offset: -2px; }
+#session-title-status { display: inline-flex; flex: none; align-items: center; gap: 4px; padding: 2px 6px; border: 1px solid var(--title-status-color); border-radius: 999px; background: color-mix(in srgb, var(--title-status-color) 18%, var(--panel)); color: var(--text); font-size: 11px; font-weight: 700; line-height: 16px; }
+#session-title-status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--title-status-color); }
+#session-title-text[hidden] + #session-title-status, #session-title-status:empty { display: none; }
 #open-dashboard, #focus-terminal:not([hidden]), .session-title-pill .panel-toggle:not([hidden]) { display: grid; flex: none; place-items: center; width: 30px; height: 30px; padding: 0; border-radius: 50%; font-size: 14px; }
 #open-dashboard { border-color: transparent; }
 #open-dashboard:not(:disabled):is(:hover, :focus-visible) { background: var(--border); }

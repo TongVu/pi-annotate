@@ -34,8 +34,9 @@ terminal modes work.
    does not undo actions Pi already took.
 4. New messages appear in the same tab as Pi finishes them. The composer border
    and status dot pulse amber while Pi is working unless reduced motion is set.
-   The dot turns green when Pi is ready. Replies aren't streamed
-   token by token. If Pi needs an approval or other interactive input, use the terminal.
+   The composer dot turns green when Pi is ready. The chat title shows a labeled
+   status badge, and the browser tab shows the status in its icon and title.
+   Replies aren't streamed token by token. If Pi needs an approval or other interactive input, use the terminal.
 
 Click **👾** in the composer to view or change this chat’s model and thinking effort. Type in the model field to filter Pi’s model cycle, then click a result or choose it with the arrow keys and Enter. Click any thinking level supported by the model to select it. The active level is highlighted. Changes are available when Pi is idle and do not affect defaults for new chats.
 

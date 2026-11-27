@@ -454,27 +454,32 @@ test("status icon distinguishes ready, working, stopped and disconnected", async
   assert.equal(indicator.dataset.state, "ready");
   assert.match(indicator.textContent, /ready for the next task/);
   const favicon = () => decodeURIComponent(f.$("app-favicon").href);
+  const titleStatus = f.$("session-title-status");
+  const expectStatus = (label, color, title) => {
+    assert.equal(titleStatus.textContent, label);
+    assert.equal(titleStatus.style.getPropertyValue("--title-status-color"), color);
+    assert.ok(favicon().includes(`r="8" fill="${color}" stroke="white"`));
+    assert.equal(f.window.document.title, `Pi Chat · ${title}`);
+  };
   assert.ok(favicon().includes(`data:image/png;base64,${logo.toString("base64")}`), "the status badge is drawn over the supplied logo");
-  assert.match(favicon(), /fill="#2f9b69"/);
+  expectStatus("Ready", "#2f9b69", "✓ Ready");
   busy = true;
   await f.poll();
   assert.equal(indicator.dataset.state, "working");
   assert.match(indicator.textContent, /working/);
-  assert.match(favicon(), /fill="#dc4141"/);
-  assert.equal(f.window.document.title, "Pi Chat · 🏗️");
+  expectStatus("Working", "#dc4141", "🏗️ Working");
   busy = false;
   await f.poll();
   assert.equal(indicator.dataset.state, "ready");
-  assert.equal(f.window.document.title, "Pi Chat · ✓ Ready");
-  assert.match(favicon(), /fill="#2f9b69"/);
+  expectStatus("Ready", "#2f9b69", "✓ Ready");
   failed = true;
   await f.poll();
   assert.equal(indicator.dataset.state, "stopped");
-  assert.equal(f.window.document.title, "Pi Chat · 🚫");
+  expectStatus("Stopped", "#d99b25", "🚫 Stopped");
   offline = true;
   await f.poll();
   assert.equal(indicator.dataset.state, "disconnected");
-  assert.equal(f.window.document.title, "Pi Chat · 🔌");
+  expectStatus("Offline", "#858b91", "🔌 Offline");
 });
 
 test("the tab shows working from send through the next fresh Pi status", async (t) => {
@@ -489,7 +494,7 @@ test("the tab shows working from send through the next fresh Pi status", async (
   } });
   const title = () => f.window.document.title;
   const readyTitle = "Pi Chat · ✓ Ready";
-  const workingTitle = "Pi Chat · 🏗️";
+  const workingTitle = "Pi Chat · 🏗️ Working";
   const submit = () => f.$("chat-form").dispatchEvent(new f.window.Event("submit", { cancelable: true }));
   const input = f.$("chat-input");
   const workingComposer = () => input.closest('.chat-composer:has(#chat-state[data-state="working"])');
@@ -540,7 +545,7 @@ test("two live chats keep their session name first regardless of shared status",
   secondBusy = true;
   await second.poll();
   assert.equal(first.window.document.title, "Fix markdown overflow · ✓ Ready");
-  assert.equal(second.window.document.title, "Merging renovate PRs · 🏗️");
+  assert.equal(second.window.document.title, "Merging renovate PRs · 🏗️ Working");
 });
 
 test("chat tab follows the Pi session name and moves chat controls out of the header", async (t) => {
