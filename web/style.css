@@ -111,13 +111,13 @@ textarea { width: 100%; resize: vertical; background: var(--bg); color: var(--te
 @media (max-width: 850px) { main { grid-template-columns: minmax(0, 1fr); } aside { border-left: 0; border-top: 1px solid var(--border); } header { padding: 16px; flex-wrap: wrap; } #status { padding: 12px 16px; } article { padding: 24px 20px 40px; } }
 /* Chat keeps the annotation panel and composer in view while the transcript scrolls. */
 .chat-page { --chat-toolbar-height: 46px; --chat-note-button-size: 32px; display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr) var(--explorer-width, 0px); height: 100dvh; overflow: hidden; }
-.chat-page.explorer-open { --explorer-width: clamp(220px, 22vw, 280px); }
+.chat-page.explorer-open { --explorer-width: var(--chat-explorer-size, clamp(220px, 22vw, 280px)); }
 .chat-page:has(#saved-conversation[hidden]) { --chat-heading-height: 0px; }
 .chat-page > header { display: none; }
 .chat-page #status { flex: 1 1 auto; min-width: 0; padding: 0; margin: 0; border: 0; overflow-wrap: anywhere; color: var(--muted); font-size: 12px; line-height: 1.35; }
 .chat-page #status.error { color: #ffb4a6; }
 @media (prefers-color-scheme: light) { .chat-page #status.error { color: #a12d20; } }
-.chat-page main { --turn-rail-width: 26px; --turn-blue: #74baff; grid-area: 1 / 1; grid-template-columns: [tools] var(--chat-tools-width, minmax(220px, 340px)) [rail] var(--turn-rail-width) [transcript] minmax(0, 1fr); grid-template-rows: var(--chat-heading-height, var(--chat-toolbar-height)) minmax(0, 1fr) auto auto; width: 100%; max-width: none; min-height: 0; margin: 0 auto; }
+.chat-page main { --turn-rail-width: 26px; --turn-blue: #74baff; grid-area: 1 / 1; grid-template-columns: [tools] var(--chat-tools-width, var(--chat-tools-size, minmax(220px, 340px))) [rail] var(--turn-rail-width) [transcript] minmax(0, 1fr); grid-template-rows: var(--chat-heading-height, var(--chat-toolbar-height)) minmax(0, 1fr) auto auto; width: 100%; max-width: none; min-height: 0; margin: 0 auto; }
 .chat-page main:is(.chat-tools-collapsed, :has(#saved-conversation:not([hidden]))) { --chat-tools-width: 0px; }
 #chat-rail:not([hidden]) { grid-area: 2 / rail / auto / -1; display: grid; grid-template: minmax(0, 1fr) / var(--turn-rail-width); position: relative; z-index: 3; min-height: 0; pointer-events: none; }
 #chat-state:not([hidden]) { flex: none; display: grid; place-items: center; width: 18px; height: 24px; color: var(--muted); margin-inline-start: -6px; }
@@ -195,7 +195,17 @@ textarea { width: 100%; resize: vertical; background: var(--bg); color: var(--te
 .chat-page #chat-tools-content { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: 14px; min-height: 0; overflow: hidden; }
 .chat-page #annotations-panel { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height: 0; overflow: hidden; }
 .chat-page #annotations { min-height: 0; overflow: auto; scrollbar-width: thin; }
-@media (min-width: 761px) { .chat-page #chat-tools { border: 0; border-inline-end: 1px solid var(--border); } }
+.chat-panel-resize { display: none; }
+@media (width > 760px) {
+  .chat-page #chat-tools { position: relative; border: 0; border-inline-end: 1px solid var(--border); }
+  .chat-page #chat-explorer { position: relative; }
+  .chat-page .chat-panel-resize { position: absolute; inset-block: 0; z-index: 1; display: grid; place-items: center; width: 10px; cursor: col-resize; touch-action: none; user-select: none; }
+  #chat-tools-resize { right: 0; }
+  #chat-explorer-resize { left: 0; }
+  .chat-panel-resize::before { content: ""; width: 3px; height: 32px; border-radius: 3px; background: var(--muted); }
+  .chat-panel-resize:is(:hover, :active, :focus-visible) { background: var(--border); outline: none; }
+  .chat-panel-resize:is(:hover, :active, :focus-visible)::before { background: var(--accent); }
+}
 #chat-form { grid-row: 3; padding: 8px 16px 12px; border-top: 1px solid var(--border); }
 .chat-composer { --composer-border: var(--border); position: relative; background: var(--panel); border: 1px solid var(--composer-border); border-radius: 12px; }
 .chat-composer:focus-within { --composer-border: var(--accent); }

@@ -6,6 +6,72 @@ import { mountAttachmentUi } from "./attachments.js";
 import { mountComposerDraft } from "./composer.js";
 import { mountComposerControls } from "./composer-controls.js";
 
+function mountPanelResizers(window) {
+  const { document } = window;
+  const min = 220;
+  // At desktop widths, leave at least 40% of the window for the middle column.
+  const max = () => Math.max(min, Math.min(600, Math.floor(window.innerWidth * 0.3)));
+  const clamp = (width) => Math.max(min, Math.min(max(), Math.round(width)));
+  for (const [id, direction, defaultWidth] of [
+    ["chat-tools", 1, () => 340],
+    ["chat-explorer", -1, () => Math.min(280, window.innerWidth * 0.22)],
+  ]) {
+    const handle = document.getElementById(`${id}-resize`);
+    const key = `pi-chat:${id}-width`;
+    let preferred;
+    let drag;
+    try { preferred = Number(window.localStorage.getItem(key)) || undefined; } catch { /* Resizing still works. */ }
+    const currentWidth = () => clamp(preferred ?? defaultWidth());
+    function update() {
+      const width = currentWidth();
+      document.body.style.setProperty(`--${id}-size`, `${width}px`);
+      handle.setAttribute("aria-valuemin", String(min));
+      handle.setAttribute("aria-valuemax", String(max()));
+      handle.setAttribute("aria-valuenow", String(width));
+    }
+    function save() {
+      try { window.localStorage.setItem(key, String(preferred)); } catch { /* Persistence is optional. */ }
+    }
+    function resize(width) {
+      const next = clamp(width);
+      if (next === currentWidth()) return false;
+      preferred = next;
+      update();
+      return true;
+    }
+    handle.addEventListener("pointerdown", (event) => {
+      if (drag || event.button !== 0) return;
+      event.preventDefault();
+      handle.focus({ preventScroll: true });
+      handle.setPointerCapture(event.pointerId);
+      drag = { id: event.pointerId, x: event.clientX, width: currentWidth(), changed: false };
+    });
+    handle.addEventListener("pointermove", (event) => {
+      if (drag?.id !== event.pointerId) return;
+      drag.changed = resize(drag.width + (event.clientX - drag.x) * direction) || drag.changed;
+    });
+    function finishDrag(event) {
+      if (drag?.id !== event.pointerId) return;
+      if (drag.changed) save();
+      drag = undefined;
+    }
+    for (const event of ["pointerup", "pointercancel", "lostpointercapture"]) handle.addEventListener(event, finishDrag);
+    handle.addEventListener("keydown", (event) => {
+      if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+      const offsets = { ArrowLeft: -16, ArrowRight: 16 };
+      let width;
+      if (event.key === "Home") width = min;
+      else if (event.key === "End") width = max();
+      else if (Object.hasOwn(offsets, event.key)) width = currentWidth() + offsets[event.key] * direction;
+      else return;
+      event.preventDefault();
+      if (resize(width)) save();
+    });
+    window.addEventListener("resize", update);
+    update();
+  }
+}
+
 export async function mountChatPage(window, { token, tooltipFactory, loadNotes = () => import("./notes.js") }) {
   const { document, crypto } = window;
   const $ = (id) => document.getElementById(id);
@@ -310,6 +376,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     // Older servers silently ignore the new attachments field on messages with a caption.
     if (data.protocol !== 2) throw new Error("Pi's chat server is outdated. Run /reload, then /chat in Pi.");
     document.body.classList.add("chat-page");
+    mountPanelResizers(window);
     $("chat-form").before(chatHeading);
     sessionTitlePill.hidden = false;
     const shortcuts = new Map([

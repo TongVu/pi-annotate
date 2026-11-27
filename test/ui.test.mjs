@@ -8,11 +8,12 @@ import { startChatPage } from "../web/app.js";
 const logo = await readFile(new URL("../web/logo.png", import.meta.url));
 // The dashboard still uses the classic shared tooltip script. Test it in the window's realm.
 const tooltipScript = new Script(await readFile(new URL("../web/tooltips.js", import.meta.url), "utf8"), { filename: "web/tooltips.js" });
-async function fixture(t, { chatFetch, loadNotes } = {}) {
+async function fixture(t, { chatFetch, loadNotes, setupWindow } = {}) {
   const html = await readFile(new URL("../web/index.html", import.meta.url), "utf8");
   const dom = new JSDOM(html, { url: "http://127.0.0.1:12345/?tab=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#test-token", runScripts: "outside-only" });
   t.after(() => dom.window.close());
   const { window } = dom;
+  setupWindow?.(window);
   const $ = (id) => window.document.getElementById(id);
   window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
   window.HTMLDialogElement.prototype.close = function () { this.open = false; this.dispatchEvent(new window.Event("close")); };
@@ -1129,6 +1130,57 @@ test("saved-chat launch leaves the live composer alone and refresh drops a delet
   assert.equal(resume.hidden, true);
   f.$("back-to-live").click();
   assert.equal(f.$("chat-input").value, "Keep this draft");
+});
+
+test("both chat panels resize independently and restore their preferred widths", async (t) => {
+  const chatFetch = async (path) => ({ ok: true, json: async () => path === "/api/response"
+    ? { mode: "chat", protocol: 2, cursor: null, messages: [], busy: false }
+    : { current: { id: "current", cwd: "/project" }, sessions: [] } });
+  const f = await fixture(t, { chatFetch, setupWindow: (window) => { window.innerWidth = 1600; } });
+  const { window, $ } = f;
+  const left = $("chat-tools-resize");
+  const right = $("chat-explorer-resize");
+  const width = (panel) => window.document.body.style.getPropertyValue(`--${panel}-size`);
+  const pointer = (handle, type, clientX, pointerId = 1) => {
+    const event = new window.MouseEvent(type, { clientX, cancelable: true });
+    Object.defineProperty(event, "pointerId", { value: pointerId });
+    handle.dispatchEvent(event);
+  };
+  const drag = (handle, from, to) => {
+    handle.setPointerCapture = (id) => assert.equal(id, 1);
+    pointer(handle, "pointerdown", from);
+    pointer(handle, "pointermove", 0, 2);
+    pointer(handle, "pointermove", to);
+    pointer(handle, "pointerup", to);
+  };
+  assert.equal($("chat-explorer").hidden, true);
+  $("explorer-toggle").click();
+  assert.equal($("chat-explorer").hidden, false);
+  drag(left, 339, 419);
+  assert.equal(width("chat-tools"), "420px");
+  assert.equal(width("chat-explorer"), "280px");
+  drag(right, 1321, 1121);
+  assert.equal(width("chat-explorer"), "480px");
+  assert.equal(right.getAttribute("aria-valuenow"), "480");
+  right.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowRight", cancelable: true }));
+  assert.equal(width("chat-explorer"), "464px");
+  $("chat-tools-toggle").click();
+  $("chat-tools-toggle").click();
+  assert.equal(width("chat-tools"), "420px");
+  window.innerWidth = 800;
+  window.dispatchEvent(new window.Event("resize"));
+  assert.equal(width("chat-tools"), "240px");
+  assert.equal(width("chat-explorer"), "240px");
+
+  const restored = await fixture(t, { chatFetch, setupWindow(restoredWindow) {
+    restoredWindow.innerWidth = 1600;
+    for (const panel of ["chat-tools", "chat-explorer"]) {
+      const key = `pi-chat:${panel}-width`;
+      restoredWindow.localStorage.setItem(key, window.localStorage.getItem(key));
+    }
+  } });
+  assert.equal(restored.$("chat-tools-resize").getAttribute("aria-valuenow"), "420");
+  assert.equal(restored.$("chat-explorer-resize").getAttribute("aria-valuenow"), "464");
 });
 
 test("Markdown notes persist per chat, preview safely, and copy their source", async (t) => {

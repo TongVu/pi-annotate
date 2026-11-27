@@ -49,6 +49,9 @@ send several questions together, each with its quote. Keep a checklist or other
 reference material in the **Markdown note**, which saves locally without
 sending it to Pi.
 
+On desktop, drag the inner edge of either side panel to resize it, or focus
+its divider and use the left and right arrow keys. Widths survive a page refresh.
+
 ![Trail Atlas browser chat with a Markdown checklist and a follow-up question quoting a line from Pi’s reply](docs/screenshots/browser-chat.png)
 
 ## More details
