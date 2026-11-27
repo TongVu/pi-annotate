@@ -9,7 +9,7 @@ import { canFocusBrowser, focusBrowserChat } from "./focus-browser.ts";
 import { isLocalRequest, isSameOriginJson, setLocalPageHeaders } from "./loopback-http.ts";
 import { shellQuote } from "./resume-chat.ts";
 import { archiveSession, listArchivedSessions, restoreArchivedSession } from "./session-archive.ts";
-import { listOwnedSessions, requestOwnedChat } from "./session-owner.ts";
+import { listOwnedSessions, requestOwnedChat, requestOwnerStop } from "./session-owner.ts";
 import { readWebAsset } from "./web-assets.ts";
 
 const assets = new Map([
@@ -148,6 +148,7 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
             canArchive: archiveDir && session && !peer && !owner && (opening.get(id) ?? 0) <= Date.now() ? true : undefined,
             status: peer ? peer.status ?? "connected" : owner ? "disconnected" : "saved",
             terminalWorking: !peer && owner?.working ? true : undefined,
+            stopTarget: !peer && owner?.stopTarget && owner.stopTarget.pid !== process.pid ? owner.stopTarget.key : undefined,
             canVerify: verifyChat && (peer?.cwd || owner?.cwd || session?.cwd) ? true : undefined,
             action: peer ? (peer.tab && canFocus(agent) ? "focus" : peer.tab && browserSwitcher ? "browser-tab" : "manual-tab")
               : owner ? "reopen" : session?.cwd ? (resume ? "resume" : "manual-resume") : "unavailable",
@@ -161,7 +162,8 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
       const bookmark = req.url === "/api/session/bookmark";
       const archive = req.url === "/api/session/archive";
       const restore = req.url === "/api/session/restore";
-      if (req.method === "POST" && (newChat || verify || focusHost || bookmark || archive || restore || req.url === "/api/open")) {
+      const stop = req.url === "/api/session/stop";
+      if (req.method === "POST" && (newChat || verify || focusHost || bookmark || archive || restore || stop || req.url === "/api/open")) {
         if (!isSameOriginJson(req.headers, origin)) {
           return reply(403, { error: "Expected a same-origin JSON request." });
         }
@@ -171,6 +173,23 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
           if (raw.length > 4096) return reply(413, { error: "Request is too large." });
         }
         const body = JSON.parse(raw);
+        if (stop) {
+          const { id, target } = body ?? {};
+          if (typeof id !== "string" || !id || typeof target !== "string" || !target || Object.keys(body).length !== 2) {
+            return reply(400, { error: "Choose a disconnected Pi session to stop." });
+          }
+          const { live, owned } = await discover();
+          if (closed) return;
+          const owner = owned.get(id)?.stopTarget;
+          if (live.has(id) || !owner || owner.key !== target || owner.pid === process.pid) {
+            return reply(409, { error: "That disconnected Pi session changed or can’t be stopped here. Check its updated status." });
+          }
+          const result = await requestOwnerStop(owner);
+          if (result === "suspended") return reply(409, { error: "Pi is suspended. Bring it to the foreground in its terminal before stopping it." });
+          if (result !== "stopping") return reply(409, { error: "Could not stop the disconnected Pi session. Check whether it reconnected, or quit it from its terminal." });
+          listing = undefined;
+          return reply(202, { message: "Quitting Pi. Saved chat history will remain available to resume." });
+        }
         if (restore) {
           const id = body?.id;
           if (typeof id !== "string" || !id || Object.keys(body).length !== 1) return reply(400, { error: "Choose an archived session to restore." });

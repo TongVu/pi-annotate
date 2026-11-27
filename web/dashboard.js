@@ -69,6 +69,7 @@ let activeProjectOption;
 const pending = new Set();
 const savingBookmarks = new Set();
 const archiving = new Set();
+const stopping = new Set();
 const restoring = new Set();
 
 function el(tag, className, text) {
@@ -106,13 +107,13 @@ function projectName(cwd) {
 
 function actionButton(session, inSidebar = false) {
   const action = actions[session.action];
-  const label = pending.has(session.id) ? "Opening…" : action;
+  const label = stopping.has(session.id) ? "Stopping…" : pending.has(session.id) ? "Opening…" : action;
   const node = el("button", inSidebar ? "session-link" : "open", inSidebar ? undefined : label);
   node.type = "button";
   node.dataset.id = session.id;
   node.dataset.place = inSidebar ? "side" : "card";
   node.disabled = session.action === "unavailable";
-  node.setAttribute("aria-disabled", String(pending.has(session.id) || node.disabled));
+  node.setAttribute("aria-disabled", String(pending.has(session.id) || stopping.has(session.id) || node.disabled));
   const { status, terminalWorking } = session;
   node.setAttribute("aria-label", `${label}: ${session.name} (${statuses[status]}${terminalWorking ? " · Working in Terminal" : ""})`);
   setTooltip(node, status === "disconnected" ? `${session.name} · ${disconnectedHint(terminalWorking)}` : session.name);
@@ -120,7 +121,7 @@ function actionButton(session, inSidebar = false) {
   return node;
 }
 
-function sessionStorageButton({ id, name }, place, label, shape, busy) {
+function sessionIconButton({ id, name }, place, label, shape, busy) {
   const button = el("button", `${place}-session`);
   button.type = "button";
   button.dataset.id = id;
@@ -142,9 +143,13 @@ function sessionStorageButton({ id, name }, place, label, shape, busy) {
 
 function sidebarSession(session) {
   const link = actionButton(session, true);
-  if (!session.canArchive) return link;
-  const row = el("div", "session-with-archive");
-  row.append(link, sessionStorageButton(session, "archive", "Archive", "M2.5 4h11M6 4V2h4v2M4 4l.7 10h6.6L12 4M7 7v4m2-4v4", archiving.has(session.id)));
+  const stop = session.status === "disconnected" && session.stopTarget;
+  if (!stop && !session.canArchive) return link;
+  const row = el("div", "session-with-action");
+  const button = stop
+    ? sessionIconButton(session, "stop", "Stop Pi session", "M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM6 6l4 4m0-4-4 4", stopping.has(session.id) || pending.has(session.id))
+    : sessionIconButton(session, "archive", "Archive", "M2.5 4h11M6 4V2h4v2M4 4l.7 10h6.6L12 4M7 7v4m2-4v4", archiving.has(session.id));
+  row.append(link, button);
   return row;
 }
 
@@ -189,7 +194,7 @@ function renderArchive(archived) {
     if (cwd) details.append(`${projectName(cwd)} · `);
     details.append(time);
     item.append(el("span", "", name), details);
-    if (id) item.append(sessionStorageButton({ id, name }, "restore", "Restore", "M2.5 4v4h4M2.5 8l2-2a5.5 5.5 0 1 1 1 8", restoring.has(id)));
+    if (id) item.append(sessionIconButton({ id, name }, "restore", "Restore", "M2.5 4v4h4M2.5 8l2-2a5.5 5.5 0 1 1 1 8", restoring.has(id)));
     return item;
   }));
   if (focused?.place === "restore") (restoreButton(focused.id) ?? archiveView.querySelector("summary")).focus({ preventScroll: true });
@@ -269,7 +274,7 @@ function cards(cwd, items, namesById) {
 function render() {
   hideTooltip();
   const focused = document.activeElement?.dataset;
-  const archiveProject = focused?.place === "archive" ? document.activeElement.closest(".project")?.querySelector(".project-heading")?.dataset.project : undefined;
+  const actionProject = ["archive", "stop"].includes(focused?.place) ? document.activeElement.closest(".project")?.querySelector(".project-heading")?.dataset.project : undefined;
   createChatButton.disabled = !projects.length;
   if (view === "project" && !projects.includes(project) && !sessions.some(({ cwd }) => cwd === project)) {
     view = "all";
@@ -333,8 +338,9 @@ function render() {
   } else if (focused?.id !== undefined || focused?.project !== undefined) {
     const replacement = [...document.querySelectorAll("button[data-id], button[data-project]")].find(({ dataset }) =>
       focused.id !== undefined ? dataset.id === focused.id && dataset.place === focused.place : dataset.project === focused.project);
-    const fallback = archiveProject === undefined ? undefined : [...document.querySelectorAll(".project-heading")].find(({ dataset }) => dataset.project === archiveProject);
-    (replacement ?? fallback ?? (view === "bookmarks" ? bookmarkView : undefined))?.focus({ preventScroll: true });
+    const rowLink = focused.place === "stop" ? [...document.querySelectorAll(".session-link")].find(({ dataset }) => dataset.id === focused.id) : undefined;
+    const fallback = actionProject === undefined ? undefined : [...document.querySelectorAll(".project-heading")].find(({ dataset }) => dataset.project === actionProject);
+    (replacement ?? rowLink ?? fallback ?? (view === "bookmarks" ? bookmarkView : undefined))?.focus({ preventScroll: true });
   }
 }
 
@@ -416,6 +422,25 @@ async function archiveChat(id) {
   }
 }
 
+async function stopChat(id) {
+  const session = sessions.find((item) => item.id === id);
+  if (session?.status !== "disconnected" || !session.stopTarget || pending.has(id) || stopping.has(id)) return;
+  if (!window.confirm(`Stop Pi for “${session.name}”? Any work in progress will be interrupted. Saved chat history will stay available.`)) return;
+  stopping.add(id);
+  render();
+  try {
+    const result = await api("/api/session/stop", { id, target: session.stopTarget });
+    await refreshInFlight;
+    await refresh();
+    notice(result.message);
+  } catch (error) {
+    notice(error.message, true);
+  } finally {
+    stopping.delete(id);
+    render();
+  }
+}
+
 function restoreButton(id) {
   return [...document.querySelectorAll(".restore-session")].find(({ dataset }) => dataset.id === id);
 }
@@ -469,7 +494,7 @@ async function focusBrowserTab(tab) {
 
 async function openChat(id) {
   const session = sessions.find((item) => item.id === id);
-  if (!session || pending.has(id)) return;
+  if (!session || pending.has(id) || stopping.has(id)) return;
   pending.add(id);
   render();
   try {
@@ -620,6 +645,7 @@ document.addEventListener("click", (event) => {
     void api("/api/session/verify", { id }).then(result => notice(result.message), error => notice(error.message, true)).finally(() => { button.disabled = false; });
   } else if (place === "bookmark") void toggleBookmark(id);
   else if (place === "archive") void archiveChat(id);
+  else if (place === "stop") void stopChat(id);
   else if (place === "restore") void restoreChat(button);
   else if (id !== undefined) void openChat(id);
   else if (cwd !== undefined || next) {

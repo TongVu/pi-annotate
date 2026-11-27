@@ -301,6 +301,82 @@ test("dashboard reconnects a disconnected Pi owner before considering a saved-se
   assert.equal(launches, 1);
 });
 
+test("sidebar stops only the confirmed disconnected Pi owner and keeps the saved chat", { skip: process.platform === "win32" }, async (t) => {
+  const dashboard = await fixture(t, { resume: async () => assert.fail("Stop must not launch a chat") });
+  const startOwner = async () => {
+    const child = spawn(process.execPath, ["--input-type=module", "-e", `
+      import { registerSessionOwner } from ${JSON.stringify(new URL("../src/session-owner.ts", import.meta.url).href)};
+      const hold = setInterval(() => {}, 60000);
+      const owner = await registerSessionOwner(process.argv[1], { id: 'saved', cwd: '/work/project' }, async () => {
+        throw new Error('Stop must not open a browser');
+      }, () => {
+        setImmediate(async () => { await owner.close(); clearInterval(hold); });
+        return true;
+      });
+    `, dashboard.ownerDir], { env: { ...process.env, TMPDIR: join(dashboard.ownerDir, "..") } });
+    const exited = once(child, "exit");
+    t.after(async () => { child.kill(); await exited; });
+    const target = await waitFor(async () => (await dashboard.sessions())[0]?.stopTarget);
+    return { target, exited };
+  };
+  const path = "/api/session/stop";
+  const { target, exited } = await startOwner();
+  const stop = (requestTarget) => dashboard.request(path, { id: saved.id, target: requestTarget });
+  assert.equal((await fetch(dashboard.url.origin + path, { method: "POST", body: "{}" })).status, 401);
+  assert.equal((await fetch(dashboard.url.origin + path, { method: "POST", headers: {
+    Authorization: `Bearer ${dashboard.token}`, Origin: "null", "Content-Type": "application/json",
+  }, body: JSON.stringify({ id: saved.id, target }) })).status, 403);
+  assert.equal((await dashboard.request(path, { id: saved.id, target, pid: process.pid })).status, 400);
+
+  const host = await registerSessionOwner(dashboard.ownerDir, { id: "host", cwd: saved.cwd }, async () => "attached", () => assert.fail("Stop must not quit the dashboard host"));
+  t.after(host.close);
+  assert.equal((await dashboard.sessions()).find(({ id }) => id === "host").stopTarget, undefined);
+  const duplicate = await registerSessionOwner(dashboard.ownerDir, saved, async () => "attached");
+  t.after(duplicate.close);
+  assert.equal((await dashboard.sessions()).find(({ id }) => id === saved.id).stopTarget, undefined);
+  assert.equal((await stop(target)).status, 409);
+  await duplicate.close();
+  const presence = createChatPresence(() => dashboard.presenceDir, () => saved);
+  t.after(presence.close);
+  await presence.touch(30_000);
+  assert.equal((await dashboard.sessions()).find(({ id }) => id === saved.id).stopTarget, undefined);
+  assert.equal((await stop(target)).status, 409);
+  await presence.close();
+
+  const asset = async (url) => (await fetch(dashboard.url.origin + url)).text();
+  const dom = new JSDOM(await asset("/"), { url: dashboard.url.href, runScripts: "outside-only" });
+  t.after(() => dom.window.close());
+  const writes = [];
+  dom.window.fetch = (url, options) => {
+    const body = options.body && JSON.parse(options.body);
+    if (body) writes.push([url, body]);
+    return dashboard.request(url, body);
+  };
+  let confirmed = false;
+  dom.window.confirm = (message) => { assert.match(message, /Saved work.*interrupted/); return confirmed; };
+  dom.window.eval(await asset("/dashboard.js"));
+  const { document } = dom.window;
+  const icon = await waitFor(() => document.querySelector("#projects .stop-session"));
+  assert.equal(document.querySelectorAll(".stop-session").length, 1);
+  assert.equal(icon.getAttribute("aria-label"), `Stop Pi session: ${saved.name}`);
+  icon.focus();
+  icon.click();
+  assert.deepEqual(writes, []);
+  confirmed = true;
+  icon.click();
+  assert.deepEqual(await exited, [0, null]);
+  await waitFor(() => !document.querySelector(".stop-session"));
+  assert.equal(document.activeElement, document.querySelector('.session-link[data-id="saved"]'));
+  assert.match(document.getElementById("message").textContent, /Saved chat history/);
+  assert.deepEqual(writes, [[path, { id: saved.id, target }]]);
+  assert.equal((await dashboard.sessions()).find(({ id }) => id === saved.id).status, "saved");
+
+  const replacement = await startOwner();
+  assert.notEqual(replacement.target, target);
+  assert.equal((await stop(target)).status, 409, "a stale button must not stop a replacement owner");
+  assert.equal((await dashboard.sessions()).find(({ id }) => id === saved.id).stopTarget, replacement.target);
+});
+
 test("Linux reconnect skips a suspended older owner without waking it or starting another Pi", { skip: process.platform !== "linux" }, async (t) => {
   let launches = 0, attaches = 0;
   const dashboard = await fixture(t, { resume: async () => { launches++; } });

@@ -3,11 +3,13 @@ import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:f
 import { createConnection, createServer } from "node:net";
 import type { Socket } from "node:net";
 import { tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 
 type OwnerResult = "attached" | "already-open" | "unavailable";
 type Identity = { id: string; cwd: string; name?: string };
-type OwnedSession = Identity & { working?: true };
+type StopTarget = { key: string; pid: number; socketPath: string };
+type OwnedSession = Identity & { working?: true; stopTarget?: StopTarget };
+const actionTimeout = 9000;
 const prefix = (id: string) => createHash("sha256").update(id).digest("hex");
 
 function processAlive(pid: number) {
@@ -17,22 +19,40 @@ function processAlive(pid: number) {
 }
 
 /** The Unix socket is confined to a private temp directory; browsers cannot access it. */
-export async function registerSessionOwner(registry: string, session: Identity, attach: () => Promise<OwnerResult>) {
+export async function registerSessionOwner(registry: string, session: Identity, attach: () => Promise<OwnerResult>, stop?: () => boolean) {
   await mkdir(registry, { recursive: true, mode: 0o700 });
   const directory = await mkdtemp(join(tmpdir(), "pi-a-"));
   const socketPath = join(directory, "chat");
   const marker = join(registry, `${prefix(session.id)}-${randomUUID()}.json`);
   const sockets = new Set<Socket>();
   let opening: Promise<OwnerResult> | undefined;
-  const server = createServer((socket) => {
+  let stopping = false;
+  const listenFor = (handle: (socket: Socket) => void) => createServer((socket) => {
     sockets.add(socket);
     socket.once("close", () => sockets.delete(socket));
     socket.on("error", () => {});
     socket.setTimeout(10_000, () => socket.destroy());
+    handle(socket);
+  });
+  const server = listenFor((socket) => {
+    if (stopping) { socket.end("unavailable"); return; }
     opening ??= Promise.resolve().then(attach).catch(() => "unavailable" as const).finally(() => { opening = undefined; });
     void opening.then((result) => socket.end(result));
   });
-  const record = { ...session, pid: process.pid, socketPath, startedAt: Date.now() };
+  // Use a separate socket so an older dashboard's connect-to-reopen request still works.
+  const stopServer = stop && listenFor((socket) => {
+    socket.once("data", (data) => {
+      const deadline = Number(data.toString());
+      const now = Date.now();
+      if (opening || !Number.isSafeInteger(deadline) || deadline <= now || deadline > now + actionTimeout) {
+        socket.end("unavailable");
+        return;
+      }
+      try { stopping ||= stop(); } catch { /* The session may be closing. */ }
+      socket.end(stopping ? "stopping" : "unavailable");
+    });
+  });
+  const record = { ...session, pid: process.pid, socketPath, startedAt: Date.now(), canStop: !!stopServer };
   const publish = async (working: boolean) => {
     await writeFile(`${marker}.tmp`, JSON.stringify({ ...record, working }), { mode: 0o600 });
     await rename(`${marker}.tmp`, marker);
@@ -47,16 +67,19 @@ export async function registerSessionOwner(registry: string, session: Identity, 
   const close = async () => {
     closed = true;
     for (const socket of sockets) socket.destroy();
-    if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
+    await Promise.all([server, stopServer].map((listener) => listener?.listening
+      ? new Promise<void>((resolve) => listener.close(() => resolve())) : undefined));
     await writing;
     await Promise.all([rm(marker, { force: true }), rm(`${marker}.tmp`, { force: true }), rm(directory, { recursive: true, force: true })]).catch(() => {});
   };
   try {
-    await new Promise<void>((resolve, reject) => {
-      server.once("error", reject);
-      server.listen(socketPath, resolve);
+    const listen = (listener: typeof server, path: string) => new Promise<void>((resolve, reject) => {
+      listener.once("error", reject);
+      listener.listen(path, resolve);
+      listener.unref();
     });
-    server.unref();
+    await listen(server, socketPath);
+    if (stopServer) await listen(stopServer, join(directory, "stop"));
     await publish(false);
     return { close, setWorking };
   } catch (error) {
@@ -65,18 +88,19 @@ export async function registerSessionOwner(registry: string, session: Identity, 
   }
 }
 
-function askOwner(path: string): Promise<OwnerResult> {
+function askOwner(path: string, deadline?: number): Promise<string> {
   return new Promise((resolve) => {
     const socket = createConnection(path);
     let output = "";
     socket.setEncoding("utf8");
-    socket.setTimeout(9000, () => socket.destroy());
+    socket.setTimeout(actionTimeout, () => socket.destroy());
+    if (deadline !== undefined) socket.on("connect", () => socket.write(String(deadline)));
     socket.on("data", (data) => {
       output += data;
       if (output.length > 32) socket.destroy();
     });
     socket.on("error", () => resolve("unavailable"));
-    socket.on("end", () => resolve(output === "attached" || output === "already-open" ? output : "unavailable"));
+    socket.on("end", () => resolve(output));
     socket.on("close", () => resolve("unavailable"));
   });
 }
@@ -88,11 +112,14 @@ export async function listOwnedSessions(registry: string): Promise<OwnedSession[
     if (!/^[a-f0-9]{64}-[a-f0-9-]{36}\.json$/.test(name)) continue;
     const path = join(registry, name);
     try {
-      const { pid, id, cwd, name: label, working } = JSON.parse(await readFile(path, "utf8"));
+      const { pid, id, cwd, name: label, working, canStop, socketPath } = JSON.parse(await readFile(path, "utf8"));
       if (!processAlive(pid)) await rm(path, { force: true });
       else if (typeof id === "string" && typeof cwd === "string" && name.startsWith(prefix(id))) {
+        const previous = sessions.get(id);
         sessions.set(id, { id, cwd, name: typeof label === "string" ? label : undefined,
-          working: working === true || sessions.get(id)?.working ? true : undefined });
+          working: working === true || previous?.working ? true : undefined,
+          stopTarget: !previous && canStop === true && typeof socketPath === "string" && isAbsolute(socketPath)
+            ? { key: name.slice(65, -5), pid, socketPath: join(dirname(socketPath), "stop") } : undefined });
       }
     } catch { /* The owner may have just shut down. */ }
   }
@@ -125,11 +152,20 @@ export async function requestOwnedChat(registry: string, id: string): Promise<Ow
   // browser launch for later, so check before sending and never retry after a timeout.
   owners.sort((a, b) => a.startedAt - b.startedAt);
   for (const owner of owners) {
-    if (process.platform === "linux") {
-      const status = await readFile(`/proc/${owner.pid}/status`, "utf8").catch(() => "");
-      if (/^State:\s+[Tt]\b/m.test(status)) continue;
-    }
-    return askOwner(owner.socketPath);
+    if (await isSuspended(owner.pid)) continue;
+    const result = await askOwner(owner.socketPath);
+    return result === "attached" || result === "already-open" ? result : "unavailable";
   }
   return owners.length ? "suspended" : "missing";
+}
+
+async function isSuspended(pid: number) {
+  if (process.platform !== "linux") return false;
+  const status = await readFile(`/proc/${pid}/status`, "utf8").catch(() => "");
+  return /^State:\s+[Tt]\b/m.test(status);
+}
+
+export async function requestOwnerStop(target: StopTarget) {
+  if (await isSuspended(target.pid)) return "suspended";
+  return await askOwner(target.socketPath, Date.now() + actionTimeout) === "stopping" ? "stopping" : "unavailable";
 }

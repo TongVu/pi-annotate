@@ -49,9 +49,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .nav-item[aria-current="true"] { background: white; font-weight: 600; }
 .truncate { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .meta { font-size: 11px; color: var(--muted); flex: none; }
-.session-with-archive { position: relative; }
-.session-with-archive .meta { min-width: 26px; text-align: end; visibility: hidden; }
-.archive-session, .restore-session {
+.session-with-action { position: relative; }
+.session-with-action .meta { min-width: 26px; text-align: end; visibility: hidden; }
+.archive-session, .restore-session, .stop-session {
   position: absolute;
   inset-block: 0;
   inset-inline-end: 4px;
@@ -65,7 +65,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
   color: var(--muted);
 }
 :is(.archive-session, .restore-session):is(:hover, :focus-visible) { background: var(--border); color: var(--ink); }
-:is(.archive-session, .restore-session)[aria-disabled="true"] { cursor: wait; }
+.stop-session:is(:hover, :focus-visible) { background: #fae5df; color: #a63926; }
+:is(.archive-session, .restore-session, .stop-session)[aria-disabled="true"] { cursor: wait; }
 #archive-view summary { display: list-item; cursor: pointer; }
 #archive-view summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 #archive-count { float: inline-end; }
@@ -83,8 +84,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 #archived-sessions li:has(.restore-session) { position: relative; padding-inline-end: 38px; }
 .restore-session { inset-block: 3px; }
 @media (hover: hover) and (pointer: fine) {
-  .session-with-archive:not(:hover, :focus-within) .meta { visibility: visible; }
-  .session-with-archive:not(:hover, :focus-within) .archive-session,
+  .session-with-action:not(:hover, :focus-within) .meta { visibility: visible; }
+  .session-with-action:not(:hover, :focus-within) :is(.archive-session, .stop-session),
   #archived-sessions li:not(:hover, :focus-within) .restore-session { opacity: 0; pointer-events: none; }
 }
 .main { --inset: 36px; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; }

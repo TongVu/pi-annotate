@@ -329,6 +329,12 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
           if (owner !== ownerGeneration || ctx.sessionManager.getSessionId() !== id) return "unavailable";
           if (active) return "already-open";
           return await runChatPage("", ctx) ? "attached" : "unavailable";
+        }, () => {
+          if (owner !== ownerGeneration || ctx.sessionManager.getSessionId() !== id || active) return false;
+          const busy = !ctx.isIdle();
+          ctx.shutdown();
+          if (busy) ctx.abort();
+          return true;
         });
         if (owner === ownerGeneration) sessionOwner = registered;
         else await registered.close();

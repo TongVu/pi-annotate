@@ -159,6 +159,10 @@ account signed into Codex, not Pi's context usage, and refreshes about once a mi
   the dashboard never opens a replacement for a connected chat.
 - **Reopen chat** asks the running Pi session to open a fresh tab. It does not
   start a second Pi or interrupt an ongoing turn.
+- **Stop Pi session** appears when you hover over or tab to an eligible disconnected
+  chat in the Projects sidebar. Confirm to quit that Pi session without switching
+  terminals or deleting saved history. Work in progress is interrupted. The Pi
+  hosting the dashboard must be quit from its own terminal.
 - **Resume chat** starts the saved session in its original project via Terminal
   on macOS or in a new tab in the dashboard’s Kitty window on Linux. If terminal
   launch is unavailable, copy the resume command, then run `/chat` in Pi.
