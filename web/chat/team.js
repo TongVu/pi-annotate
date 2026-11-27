@@ -10,7 +10,7 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
   const roles = $("team-roles"), transcript = $("team-transcript");
   const setup = $("team-setup"), start = $("team-start"), submit = $("team-submit"), pick = $("team-attach"), files = $("team-files");
   const direction = $("team-direction"), stop = $("team-stop"), cancelStart = $("team-cancel-start");
-  const brief = $("team-brief"), input = $("team-input");
+  const brief = $("team-brief"), input = $("team-input"), resume = $("team-resume");
   const attachmentList = $("team-attachments"), resultView = $("team-result");
   const feedbackButton = $("team-feedback");
   let composingFeedback = false, displayedRound = 0;
@@ -96,6 +96,7 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
     const status = $("team-setup-status");
     status.textContent = problem || (phase === "starting" ? "Preparing the shared workspace…" : readingFiles ? "Reading files…" : "");
     status.classList.toggle("error", Boolean(problem));
+    syncDirection();
   }
 
   function renderAttachments() {
@@ -190,7 +191,7 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
     if (!role) return;
     $("team-role-title").textContent = `${role.name} · ${labels[role.status]}`;
     direction.hidden = role.status !== "paused";
-    $("team-report").textContent = role.report;
+    syncDirection();
     if (transcriptRole !== role.id) {
       transcriptRole = role.id;
       transcript.replaceChildren();
@@ -269,13 +270,25 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
     syncSetup();
     brief.focus();
   });
+  function syncDirection() {
+    const role = snapshot?.roles.find(({ id }) => id === selected);
+    input.readOnly = pending || role?.status !== "paused";
+    resume.disabled = pending || role?.status !== "paused" || !input.value.trim();
+  }
+  input.addEventListener("input", syncDirection);
+  input.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || event.isComposing || event.keyCode === 229) return;
+    event.preventDefault();
+    if (!event.repeat && !resume.disabled) direction.requestSubmit();
+  });
   direction.addEventListener("submit", (event) => {
     event.preventDefault();
     const id = selected;
     const role = snapshot?.roles.find((role) => role.id === id);
     if (!role || role.status !== "paused") return;
     const text = input.value;
-    void act({ action: "resume", role: id, pause: role.pause, direction: text }, direction.querySelector("button"), () => {
+    if (!text.trim()) return;
+    void act({ action: "resume", role: id, pause: role.pause, direction: text }, resume, () => {
       if (selected === id && input.value === text) input.value = "";
       if (drafts.get(id) === text) drafts.delete(id);
     });

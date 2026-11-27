@@ -65,10 +65,23 @@ button.team-icon.secondary:not(:disabled):hover { background: color-mix(in srgb,
 #team-transcript { overflow: auto; overscroll-behavior: contain; padding: 12px max(16px, calc((100% - 78ch) / 2)); }
 #team-transcript section { padding: 10px 0; border-bottom: 1px solid var(--border); }
 #team-transcript strong { color: var(--muted); font-size: 12px; }
-#team-transcript p, #team-report { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 0; font-size: 14px; }
-#team-direction { padding: 10px 16px; border-top: 1px solid var(--border); }
-#team-direction button { margin-top: 4px; }
-#team-report { margin-bottom: 8px; max-height: min(140px, 20dvh); overflow: auto; color: var(--team-warning, #e0ad70); }
+#team-transcript p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 0; font-size: 14px; }
+#team-direction { padding: 12px 16px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid var(--border); }
+.team-direction-label { display: block; margin: 0 0 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.team-composer { width: min(100%, 78ch); margin-inline: auto; }
+.team-composer:focus-within { box-shadow: 0 0 0 1px var(--accent); }
+#team-input { display: block; width: 100%; min-height: 56px; max-height: min(28dvh, 220px); margin: 0; padding: 12px 14px 4px; resize: vertical; border: 0; background: transparent; font-size: 14px; }
+#team-input:focus-visible { outline: none; }
+.team-composer-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 8px 8px; }
+.team-composer-hint { color: var(--muted); font-size: 11px; }
+#team-resume { display: grid; place-items: center; flex: none; width: 36px; height: 36px; padding: 0; border-radius: 50%; }
+#team-resume:disabled { opacity: .55; }
+#team-stop:not([hidden]) { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; margin-top: 12px; padding: 6px 12px; border-radius: 999px; color: var(--muted); font-size: 12px; }
+#team-stop:not([hidden]):hover { color: var(--text); border-color: var(--team-warning, #e0ad70); }
+@media (max-width: 600px) {
+  #team-direction { padding-inline: 10px; }
+  .team-composer-hint { font-size: 10px; }
+}
 @media (prefers-color-scheme: light) {
   .chat-page { --team-warning: #8a4b17; }
   #team-setup-status.error { --attachment-error: #a12d20; }
