@@ -49,7 +49,7 @@ screens, notes and annotations sit below the chat and the explorer opens from
 the right edge.
 
 With the chat tab focused, press **Ctrl+Shift+1** to switch to the terminal tab
-running that chat (same as clicking **🕹️**), **Ctrl+Shift+2** to toggle notes and
+running that chat (same as clicking **Switch to Terminal**), **Ctrl+Shift+2** to toggle notes and
 annotations, or **Ctrl+Shift+3** to toggle the explorer. Switching to the terminal
 does not start Pi, open a new tab, or send text to the terminal.
 On macOS, use Terminal.app and allow Terminal Automation if prompted. On Linux,
@@ -163,7 +163,7 @@ The status legend shows **5-hour · N% left** when the local Codex CLI or the CL
 bundled with the macOS ChatGPT app reports a five-hour quota. The badge uses the
 account signed into Codex, not Pi's context usage, and refreshes about once a minute.
 
-- **🕹️ Switch to Terminal** focuses the Pi terminal hosting the dashboard, not
+- **Switch to Terminal** focuses the Pi terminal hosting the dashboard, not
   the terminal for a selected chat. It supports Terminal.app on macOS and Kitty
   on Linux with local remote control enabled.
 - **Go to tab** on macOS switches to the existing tab in Chrome or Safari without

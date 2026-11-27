@@ -967,6 +967,7 @@ test("dashboard filters projects and cards by name or directory within the selec
   const terminal = q("#focus-terminal");
   assert.equal(terminal.hidden, false);
   assert.equal(terminal.dataset.tooltip, "Switch to Terminal");
+  assert.ok(terminal.querySelector('svg[aria-hidden="true"]'));
   terminal.click();
   assert.equal(terminal.disabled, true);
   terminal.click();

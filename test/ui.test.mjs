@@ -618,7 +618,7 @@ test("the icon-only terminal button requests focus for the live chat and reports
   } });
   const focus = f.$("focus-terminal");
   assert.equal(focus.parentElement, f.$("session-title-pill"));
-  assert.equal(focus.textContent.trim(), "🕹️");
+  assert.ok(focus.querySelector('svg[aria-hidden="true"]'));
   assert.equal(focus.getAttribute("aria-label"), "Switch to Terminal");
   focus.click();
   assert.equal(focus.disabled, true);

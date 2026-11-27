@@ -91,7 +91,7 @@ Use a disposable project/session. The user operates Edge; an agent can check con
 
 1. Run `pi --dashboard` in Kitty. Confirm the dashboard opens in Edge and lists the launch project. Leave this terminal running.
 2. In a second Kitty tab start `pi` in the project and type `/chat`. In Edge send a harmless message. Confirm the reply appears in that tab and the same turn appears in Kitty. Check the model/effort picker. Select a passage and send an annotation; confirm Pi receives the quote and question.
-3. Click **🕹️ Switch to Terminal** from the chat: it should select the second Kitty tab, without starting another Pi. From the dashboard the same button should select the *dashboard's* Kitty tab. Record any Wayland foreground limitation separately.
+3. Click **Switch to Terminal** from the chat: it should select the second Kitty tab, without starting another Pi. From the dashboard the same button should select the *dashboard's* Kitty tab. Record any Wayland foreground limitation separately.
 4. Leave a draft in the chat, switch to the dashboard and click the session. The original Edge tab should activate with its draft intact. Discard the test draft and close the browser tab. Click the session again: one new browser tab should connect to the same Pi, with no new Kitty tab. Finally exit the disposable Pi and click the saved session: exactly one new Kitty tab and one connected browser tab should open.
 
 5. Click **Create new chat**, choose the disposable project, then click **Create chat**. Confirm that Kitty selects a new tab running a fresh Pi in that directory and Edge opens a new, empty chat connected to it. No command should need to be copied. Wayland may leave Edge in front while Kitty starts Pi.
