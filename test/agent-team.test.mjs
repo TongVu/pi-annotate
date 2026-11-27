@@ -239,7 +239,7 @@ test("served Teams view sends attachments, shows the combined result, and gives 
   assert.equal($("chat-form").previousElementSibling, heading);
   assert.equal(toggle.getAttribute("aria-label"), "Open Teams");
   for (const id of ["team-toggle", "team-back", "team-setup-back"]) assert.equal($(id), null);
-  assert.equal(toggle.querySelector(".team-mode-icon[aria-hidden=true]").textContent, "🎮");
+  assert.ok(toggle.querySelector("svg.team-mode-icon[aria-hidden=true]"));
   assert.ok(toggle.querySelector("svg.chat-mode-icon[aria-hidden=true]"));
   for (const [id, label] of [["team-attach", "Attach files"], ["team-submit", "Start team"]]) {
     assert.equal($(id).getAttribute("aria-label"), label);
