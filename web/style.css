@@ -25,6 +25,16 @@ article { min-width: 0; padding: 30px 40px 80px; }
 #response code:not(pre code), .annotation-comment code:not(pre code) { background: #0b3159; color: #fff; border-radius: 6px; }
 #response pre, .annotation-comment pre { padding: 16px; margin: 0 0 1em; overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 9px; line-height: 1.5; }
 #response pre code, .annotation-comment pre code { padding: 0; white-space: pre; overflow-wrap: normal; }
+.hljs { --syntax-keyword: #c7a7f6; --syntax-string: #add69e; --syntax-value: #f0bc83; --syntax-name: #98c4fb; --syntax-deletion: #ffa4a4; }
+.hljs :is(.hljs-keyword, .hljs-selector-tag) { color: var(--syntax-keyword); }
+.hljs :is(.hljs-string, .hljs-regexp, .hljs-addition) { color: var(--syntax-string); }
+.hljs :is(.hljs-number, .hljs-literal, .hljs-variable, .hljs-symbol) { color: var(--syntax-value); }
+.hljs :is(.hljs-title, .hljs-built_in, .hljs-type, .hljs-meta) { color: var(--syntax-name); }
+.hljs :is(.hljs-comment, .hljs-quote) { color: var(--muted); }
+.hljs .hljs-deletion { color: var(--syntax-deletion); }
+@media (prefers-color-scheme: light) {
+  .hljs { --syntax-keyword: #6e368b; --syntax-string: #246738; --syntax-value: #8a4517; --syntax-name: #155a9c; --syntax-deletion: #a82b34; }
+}
 #response blockquote { max-height: none; overflow: visible; white-space: normal; }
 #response hr { border: 0; border-top: 1px solid var(--border); margin: 1.5em 0; }
 #response table { display: block; max-width: 100%; overflow: auto; border-collapse: collapse; margin: 0 0 1em; }

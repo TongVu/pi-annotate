@@ -1,5 +1,16 @@
+import hljs from "highlight.js/lib/core";
+import bash from "highlight.js/lib/languages/bash";
+import diff from "highlight.js/lib/languages/diff";
+import java from "highlight.js/lib/languages/java";
+import javascript from "highlight.js/lib/languages/javascript";
 import { Marked, Renderer } from "marked";
 import { parseFragment } from "parse5";
+
+hljs.registerLanguage("bash", bash);
+hljs.registerLanguage("diff", diff);
+hljs.registerLanguage("java", java);
+hljs.registerLanguage("javascript", javascript);
+hljs.registerAliases("shell", { languageName: "bash" });
 
 function escapeHtml(text) {
   return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
@@ -27,6 +38,16 @@ const renderer = new Renderer();
 // Raw HTML is visible literal text, never active markup. All other HTML comes
 // from Marked's built-in escaping or the restricted renderer methods below.
 renderer.html = ({ text }) => escapeHtml(text);
+renderer.code = function (token) {
+  const language = token.lang?.trim().split(/\s+/, 1)[0]?.toLowerCase();
+  if (!language || !hljs.getLanguage(language) || token.text.length > 32_000) {
+    return Renderer.prototype.code.call(this, token);
+  }
+  // Match Marked's trailing newline so highlighting never changes quote offsets.
+  const code = token.text.replace(/\n$/, "");
+  const { value } = hljs.highlight(code, { language, ignoreIllegals: true });
+  return `<pre><code class="hljs language-${escapeHtml(language)}">${value}\n</code></pre>\n`;
+};
 renderer.link = function ({ href, tokens }) {
   const label = this.parser.parseInline(tokens);
   const url = safeLink(href);

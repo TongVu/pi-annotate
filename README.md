@@ -44,6 +44,7 @@ original chat unchanged.
 ### Chat in the browser and ask about a passage
 
 Read Markdown replies and code blocks, and send screenshots or text files.
+Label fenced code blocks `js`, `java`, `bash` (or `shell`), or `diff` to highlight them.
 To ask about a specific passage, select it and click **Add annotation**. You can
 send several questions together, each with its quote. Keep a checklist or other
 reference material in the **Markdown note**, which saves locally without

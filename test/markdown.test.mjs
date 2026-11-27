@@ -31,6 +31,28 @@ test("Markdown renders headings, emphasis, lists, quotes, links, code and tables
   assert.equal(document.querySelector("input"), null);
 });
 
+test("fenced JavaScript, Java, shell and diff blocks highlight without changing their text", () => {
+  for (const [language, lines, selector, token] of [
+    ["javascript", ["const tag = '<img src=x onerror=alert(1)>';"], ".hljs-string", "'<img src=x onerror=alert(1)>'"],
+    ["js", ["const x = 1;"], ".hljs-keyword", "const"],
+    ["java", ["public class Demo {}"], ".hljs-keyword", "public"],
+    ["bash", ["echo \"$HOME\""], ".hljs-built_in", "echo"],
+    ["sh", ["echo 'hello'"], ".hljs-string", "'hello'"],
+    ["shell", ["echo \"$HOME\""], ".hljs-variable", "$HOME"],
+    ["diff", ["@@ -1 +1 @@", "-before", "+after"], ".hljs-addition", "+after"],
+  ]) {
+    const fence = (tag) => [`\`\`\`${tag}`, "", ...lines, "", "```"].join("\n");
+    const highlighted = renderedDocument(fence(`${language} example`));
+    assert.equal(highlighted.text, renderedDocument(fence("")).text, language);
+    assert.equal(highlighted.document.querySelector(`pre code.hljs ${selector}`)?.textContent, token, language);
+    assert.equal(highlighted.document.querySelector("img"), null);
+    if (language === "diff") assert.equal(highlighted.document.querySelector(".hljs-deletion").textContent, "-before");
+  }
+  const { document } = renderedDocument("`const x`\n\n```unknown\nconst x\n```\n\n```\nconst x\n```");
+  assert.equal(document.querySelector(".hljs, code span"), null);
+  assert.equal(document.querySelector("pre code.language-unknown").textContent, "const x\n");
+});
+
 test("canonical text matches DOM text for entities, breaks, nested blocks and Unicode", () => {
   for (const source of [
     "**Fish &amp; chips** &lt;safe&gt; &#x1f98a; &copy;",
