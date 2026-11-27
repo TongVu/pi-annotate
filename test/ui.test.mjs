@@ -1684,7 +1684,12 @@ test("browser chat adds several picked or pasted files, removes them individuall
   preview.click();
   assert.equal(f.$("image-preview").open, true);
   assert.equal(f.$("preview-image").src, src);
-  f.$("close-preview").click();
+  const closePreview = f.$("close-preview");
+  assert.equal(closePreview.parentElement, f.$("preview-title").parentElement);
+  assert.equal(closePreview.getAttribute("aria-label"), "Close image preview");
+  assert.ok(closePreview.querySelector('svg[aria-hidden="true"]'));
+  assert.equal(f.$("image-preview").querySelectorAll("button").length, 1);
+  closePreview.click();
   assert.equal(f.$("image-preview").open, false);
   assert.equal(f.$("preview-image").hasAttribute("src"), false);
   const picked = waitForFileCount(4);

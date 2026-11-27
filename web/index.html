@@ -225,9 +225,13 @@
     <div class="actions"><button id="close-resume-command" type="button" class="secondary">Close</button></div>
   </dialog>
   <dialog id="image-preview" aria-labelledby="preview-title">
-    <h2 id="preview-title"></h2>
+    <div class="image-preview-header">
+      <h2 id="preview-title"></h2>
+      <button id="close-preview" type="button" class="secondary" aria-label="Close image preview" title="Close image preview" autofocus>
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
     <img id="preview-image" alt="">
-    <div class="actions"><button id="close-preview" type="button" class="secondary" autofocus>Close preview</button></div>
   </dialog>
   <dialog id="comment-dialog" aria-labelledby="comment-title">
     <form id="comment-form">
