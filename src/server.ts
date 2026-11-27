@@ -103,6 +103,12 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
           if (!checkCurrent()) return;
           if (body?.action === "start" || body?.action === "feedback") chat.team.start(body.brief, body.attachments, body.action === "feedback");
           else if (body?.action === "resume") chat.team.resume(body.role, body.pause, body.direction);
+          else if (body?.action === "settings") {
+            if (typeof body.role !== "string" || !body.settings || typeof body.settings !== "object" || Array.isArray(body.settings)) throw new Error("Choose a role, model, and thinking effort.");
+            const snapshot = chat.team.updateSettings(body.role, body.settings);
+            reply(200, snapshot);
+            return;
+          }
           else if (body?.action === "stop") chat.team.close();
           else throw new Error("Unknown team action.");
           reply(202, { ok: true });

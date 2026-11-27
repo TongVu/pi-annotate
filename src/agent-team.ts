@@ -7,11 +7,21 @@ import { INLINE_TEXT_LIMIT, inlineAttachmentBlocks, parseAttachments } from "./c
 
 const exec = promisify(execFile);
 export const teamThinkingLevel = "high";
+export const teamRoleDefaults = {
+  po: { model: "openai/gpt-6.2-sol", effort: "medium" },
+  architect: { model: "openai/gpt-6.2-sol", effort: "medium" },
+  backend: { model: "openai/gpt-6-luna", effort: "high" },
+  frontend: { model: "openai/gpt-6-luna", effort: "high" },
+};
 
-export function resolveTeamModel(availableModels, getThinkingLevels) {
-  const model = availableModels.find(({ provider, id }) => provider === "openai" && id === "gpt-6-luna");
-  if (!model) throw new Error("Agent teams require GPT-6 Luna (openai/gpt-6-luna). Check model availability and sign-in in Pi.");
-  if (!getThinkingLevels(model).includes(teamThinkingLevel)) throw new Error("GPT-6 Luna must support high thinking effort to start an agent team.");
+const modelKey = ({ provider, id }) => `${provider}/${id}`;
+export function teamModelChoices(availableModels, getThinkingLevels) {
+  return availableModels.map((model) => ({ key: modelKey(model), label: `${model.name || model.id} (${model.provider})`, efforts: getThinkingLevels(model) }));
+}
+export function resolveTeamModel(availableModels, getThinkingLevels, requested = "openai/gpt-6-luna", effort = "high") {
+  const model = availableModels.find((item) => modelKey(item) === requested);
+  if (!model) throw new Error(`Team model ${requested} is unavailable. Choose a model listed in the current model options.`);
+  if (!getThinkingLevels(model).includes(effort)) throw new Error(`${effort} thinking effort is not supported by ${requested}. Choose one of its supported effort levels.`);
   return model;
 }
 
@@ -142,8 +152,9 @@ function resultOf(text) {
   } catch { /* A malformed final response counts as an unsuccessful attempt. */ }
 }
 
-export function createAgentTeam({ prepare, saveAttachments, openWorker, inspectWorkspace = inspectTeamWorkspace }) {
-  const state = Object.fromEntries(Object.entries(roles).map(([id, name]) => [id, { id, name, status: "queued", messages: [], report: "", pause: 0 }]));
+export function createAgentTeam({ prepare, saveAttachments, openWorker, inspectWorkspace = inspectTeamWorkspace, modelChoices = [], resolveRoleSettings }) {
+  const settings = structuredClone(teamRoleDefaults);
+  const state = Object.fromEntries(Object.entries(roles).map(([id, name]) => [id, { id, name, ...settings[id], status: "queued", messages: [], report: "", pause: 0 }]));
   const jobs = Object.fromEntries(Object.keys(stages).map((id) => [id, "queued"]));
   const reports = {};
   const workers = new Map();
@@ -197,7 +208,7 @@ export function createAgentTeam({ prepare, saveAttachments, openWorker, inspectW
       inspecting = false;
       let worker = workers.get(stage.role);
       if (!worker) {
-        worker = await openWorker({ cwd: workspace.cwd, writable });
+        worker = await openWorker({ cwd: workspace.cwd, writable, ...resolveRoleSettings?.(stage.role, settings[stage.role]) });
         if (phase !== "active") { worker.dispose(); return; }
         workers.set(stage.role, worker);
       }
@@ -289,10 +300,24 @@ export function createAgentTeam({ prepare, saveAttachments, openWorker, inspectW
   return {
     snapshot(role?) {
       if (role !== undefined && !Object.hasOwn(state, role)) throw new Error("Unknown team role.");
-      return { phase, revision, round, workspace, result: phase === "done" ? outcome : undefined, issue, roles: Object.values(state).map(({ messages, ...data }) => data), messages: role === undefined ? undefined : state[role].messages };
+      return { phase, revision, round, workspace, result: phase === "done" ? outcome : undefined, issue, modelChoices, settings: structuredClone(settings), roles: Object.values(state).map(({ messages, ...data }) => ({ ...data, ...settings[data.id] })), messages: role === undefined ? undefined : state[role].messages };
+    },
+    updateSettings(role, requested) {
+      if (!Object.hasOwn(settings, role)) throw new Error("Unknown team role.");
+      if (phase !== "idle") throw new Error("Role model settings can only be changed before the team starts.");
+      if (!requested || typeof requested !== "object" || Array.isArray(requested) || Object.keys(requested).some((key) => !["model", "effort"].includes(key))) throw new Error("Choose a model and thinking effort.");
+      const next = { ...settings[role], ...requested };
+      if (typeof next.model !== "string" || typeof next.effort !== "string") throw new Error("Choose a model and thinking effort.");
+      if (resolveRoleSettings) resolveRoleSettings(role, next);
+      else if (modelChoices.length && !modelChoices.some((choice) => choice.key === next.model && choice.efforts.includes(next.effort))) throw new Error(`Unsupported model or effort: ${next.model} / ${next.effort}.`);
+      settings[role] = next;
+      Object.assign(state[role], next);
+      change();
+      return this.snapshot();
     },
     start(task, attachments, followUp = false) {
       const previous = phase;
+      if (previous === "idle" && resolveRoleSettings) for (const [id, value] of Object.entries(settings)) resolveRoleSettings(id, value);
       if (previous !== (followUp ? "done" : "idle")) throw new Error(followUp ? "Wait for the team’s result before sending feedback." : "This chat already started a team.");
       if (typeof task !== "string" || task.length > 32_000 || (!task.trim() && attachments === undefined)) {
         throw new Error("Enter a task brief (up to 32,000 characters) or attach files.");
@@ -308,7 +333,7 @@ export function createAgentTeam({ prepare, saveAttachments, openWorker, inspectW
         try {
           if (textTotal > INLINE_TEXT_LIMIT) upload = await saveAttachments(items);
           if (phase !== "starting") { await upload?.discard(); return; }
-          workspace = await prepare({ hasImages: items.some((item) => item.type === "image"), workspace });
+          workspace = await prepare({ hasImages: items.some((item) => item.type === "image"), workspace, settings: structuredClone(settings) });
           change();
           if (phase !== "starting") { await upload?.discard(); return; }
           if (followUp) feedback = request;

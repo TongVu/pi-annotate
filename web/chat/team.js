@@ -48,9 +48,29 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
     if (!setup.hidden) brief.focus();
   }
   viewToggle.addEventListener("click", () => togglePanel(!opened));
+  document.addEventListener("pointerdown", (event) => {
+    for (const wrapper of roles.querySelectorAll(".team-agent-wrap")) {
+      const popover = wrapper.querySelector(".team-agent-settings");
+      if (!popover?.hidden && !popover.contains(event.target) && !wrapper.querySelector(".team-agent-gear").contains(event.target)) {
+        popover.hidden = true;
+        wrapper.querySelector(".team-agent-gear").setAttribute("aria-expanded", "false");
+      }
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || event.defaultPrevented) return;
+    const open = roles.querySelector(".team-agent-settings:not([hidden])");
+    if (!open) return;
+    const gear = open.parentElement.querySelector(".team-agent-gear");
+    open.hidden = true;
+    gear.setAttribute("aria-expanded", "false");
+    gear.focus();
+  });
 
   function card(id, name) {
     if (cards.has(id)) return cards.get(id);
+    const wrapper = document.createElement("div");
+    wrapper.className = id === "lead" ? "team-agent-wrap team-lead-wrap" : "team-agent-wrap";
     const button = document.createElement("button");
     button.type = "button";
     button.className = "secondary team-card";
@@ -65,8 +85,98 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
       setRole(id === "lead" ? undefined : id);
       if (id !== "lead") transcript.focus({ preventScroll: true });
     });
+    wrapper.append(button);
+    if (id !== "lead") {
+      const gear = document.createElement("button");
+      gear.type = "button";
+      gear.className = "secondary team-agent-gear";
+      gear.setAttribute("aria-label", `Configure ${name} model and effort`);
+      gear.setAttribute("aria-expanded", "false");
+      gear.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.4 1.1-1.4 2.4-1.7-.6a8 8 0 0 1-1.5.9l-.3 1.8h-2.8l-.3-1.8a8 8 0 0 1-1.5-.9l-1.7.6-1.4-2.4 1.4-1.1a7 7 0 0 1 0-1.8l-1.4-1.1 1.4-2.4 1.7.6a8 8 0 0 1 1.5-.9l.3-1.8h2.8l.3 1.8a8 8 0 0 1 1.5.9l1.7-.6 1.4 2.4-1.4 1.1a7 7 0 0 1 0 1.8Z"/></svg>';
+      const popover = document.createElement("div");
+      popover.className = "team-agent-settings";
+      popover.hidden = true;
+      popover.setAttribute("aria-label", `${name} model settings`);
+      const modelLabel = document.createElement("label");
+      modelLabel.textContent = "Model";
+      const modelInput = document.createElement("input");
+      modelInput.type = "text";
+      modelInput.setAttribute("role", "combobox");
+      modelInput.setAttribute("aria-autocomplete", "list");
+      modelInput.setAttribute("aria-expanded", "false");
+      modelInput.setAttribute("aria-label", `${name} model`);
+      modelInput.autocomplete = "off";
+      const options = document.createElement("ul");
+      options.className = "team-agent-model-options";
+      options.id = `team-${id}-model-options`;
+      options.setAttribute("role", "listbox");
+      options.hidden = true;
+      modelInput.setAttribute("aria-controls", options.id);
+      modelLabel.append(modelInput);
+      const effortLabel = document.createElement("span");
+      effortLabel.className = "team-agent-effort-label";
+      effortLabel.textContent = "Thinking effort";
+      const efforts = document.createElement("div");
+      efforts.className = "team-agent-efforts";
+      efforts.setAttribute("role", "group");
+      efforts.setAttribute("aria-label", `${name} thinking effort`);
+      const status = document.createElement("p");
+      status.className = "team-agent-settings-status";
+      status.setAttribute("role", "status");
+      const error = document.createElement("p");
+      error.className = "team-agent-settings-error";
+      error.setAttribute("role", "alert");
+      popover.append(modelLabel, options, effortLabel, efforts, status, error);
+      gear.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const open = popover.hidden;
+        document.querySelectorAll(".team-agent-settings:not([hidden])").forEach((other) => { other.hidden = true; other.parentElement.querySelector(".team-agent-gear")?.setAttribute("aria-expanded", "false"); });
+        popover.hidden = !open;
+        gear.setAttribute("aria-expanded", String(open));
+        if (open) modelInput.focus();
+      });
+      modelInput.addEventListener("input", () => populateRoleOptions(id, popover));
+      modelInput.addEventListener("focus", () => { modelInput.select(); populateRoleOptions(id, popover); });
+      modelInput.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") { event.preventDefault(); popover.hidden = true; gear.setAttribute("aria-expanded", "false"); gear.focus(); }
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          const items = [...options.querySelectorAll('[role="option"]')];
+          if (!items.length) return;
+          const active = items.findIndex((item) => item.getAttribute("aria-selected") === "true");
+          const nextIndex = active < 0 ? (event.key === "ArrowDown" ? 0 : items.length - 1)
+            : (active + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+          const next = items[nextIndex];
+          items.forEach((item) => item.setAttribute("aria-selected", String(item === next)));
+          modelInput.setAttribute("aria-activedescendant", next.id);
+        }
+        if (event.key === "Enter") {
+          event.preventDefault();
+          (options.querySelector('[aria-selected="true"]') ?? options.querySelector('[role="option"]'))?.click();
+        }
+      });
+      options.addEventListener("click", (event) => {
+        const option = event.target.closest('[role="option"]');
+        if (!option) return;
+        const choice = snapshot?.modelChoices?.find(({ key }) => key === option.dataset.key);
+        modelInput.value = choice?.label ?? "";
+        modelInput.dataset.key = option.dataset.key;
+        options.hidden = true;
+        modelInput.setAttribute("aria-expanded", "false");
+        const currentEffort = popover.dataset.effort;
+        const effort = choice?.efforts.includes(currentEffort) ? currentEffort : choice?.efforts[0];
+        void saveRoleSettings(id, popover, { model: option.dataset.key, effort });
+      });
+      efforts.addEventListener("click", (event) => {
+        const control = event.target.closest("button");
+        if (!control || control.disabled || control.getAttribute("aria-pressed") === "true") return;
+        void saveRoleSettings(id, popover, { model: popover.dataset.model, effort: control.value });
+      });
+      wrapper.append(gear, popover);
+    }
     cards.set(id, button);
-    roles.append(button);
+    button.dataset.role = id;
+    roles.append(wrapper);
     return button;
   }
 
@@ -85,6 +195,7 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
     if (changed) onViewChange();
     if (restoreFocus) viewToggle.focus();
     const locked = pending || phase === "starting" || readingFiles;
+    renderRoleSettings();
     brief.readOnly = locked;
     pick.disabled = files.disabled = locked;
     cancelStart.hidden = phase !== "starting";
@@ -147,6 +258,71 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
     void addFiles(selected);
   });
 
+  function populateRoleOptions(roleId, popover) {
+    const modelInput = popover.querySelector('[role="combobox"]');
+    const list = popover.querySelector('[role="listbox"]');
+    if (!snapshot?.modelChoices) return;
+    const allSelected = modelInput.selectionStart === 0 && modelInput.selectionEnd === modelInput.value.length;
+    const query = allSelected ? "" : modelInput.value.trim().toLowerCase();
+    const choices = snapshot.modelChoices.filter(({ key, label }) => label.toLowerCase().includes(query) || key.toLowerCase().includes(query));
+    list.replaceChildren(...choices.map(({ key, label }, index) => {
+      const option = document.createElement("li");
+      option.id = `team-${roleId}-model-option-${index}`;
+      option.dataset.key = key;
+      option.setAttribute("role", "option");
+      option.setAttribute("aria-selected", "false");
+      option.textContent = label;
+      return option;
+    }));
+    list.hidden = !choices.length;
+    modelInput.setAttribute("aria-expanded", String(!!choices.length));
+  }
+
+  function renderRoleSettings() {
+    if (!snapshot?.settings || !Array.isArray(snapshot.modelChoices)) return;
+    const editable = snapshot.phase === "idle" && !pending && !unavailable;
+    for (const role of snapshot.roles ?? []) {
+      const button = cards.get(role.id);
+      if (!button) continue;
+      const wrapper = button.parentElement;
+      const gear = wrapper.querySelector(".team-agent-gear");
+      const popover = wrapper.querySelector(".team-agent-settings");
+      if (!gear || !popover) continue;
+      const config = role.model ? { model: role.model, effort: role.effort } : snapshot.settings[role.id];
+      const choice = snapshot.modelChoices.find(({ key }) => key === config?.model);
+      const modelInput = popover.querySelector('[role="combobox"]');
+      if (document.activeElement !== modelInput) modelInput.value = choice?.label ?? config?.model ?? "Unavailable model";
+      modelInput.dataset.key = config?.model ?? "";
+      popover.dataset.model = config?.model ?? "";
+      popover.dataset.effort = config?.effort ?? "";
+      const efforts = popover.querySelector(".team-agent-efforts");
+      if (efforts.childElementCount !== (choice?.efforts.length ?? 0) ||
+          (choice?.efforts ?? []).some((level, index) => level !== efforts.children[index]?.value)) {
+        efforts.replaceChildren(...(choice?.efforts ?? []).map((effort) => {
+          const control = document.createElement("button");
+          control.type = "button";
+          control.value = effort;
+          control.textContent = effort === "xhigh" ? "Extra high" : effort[0].toUpperCase() + effort.slice(1);
+          return control;
+        }));
+      }
+      for (const control of efforts.children) {
+        control.setAttribute("aria-pressed", String(control.value === config?.effort));
+        control.disabled = !editable || efforts.childElementCount < 2;
+      }
+      gear.disabled = !editable;
+      gear.title = unavailable ? "Disconnected; role settings unavailable" : editable ? `Configure ${role.name}` : "Role settings lock when the team starts";
+      popover.querySelector(".team-agent-settings-status").textContent = unavailable ? "Disconnected." : snapshot.phase === "idle" ? `${choice?.label ?? "Model unavailable"} · ${config?.effort ?? "No effort"} effort` : "Settings locked after team start.";
+      popover.querySelector(".team-agent-settings-error").textContent = actionError;
+    }
+  }
+
+  async function saveRoleSettings(roleId, popover, settings) {
+    if (!settings.model || !settings.effort || pending || snapshot?.phase !== "idle") return;
+    const button = popover.parentElement.querySelector(".team-agent-gear");
+    await act({ action: "settings", role: roleId, settings }, button);
+  }
+
   function render() {
     if (!snapshot) return;
     const { phase, round, issue, workspace, result, messages } = snapshot;
@@ -187,6 +363,7 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
       button.dataset.state = preStart ? "not-started" : role.status;
       button.querySelector(".team-card-state").textContent = preStart ? "Not started" : labels[role.status];
     }
+    renderRoleSettings();
     const role = snapshot.roles.find(({ id }) => id === selected);
     if (!role) return;
     $("team-role-title").textContent = `${role.name} · ${labels[role.status]}`;
@@ -227,13 +404,15 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
       const result = await api(`/api/team?${query}`);
       if (sequence !== request || version !== selection || saved) return;
       supported = true;
+      unavailable = false;
       viewToggle.hidden = false;
       if (result.roles) {
         snapshot = result;
         render();
       }
     } catch (error) {
-      if ([401, 404, 410].includes(error.status)) unavailable = true;
+      unavailable = true;
+      render();
     }
   }
 

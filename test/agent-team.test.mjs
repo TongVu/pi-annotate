@@ -6,29 +6,64 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setImmediate as turn, setTimeout as delay } from "node:timers/promises";
 import { JSDOM } from "jsdom";
-import { createAgentTeam, inspectTeamWorkspace, prepareTeamWorkspace, resolveTeamModel, teamThinkingLevel, teamWritePath } from "../src/agent-team.ts";
+import { createAgentTeam, inspectTeamWorkspace, prepareTeamWorkspace, resolveTeamModel, teamModelChoices, teamRoleDefaults, teamThinkingLevel, teamWritePath } from "../src/agent-team.ts";
 import { teamReportType } from "../src/chat-transcript.ts";
 import { startChatServer } from "../src/server.ts";
 import { startChatPage } from "../web/app.js";
 import { mountAgentTeam } from "../web/chat/team.js";
 import { mountTranscript } from "../web/chat/transcript.js";
 
-test("team model is exactly OpenAI GPT-6 Luna at high effort, with no fallback", () => {
-  const models = [{ provider: "openai", id: "gpt-6.2-sol" }, { provider: "openai", id: "gpt-5.6-luna" }];
+test("role model defaults and selected models/efforts are validated without fallback", () => {
+  const sol = { provider: "openai", id: "gpt-6.2-sol" };
   const luna = { provider: "openai", id: "gpt-6-luna" };
+  assert.deepEqual(teamRoleDefaults, {
+    po: { model: "openai/gpt-6.2-sol", effort: "medium" },
+    architect: { model: "openai/gpt-6.2-sol", effort: "medium" },
+    backend: { model: "openai/gpt-6-luna", effort: "high" },
+    frontend: { model: "openai/gpt-6-luna", effort: "high" },
+  });
+  assert.deepEqual(teamModelChoices([sol, luna], (model) => model === sol ? ["low", "medium"] : ["medium", "high"]), [
+    { key: "openai/gpt-6.2-sol", label: "gpt-6.2-sol (openai)", efforts: ["low", "medium"] },
+    { key: "openai/gpt-6-luna", label: "gpt-6-luna (openai)", efforts: ["medium", "high"] },
+  ]);
   assert.equal(teamThinkingLevel, "high");
-  assert.equal(resolveTeamModel([...models, luna], () => ["medium", "high"]), luna);
-  assert.throws(() => resolveTeamModel(models, () => ["high"]), /require GPT-6 Luna/);
-  assert.throws(() => resolveTeamModel([luna], () => ["medium"]), /must support high/);
+  assert.equal(resolveTeamModel([sol, luna], () => ["medium", "high"], "openai/gpt-6-luna", "high"), luna);
+  assert.throws(() => resolveTeamModel([sol], () => ["medium"], "openai/gpt-6-luna", "high"), /unavailable/);
+  assert.throws(() => resolveTeamModel([luna], () => ["medium"], "openai/gpt-6-luna", "high"), /not supported/);
+});
+
+test("role settings can change only before start and are applied to that role's worker", async () => {
+  const choices = [
+    { key: "openai/gpt-6.2-sol", label: "Sol", efforts: ["medium"] },
+    { key: "openai/gpt-6-luna", label: "Luna", efforts: ["high"] },
+  ];
+  const { team, calls } = mockTeam({ modelChoices: choices, resolveRoleSettings: (role, selected) => {
+    const choice = choices.find(({ key }) => key === selected.model);
+    if (!choice) throw new Error(`Model ${selected.model} unavailable.`);
+    if (!choice.efforts.includes(selected.effort)) throw new Error(`${selected.effort} unsupported for ${selected.model}.`);
+    return { model: { provider: "openai", id: selected.model.split("/")[1] }, thinkingLevel: selected.effort };
+  } });
+  assert.deepEqual(team.snapshot().settings.po, { model: "openai/gpt-6.2-sol", effort: "medium" });
+  assert.deepEqual(team.snapshot().settings.backend, { model: "openai/gpt-6-luna", effort: "high" });
+  assert.throws(() => team.updateSettings("po", { model: "openai/nope", effort: "medium" }), /unavailable/);
+  assert.throws(() => team.updateSettings("po", { model: "openai/gpt-6-luna", effort: "medium" }), /unsupported/);
+  team.updateSettings("po", { model: "openai/gpt-6-luna", effort: "high" });
+  assert.deepEqual(team.snapshot().roles.find(({ id }) => id === "po").model, "openai/gpt-6-luna");
+  team.start("Run the task");
+  await turn();
+  assert.equal(calls[0].model.id, "gpt-6-luna");
+  assert.equal(calls[0].thinkingLevel, "high");
+  assert.throws(() => team.updateSettings("backend", { effort: "medium" }), /only be changed before/);
+  team.close();
 });
 
 const paths = { cwd: "/tmp/shared-team", head: "base" };
 const exampleChanges = { files: " M api.js\n?? ui.js", diff: "diff --git a/api.js b/api.js\n+<img src=x>\n+renderPanel()", truncated: false };
-function mockTeam({ prepare = async ({ workspace }) => workspace ?? paths, saveAttachments, inspectWorkspace = async () => exampleChanges } = {}) {
+function mockTeam({ prepare = async ({ workspace }) => workspace ?? paths, saveAttachments, inspectWorkspace = async () => exampleChanges, modelChoices, resolveRoleSettings } = {}) {
   const calls = [];
   const disposed = [];
   let openedWorkers = 0;
-  const team = createAgentTeam({ prepare, saveAttachments, inspectWorkspace, openWorker: async (opts) => {
+  const team = createAgentTeam({ prepare, saveAttachments, inspectWorkspace, modelChoices, resolveRoleSettings, openWorker: async (opts) => {
     const worker = ++openedWorkers;
     let listener, resolve;
     const abort = () => { resolve?.(); return Promise.resolve(); };
@@ -148,6 +183,13 @@ test("team API requires the live chat token and same-origin POSTs; close dispose
   assert.equal((await api("/api/team")).status, 401);
   assert.equal((await start({ ...headers, Origin: "http://another.invalid" })).status, 403);
   assert.equal((await (await api("/api/response", { headers })).json()).team, true);
+  const initial = await (await api("/api/team", { headers })).json();
+  assert.equal(initial.settings.po.model, "openai/gpt-6.2-sol");
+  assert.equal(initial.settings.backend.effort, "high");
+  assert.ok(Array.isArray(initial.modelChoices));
+  const update = await api("/api/team", { method: "POST", headers, body: JSON.stringify({ action: "settings", role: "po", settings: { model: "openai/gpt-6-luna", effort: "medium" } }) });
+  assert.equal(update.status, 200);
+  assert.equal((await update.json()).settings.po.model, "openai/gpt-6-luna");
   assert.equal((await start(headers)).status, 202);
   assert.equal(calls.length, 1);
   assert.equal((await start(headers)).status, 400);
@@ -319,6 +361,11 @@ test("served Teams view sends attachments, shows the combined result, and gives 
   assert.match($("team-result-files").textContent, /api\.js[\s\S]+ui\.js/);
   assert.match($("team-result-diff").textContent, /<img src=x>/);
   assert.equal($("team-result-diff").querySelector("img"), null);
+  toggle.click();
+  assert.equal($("team-result").hidden, true, "main chat view replaces the team result without discarding it");
+  toggle.click();
+  assert.equal($("team-result").hidden, false, "returning to Teams restores the completed result");
+  assert.match($("team-result-diff").textContent, /<img src=x>/);
   $("team-feedback").click();
   assert.equal($("team-result").hidden, true);
   assert.equal($("team-setup").hidden, false);
@@ -409,6 +456,43 @@ test("legacy team reports remain readable in the main transcript without becomin
   assert.equal(report.querySelector("h2").textContent, "Software architect · Team report");
   assert.equal(report.querySelector("strong").textContent, "Tests still needed.");
   assert.equal(report.querySelector("img, [data-response-id], .reply-branch"), null);
+});
+
+test("team role controls show backend choices, update a role, and lock after start", async (t) => {
+  const dom = new JSDOM(await readFile(new URL("../web/index.html", import.meta.url), "utf8"));
+  t.after(() => dom.window.close());
+  const d = dom.window.document;
+  const modelChoices = [
+    { key: "openai/gpt-6.2-sol", label: "Sol", efforts: ["medium", "high"] },
+    { key: "openai/gpt-6-luna", label: "Luna", efforts: ["high"] },
+  ];
+  const settings = { po: { model: modelChoices[0].key, effort: "medium" }, architect: { model: modelChoices[0].key, effort: "medium" }, backend: { model: modelChoices[1].key, effort: "high" }, frontend: { model: modelChoices[1].key, effort: "high" } };
+  let phase = "idle";
+  const roles = [{ id: "po", name: "Product owner" }, { id: "architect", name: "Software architect" }, { id: "backend", name: "Backend implementer" }, { id: "frontend", name: "Frontend implementer" }];
+  const posts = [];
+  const current = () => ({ phase, revision: 1, modelChoices, settings, roles: roles.map((role) => ({ ...role, ...settings[role.id], status: "queued" })) });
+  const ui = mountAgentTeam(dom.window, { onViewChange() {}, api: async (_path, body) => {
+    if (body?.action === "settings") { posts.push(body); Object.assign(settings[body.role], body.settings); return current(); }
+    return current();
+  } });
+  await ui.refresh();
+  d.getElementById("team-view-toggle").click();
+  const poCard = d.querySelector('.team-card[data-role="po"]').parentElement;
+  const poGear = poCard.querySelector(".team-agent-gear");
+  poGear.click();
+  assert.equal(poGear.getAttribute("aria-expanded"), "true");
+  assert.match(poCard.querySelector(".team-agent-settings-status").textContent, /Sol · medium effort/);
+  const modelInput = poCard.querySelector('[role="combobox"]');
+  modelInput.value = "Luna";
+  modelInput.dispatchEvent(new dom.window.Event("input"));
+  poCard.querySelector('.team-agent-model-options [role="option"]').click();
+  await turn();
+  assert.deepEqual(posts, [{ action: "settings", role: "po", settings: { model: modelChoices[1].key, effort: "high" } }]);
+  assert.deepEqual(settings.architect, { model: modelChoices[0].key, effort: "medium" }, "only the selected role is changed");
+  phase = "active";
+  await ui.refresh(true);
+  assert.equal(poGear.disabled, true);
+  assert.match(poCard.querySelector(".team-agent-settings-status").textContent, /locked/);
 });
 
 test("the sidebar opens a pet's transcript and routes direction only to its paused role", async (t) => {

@@ -14,7 +14,7 @@ import { focusTerminal } from "./focus-terminal.ts";
 import { listDashboardTabs, startDashboard } from "./dashboard.ts";
 import { browserApp, focusBrowserDashboard } from "./focus-browser.ts";
 import { canArchiveSessions, trashExpiredArchives } from "./session-archive.ts";
-import { createAgentTeam, createTeamWorker, prepareTeamWorkspace, resolveTeamModel, teamThinkingLevel } from "./agent-team.ts";
+import { createAgentTeam, createTeamWorker, prepareTeamWorkspace, resolveTeamModel, teamModelChoices } from "./agent-team.ts";
 
 // Keep the existing registry names so running Pi processes can still discover each other.
 const ownerRegistry = (agentDir: string) => join(agentDir, "pi-annotate-owners");
@@ -200,17 +200,26 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
       if (!isCurrent()) return;
       if (sessionTeam?.id !== sessionId) {
         closeTeam();
-        let teamModel: ExtensionContext["model"];
+        const availableTeamModels = ctx.modelRegistry.getAvailable();
+        const { getSupportedThinkingLevels } = await import("@earendil-works/pi-ai");
+        const modelChoices = teamModelChoices(availableTeamModels, getSupportedThinkingLevels);
+        const resolveRoleSettings = (_role: string, selected: { model: string; effort: string }) => ({
+          model: resolveTeamModel(availableTeamModels, getSupportedThinkingLevels, selected.model, selected.effort),
+          thinkingLevel: selected.effort,
+        });
         sessionTeam = { id: sessionId, team: createAgentTeam({
-          prepare: async ({ hasImages, workspace }) => {
-            const { getSupportedThinkingLevels } = await import("@earendil-works/pi-ai");
-            teamModel = resolveTeamModel(ctx.modelRegistry.getAvailable(), getSupportedThinkingLevels);
+          modelChoices,
+          resolveRoleSettings,
+          prepare: async ({ hasImages, workspace, settings }) => {
             if (hasImages && pi.getSettings().images?.blockImages) throw new Error("Images are disabled in Pi’s settings.");
-            if (hasImages && !teamModel.input.includes("image")) throw new Error("GPT-6 Luna cannot receive images in this Pi setup.");
+            if (hasImages) for (const selected of Object.values(settings)) {
+              const { model } = resolveRoleSettings("", selected);
+              if (!model.input.includes("image")) throw new Error(`${selected.model} cannot receive images in this Pi setup. Choose an image-capable model or remove image attachments.`);
+            }
             return workspace ?? prepareTeamWorkspace(ctx.sessionManager.getCwd(), join(await getAgentDir(), "pi-chat-teams"));
           },
           saveAttachments: (items) => saveChatAttachments(attachmentDir, sessionId, items),
-          openWorker: async (worker) => createTeamWorker({ ...worker, agentDir: await getAgentDir(), model: teamModel, thinkingLevel: teamThinkingLevel }),
+          openWorker: async ({ model, thinkingLevel, ...worker }) => createTeamWorker({ ...worker, agentDir: await getAgentDir(), model, thinkingLevel }),
         }) };
       }
       const kitty = process.platform === "linux" ? kittyDashboardTarget() : undefined;
