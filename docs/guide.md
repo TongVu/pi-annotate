@@ -307,7 +307,10 @@ not require clipboard access or access to Pi's private transcript selection.
 - This is a local authenticated capability, not protection against a compromised
   OS, browser, or extension. Response text can contain private data: use a trusted
   browser/profile. `/chat link` lets you choose where to open the local chat.
-- A connected `/chat` tab keeps its port open by polling. The page asks Pi to close
+- A connected `/chat` tab keeps its port open by polling. It checks about every
+  second while Pi or Teams is working, every five seconds when idle, and once
+  a minute in the background. Returning to the tab checks immediately. Teams details
+  refresh when the team changes or you open the panel. The page asks Pi to close
   the port when you leave. If the browser crashes, is suspended, or can't send
   that request, Pi closes the port after 30 minutes without a poll.
 - The extension keeps no separate transcript or message drafts on disk; the

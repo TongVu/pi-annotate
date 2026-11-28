@@ -125,9 +125,14 @@ test("completed Teams rounds hand off once to their Main chat, independent of th
   };
   await f.run();
   let request = connect();
+  const idle = (await request("/api/response")).teamPolling;
+  assert.deepEqual(idle, { revision: 0, active: false });
   await start(request, "start", "Show the role conversation", [{ name: "spec.txt", mimeType: "text/plain", data: Buffer.from("Attachment payload").toString("base64") }]);
   await direct(request, "Keep only the reply composer");
   await waitFor(() => reviews.length === 1);
+  const working = (await request("/api/response")).teamPolling;
+  assert.equal(working.active, true);
+  assert.ok(working.revision > idle.revision);
   assert.equal(delivered.length, 0, "nothing is sent before review");
   await f.run("close");
   reviews[0]();
@@ -148,6 +153,8 @@ test("completed Teams rounds hand off once to their Main chat, independent of th
   await f.run();
   request = connect();
   const mainView = await request("/api/response?after=private");
+  assert.equal(mainView.teamPolling.active, false);
+  assert.ok(mainView.teamPolling.revision > working.revision);
   assert.deepEqual(mainView.messages.map(({ role }) => role), ["team-handoff"]);
   assert.match(mainView.messages[0].text, /Round 1 received.*will review the result and report back here/);
   assert.doesNotMatch(mainView.messages[0].text, /Show the role conversation|Review notes/);

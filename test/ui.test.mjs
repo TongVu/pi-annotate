@@ -63,9 +63,65 @@ async function fixture(t, { chatFetch, loadNotes, setupWindow } = {}) {
     $("comment").value = question;
     $("comment-form").dispatchEvent(new window.Event("submit", { cancelable: true }));
   };
-  return { window, $, select, add, poll: () => runTimer((delay) => delay >= 1000), autosave: () => runTimer((delay) => delay < 1000) };
+  const isPoll = (delay) => delay === 0 || delay >= 1000;
+  return { window, $, select, add, poll: () => runTimer(isPoll),
+    pollDelays: () => [...timers.values()].map(({ delay }) => delay).filter(isPoll),
+    autosave: () => runTimer((delay) => delay > 0 && delay < 1000) };
 }
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+test("chat polls slowly when idle or hidden and only fetches changed Teams details", async (t) => {
+  let visibility = "visible";
+  let busy = false, teamActive = false, revision = 0;
+  const requests = [];
+  const json = (data) => ({ ok: true, json: async () => data });
+  const f = await fixture(t, {
+    setupWindow(window) {
+      Object.defineProperty(window.document, "visibilityState", { get: () => visibility });
+    },
+    async chatFetch(path) {
+      requests.push(path);
+      if (path === "/api/response") return json({ mode: "chat", protocol: 2, cursor: null, messages: [], busy,
+        team: true, teamPolling: { revision, active: teamActive } });
+      if (path.startsWith("/api/team")) return json({ phase: teamActive ? "active" : "idle", revision, roles: [] });
+      assert.fail(`Unexpected request: ${path}`);
+    },
+  });
+  const toggle = f.$("team-view-toggle");
+  for (let i = 0; toggle.hidden && i < 50; i++) await tick();
+  assert.equal(toggle.hidden, false);
+  assert.deepEqual(requests.splice(0), ["/api/response", "/api/team?"]);
+  assert.deepEqual(f.pollDelays(), [5000]);
+  await f.poll();
+  assert.deepEqual(requests.splice(0), ["/api/response"], "no second idle request for Teams");
+
+  revision++;
+  teamActive = true;
+  await f.poll();
+  await tick();
+  assert.deepEqual(requests.splice(0), ["/api/response", "/api/team?revision=0"], "hidden Teams still notices changes");
+  assert.deepEqual(f.pollDelays(), [1000]);
+  teamActive = false;
+  busy = true;
+  await f.poll();
+  assert.deepEqual(f.pollDelays(), [1000], "Main chat also polls quickly while working");
+  assert.deepEqual(requests.splice(0), ["/api/response"]);
+
+  const setVisibility = (value) => {
+    visibility = value;
+    f.window.document.dispatchEvent(new f.window.Event("visibilitychange"));
+  };
+  setVisibility("hidden");
+  assert.deepEqual(f.pollDelays(), [60_000]);
+  busy = false;
+  setVisibility("visible");
+  assert.deepEqual(f.pollDelays(), [0]);
+  await f.poll();
+  assert.deepEqual(f.pollDelays(), [5000]);
+  assert.deepEqual(requests.splice(0), ["/api/response"]);
+  toggle.click();
+  assert.deepEqual(requests, ["/api/team?revision=1"], "opening Teams refreshes without waiting for the timer");
+});
 
 test("the composer model picker shows supported efforts and only allows changes while idle", async (t) => {
   const sol = { key: "openai/sol", label: "Sol" };
@@ -567,6 +623,7 @@ test("the tab shows working from send through the next fresh Pi status", async (
   response.resolve(json(chat()));
   await stalePoll;
   assert.equal(title(), workingTitle, "a poll from before acknowledgement cannot clear working");
+  assert.deepEqual(f.pollDelays(), [0], "the acknowledged send queues an immediate follow-up without overlapping the stale poll");
   response = { promise: Promise.resolve(json(chat(true))) };
   await f.poll();
   assert.equal(title(), workingTitle);

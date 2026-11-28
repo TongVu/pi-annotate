@@ -102,6 +102,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   let stoppableRequestId;
   let failed = false;
   let connected = true;
+  let refreshLive = () => {};
   const sender = createSendCoordinator({
     submit: (body) => api("/api/chat", body),
     requestId: () => crypto.randomUUID(),
@@ -111,6 +112,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     onAccepted(result) {
       busy = true; // The next fresh poll reconciles this with Pi, even for a very fast reply.
       stoppableRequestId = result?.stoppableRequestId;
+      refreshLive();
     },
     status,
   });
@@ -424,6 +426,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     for (const id of ["chat-rail", "turns", "chat-form", "chat-state"]) $(id).hidden = false;
     annotations.start(data.annotationImages === true);
     window.addEventListener("pagehide", () => {
+      stopPolling();
       // A closing tab can't wait for a reply. If the request is dropped, the idle timer reaps it.
       const markdown = notes?.markdownForClose();
       const body = markdown === undefined ? {} : { markdown };
@@ -439,27 +442,58 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
       team.setSavedView(explorer.isSaved());
       void team.refresh();
     }).catch(() => {}); // Older listeners don't serve the optional team assets.
+    let teamActive = data.teamPolling?.active;
+    let timer, polling = false, refreshPending = false, stopped = false;
+    const delay = () => document.visibilityState === "hidden" ? 60_000 : !connected ? 3000 :
+      (busy || sender.sending || composerControls.compacting || teamActive) ? 1000 : 5000;
+    function schedule(ms) {
+      if (stopped) return;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(poll, ms);
+    }
+    function visibilityChanged() {
+      if (document.visibilityState === "visible") refreshLive();
+      else if (!polling) schedule(delay());
+    }
+    function stopPolling() {
+      stopped = true;
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", visibilityChanged);
+    }
+    refreshLive = () => {
+      if (polling) refreshPending = true;
+      else schedule(0);
+    };
+    document.addEventListener("visibilitychange", visibilityChanged);
     async function poll() {
+      polling = true;
       try {
         const wasConnected = connected;
         const sendsAtPollStart = sender.accepted;
         const data = await api(cursor === null ? "/api/response" : `/api/response?after=${encodeURIComponent(cursor)}`);
+        if (stopped) return;
         // A poll started before send acknowledgement may still report the previous idle state.
         if (sendsAtPollStart === sender.accepted) updateChat(data);
         if (!wasConnected) explorer.refreshConnection();
         explorer.pollActivity();
-        void team?.refresh();
+        teamActive = data.teamPolling?.active;
+        team?.refreshIfChanged(data.teamPolling?.revision);
       } catch (error) {
+        if (stopped) return;
         const wasConnected = connected;
         connected = false;
         composerControls.updateContext();
         if (wasConnected) explorer.refreshConnection();
         refreshChatUi();
-        if ([401, 410].includes(error.status)) return;
+        if ([401, 410].includes(error.status)) stopPolling();
+      } finally {
+        polling = false;
+        const next = refreshPending ? 0 : delay();
+        refreshPending = false;
+        schedule(next);
       }
-      window.setTimeout(poll, connected ? 1000 : 3000);
     }
-    window.setTimeout(poll, 1000);
+    schedule(delay());
   }
 
   window.addEventListener("beforeunload", (event) => {

@@ -130,7 +130,10 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, focusM
     render();
     if (!setup.hidden) brief.focus();
   }
-  viewToggle.addEventListener("click", () => togglePanel(!opened));
+  viewToggle.addEventListener("click", () => {
+    togglePanel(!opened);
+    if (opened) void refresh();
+  });
   let activeSettings;
   function closeSettings(restoreFocus = false) {
     if (!activeSettings) return;
@@ -630,9 +633,10 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, focusM
     if (follow) transcript.scrollTop = transcript.scrollHeight;
   }
 
-  let request = 0;
+  let request = 0, refreshing = false;
   async function refresh(force = false) {
-    if (unavailable || saved || (pending && !force)) return;
+    if (unavailable || saved || (!force && (pending || refreshing))) return;
+    refreshing = true;
     const version = selection, sequence = ++request;
     const current = () => sequence === request && version === selection && !saved;
     const query = new URLSearchParams();
@@ -652,6 +656,8 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, focusM
       disconnected = true;
       unavailable = [401, 404, 410].includes(error.status);
       render();
+    } finally {
+      if (sequence === request) refreshing = false;
     }
   }
 
@@ -716,6 +722,9 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, focusM
 
   return {
     refresh,
+    refreshIfChanged(revision) {
+      if (revision === undefined || revision !== snapshot?.revision || disconnected) void refresh();
+    },
     viewingTeam: () => Boolean(selected) || !setup.hidden || !resultView.hidden,
     hasDraft: () => (["idle", "starting", "done"].includes(snapshot?.phase) && Boolean(brief.value.trim() || attachments.length || readingFiles)) || Boolean(input.value.trim()) || [...drafts.values()].some((draft) => draft.trim()),
     setSavedView(value) {

@@ -518,9 +518,24 @@ test("served Teams view sends attachments, shows the combined result, and gives 
   // jsdom does not implement native dialog methods; retain the browser's open/close state for this UI test.
   window.HTMLDialogElement.prototype.showModal = function() { this.open = true; };
   window.HTMLDialogElement.prototype.close = function() { this.open = false; };
-  const polls = [];
+  let poll;
   const originalSetTimeout = window.setTimeout.bind(window);
-  window.setTimeout = (fn, ms, ...args) => ms === 1000 && fn.name === "poll" ? polls.push(fn) : originalSetTimeout(fn, ms, ...args);
+  const originalClearTimeout = window.clearTimeout.bind(window);
+  window.setTimeout = (fn, ms, ...args) => {
+    if (fn.name !== "poll") return originalSetTimeout(fn, ms, ...args);
+    poll = fn;
+    return -1;
+  };
+  window.clearTimeout = (id) => {
+    if (id === -1) poll = undefined;
+    else originalClearTimeout(id);
+  };
+  const runPoll = () => {
+    const next = poll;
+    assert.ok(next, "expected a scheduled chat poll");
+    poll = undefined;
+    return next();
+  };
   await startChatPage(window, { loadNotes: async () => undefined });
   const $ = (id) => window.document.getElementById(id);
   await until(() => !$("team-view-toggle").hidden, "Teams toggle not ready");
@@ -629,7 +644,7 @@ test("served Teams view sends attachments, shows the combined result, and gives 
   await turn();
   calls[4].finish("done", "Reviewed both changes");
   await turn();
-  await polls.shift()();
+  await runPoll();
   await until(() => !$("team-open-result").hidden, "Combined result did not become available");
   assert.equal($("team-result").hidden, true, "completion must not interrupt Main chat");
   assert.equal(composer.readOnly, false);

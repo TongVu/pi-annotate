@@ -752,6 +752,6 @@ $("copy").addEventListener("click", async () => {
 document.addEventListener("visibilitychange", () => { if (!document.hidden) void refresh(); });
 async function poll() {
   await refresh();
-  setTimeout(poll, 2000);
+  setTimeout(poll, 5000);
 }
 void poll();

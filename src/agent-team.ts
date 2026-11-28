@@ -523,6 +523,9 @@ export function createAgentTeam({ prepare, saveAttachments, openWorker, inspectW
     schedule();
   }
   return {
+    get pollState() {
+      return { revision, active: phase === "starting" || (phase === "active" && !Object.values(jobs).includes("paused")) };
+    },
     snapshot(role?) {
       if (role !== undefined && !Object.hasOwn(state, role)) throw new Error("Unknown team role.");
       return { phase, revision, round, maxRounds: maxTeamRounds, brief, feedback, disposition, mainChatManaged: !!captureBlocker, workspace, result: outcome, ...(phase === "done" && outcome && applyToken ? { applyToken } : {}), issue, modelChoices, settings: structuredClone(settings), roles: Object.values(state).map(({ messages, ...data }) => ({ ...data, ...settings[data.id], settingsFallback: settingsFallbacks[data.id] })), messages: role === undefined ? undefined : state[role].messages };
