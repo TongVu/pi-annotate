@@ -101,6 +101,7 @@ test("dashboard pet stages follow session status without changing card actions",
   ];
   const sessions = cases.map(([status, action, terminalWorking, name]) => ({
     ...saved, id: name, name, preview: "Session preview", status, action, terminalWorking, modified: +saved.modified,
+    dashboardHost: name === "ready" || undefined,
   }));
   const requests = [];
   dom.window.fetch = async (path, options) => {
@@ -123,6 +124,7 @@ test("dashboard pet stages follow session status without changing card actions",
     assert.ok(indicator.querySelector(`.dot.${status}`));
     assert.equal(indicator.textContent, "", "the status indicator has no visible label");
     assert.equal(indicator.nextElementSibling, card.querySelector("h3"), "the dot and title share the heading");
+    assert.equal(card.querySelector(".dashboard-host-badge")?.textContent, reaction === "ready" ? "Dashboard host" : undefined);
   }
   assert.match(cardFor("ready").querySelector(".open").getAttribute("aria-label"), /\(Ready to chat\)$/);
   assert.match(document.querySelector(".stat[data-status-filter=disconnected]").textContent, /Disconnected/);

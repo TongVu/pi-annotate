@@ -124,6 +124,9 @@ On macOS, the logo switches to an existing dashboard tab in Chrome or Safari,
 including one opened by another Pi using the same agent directory. If no tab
 is found, or tab switching is unavailable, the logo opens a new tab. macOS may
 ask for browser Automation permission.
+**Dashboard host** appears in the footer of the Pi terminal serving the dashboard
+and on that session’s card if it has one. It’s separate from the card’s chat
+connection status.
 The sidebar groups sessions by their original project directory. Select a
 project and hover over its path (or Tab to **Copy project path**) to copy the
 exact path for pasting into your terminal. Clones have separate cards with a

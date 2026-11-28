@@ -256,6 +256,7 @@ function cards(cwd, items, namesById) {
     const heading = el("header", "card-heading");
     heading.append(pill(session.status, "", Boolean(session.terminalWorking)), el("h3", "", session.name));
     card.append(heading);
+    if (session.dashboardHost) card.append(el("span", "dashboard-host-badge", "Dashboard host"));
     const parent = namesById.get(session.parentId);
     if (parent) {
       const lineage = el("p", "clone-lineage");

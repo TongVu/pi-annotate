@@ -143,7 +143,7 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
     sessionTeam?.team.close();
     sessionTeam = undefined;
   };
-  pi.on("session_shutdown", async () => {
+  pi.on("session_shutdown", async (_event, ctx) => {
     clearInterval(archiveTimer);
     archiveTimer = undefined;
     stop();
@@ -153,6 +153,7 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
     sessionOwner = undefined;
     const closing = dashboard;
     dashboard = undefined;
+    if (closing && ctx?.mode === "tui") ctx.ui.setStatus("pi-chat-dashboard", undefined);
     await Promise.all([owner?.close(), closing?.then((opened) => opened.close(), () => {})]);
   });
   const stopForBranchChange = () => {
@@ -177,6 +178,7 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
     const pending = dashboard ??= startDashboard({
       list: () => listSessions(sessionDir),
       project,
+      hostSessionId: ctx.sessionManager.getSessionId(),
       presenceDir: presenceRegistry(agentDir),
       ownerDir: ownerRegistry(agentDir),
       bookmarkDir: join(agentDir, "pi-chat-bookmarks"),
@@ -199,6 +201,7 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
       throw error;
     });
     if (dashboard !== pending) throw new Error("The Pi session changed. Run /chat dashboard again.");
+    ctx.ui.setStatus("pi-chat-dashboard", "Dashboard host");
     if (userAgent === undefined) ctx.ui.notify(`Local chat dashboard: ${opened.url}`, "info");
     try { await launchPage(opened.url, userAgent); }
     catch { throw new Error("Could not launch a browser. Run /chat dashboard in Pi to get the local link."); }

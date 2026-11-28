@@ -29,6 +29,7 @@ type Options = {
   archiveDir?: string;
   tabRegistry?: string;
   project?: string;
+  hostSessionId?: string;
   resume?: (session: SavedChat) => Promise<void | false>;
   forkChat?: (session: SavedChat) => Promise<void>;
   verifyChat?: (cwd: string, name?: string) => Promise<void>;
@@ -58,7 +59,7 @@ export async function listDashboardTabs(registry: string) {
   return tabs;
 }
 
-export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir, archiveDir, tabRegistry, project, resume, forkChat, createChat, verifyChat, canFocus = canFocusBrowser, focus = focusBrowserChat, focusTerminal, readQuota = readCodexQuota }: Options) {
+export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir, archiveDir, tabRegistry, project, hostSessionId, resume, forkChat, createChat, verifyChat, canFocus = canFocusBrowser, focus = focusBrowserChat, focusTerminal, readQuota = readCodexQuota }: Options) {
   const token = randomBytes(32).toString("hex");
   const tabId = randomBytes(16).toString("hex");
   const tabPath = `/?dashboard=${tabId}`;
@@ -150,6 +151,7 @@ export async function startDashboard({ list, presenceDir, ownerDir, bookmarkDir,
             canArchive: archiveDir && session && !peer && !owner && (opening.get(id) ?? 0) <= Date.now() ? true : undefined,
             status: peer ? peer.status ?? "connected" : owner ? "disconnected" : "saved",
             terminalWorking: !peer && owner?.working ? true : undefined,
+            dashboardHost: id === hostSessionId ? true : undefined,
             stopTarget: !peer && owner?.stopTarget && owner.stopTarget.pid !== process.pid ? owner.stopTarget.key : undefined,
             canVerify: verifyChat && (peer?.cwd || owner?.cwd || session?.cwd) ? true : undefined,
             canForkDirectory: forkChat && session?.path ? true : undefined,

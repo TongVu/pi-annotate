@@ -155,6 +155,7 @@ button.stat[aria-pressed="true"] { border-color: var(--accent); background: #f9e
 .card-heading { display: flex; align-items: flex-start; gap: 8px; line-height: 20px; }
 .card-heading > .pill { flex: none; height: 20px; }
 .card:has(.bookmark) > .card-heading { padding-right: 32px; }
+.dashboard-host-badge { align-self: flex-start; border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px; font-size: 12px; font-weight: 600; }
 .bookmark { position: absolute; z-index: 1; top: 6px; right: 6px; width: 36px; height: 36px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--muted); }
 .bookmark:hover, .bookmark:focus-visible { background: var(--side); }
 .bookmark[aria-pressed="true"] { color: #397f83; }

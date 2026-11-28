@@ -16,6 +16,7 @@ function fixture(t, { dashboard = false, launchPage = async () => {}, sendUserMe
   const flags = new Map();
   const tools = new Map();
   const notices = [];
+  const statuses = new Map();
   registerChatExtension({
     on: (event, callback) => handlers.set(event, callback),
     registerCommand: (name, options) => commands.set(name, options),
@@ -27,7 +28,6 @@ function fixture(t, { dashboard = false, launchPage = async () => {}, sendUserMe
     sendUserMessage,
     sendMessage,
   }, launchPage, options);
-  t.after(() => handlers.get("session_shutdown")());
   const ctx = {
     mode: "tui",
     isIdle: () => true,
@@ -40,9 +40,14 @@ function fixture(t, { dashboard = false, launchPage = async () => {}, sendUserMe
       getCwd: () => process.cwd(),
       getSessionFile: () => undefined,
     },
-    ui: { notify: (message) => notices.push(message) },
+    ui: {
+      notify: (message) => notices.push(message),
+      setStatus: (key, text) => text === undefined ? statuses.delete(key) : statuses.set(key, text),
+    },
   };
-  return { handlers, notices, ctx, commands, flags, tools, run: (args = "link") => commands.get("chat").handler(args, ctx) };
+  const close = () => handlers.get("session_shutdown")({}, ctx);
+  t.after(close);
+  return { handlers, notices, statuses, ctx, commands, flags, tools, close, run: (args = "link") => commands.get("chat").handler(args, ctx) };
 }
 
 function openedUrl(notices) {
@@ -411,7 +416,8 @@ test("the chat button opens a dashboard only when no existing tab can be focused
     await f.run();
     const chat = openedUrl(f.notices);
     return {
-      close: () => f.handlers.get("session_shutdown")(),
+      close: f.close,
+      statuses: f.statuses,
       open: async () => {
         const response = await fetch(`${chat.origin}/api/dashboard/open`, {
           method: "POST", body: "{}", headers: { Authorization: `Bearer ${chat.hash.slice(1)}`,
@@ -430,6 +436,8 @@ test("the chat button opens a dashboard only when no existing tab can be focused
   await second.open();
   assert.deepEqual(probes, [[firstTab]], "the other Pi discovers the locator without its bearer token");
   assert.equal(launches, 1, "focusing does not launch another tab");
+  assert.equal(first.statuses.get("pi-chat-dashboard"), "Dashboard host");
+  assert.equal(second.statuses.has("pi-chat-dashboard"), false, "focusing another Pi's dashboard does not make this Pi a host");
   openTabs.clear();
   await second.open();
   assert.equal(openTabs.size, 1, "a closed tab is replaced");
@@ -439,6 +447,22 @@ test("the chat button opens a dashboard only when no existing tab can be focused
   await second.open();
   assert.deepEqual(probes.at(-1), [secondTab], "a shutdown dashboard is no longer a candidate");
   assert.equal(launches, 2);
+});
+
+test("an empty dashboard launcher is marked in the terminal without adding a chat card", async (t) => {
+  const agentDir = await mkdtemp(join(tmpdir(), "pi-chat-dashboard-launcher-"));
+  t.after(() => rm(agentDir, { recursive: true, force: true }));
+  const f = fixture(t, { dashboard: true, getAgentDir: async () => agentDir, listSessions: async () => [] });
+  await f.handlers.get("session_start")({ reason: "startup" }, f.ctx);
+  assert.equal(f.statuses.get("pi-chat-dashboard"), "Dashboard host");
+  const url = openedUrl(f.notices);
+  const response = await fetch(`${url.origin}/api/dashboard`, { headers: { Authorization: `Bearer ${url.hash.slice(1)}` } });
+  assert.deepEqual((await response.json()).sessions, []);
+  await f.run("close");
+  assert.equal(f.statuses.get("pi-chat-dashboard"), "Dashboard host", "closing a browser chat does not stop the dashboard");
+  await f.close();
+  assert.equal(f.statuses.has("pi-chat-dashboard"), false);
+  await assert.rejects(() => fetch(url.origin));
 });
 
 test("--dashboard does not launch a browser from non-interactive Pi", async (t) => {

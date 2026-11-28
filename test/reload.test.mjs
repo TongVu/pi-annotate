@@ -312,8 +312,10 @@ test("installed Pi accepts a browser prompt before the model finishes, then expo
     },
   ]);
   const errors = [];
+  let dashboardStatus;
   await session.bindExtensions({ mode: "tui", onError: (error) => errors.push(error), uiContext: {
     notify(message) { if (message.includes("http://127.0.0.1:")) link = message.split(": ").at(-1); },
+    setStatus(key, text) { if (key === "pi-chat-dashboard") dashboardStatus = text; },
   } });
   try {
     session.setSessionName("Live browser chat feature");
@@ -490,8 +492,13 @@ test("installed Pi accepts a browser prompt before the model finishes, then expo
     assert.equal(response.status, 200);
     const { sessions, canFocusTerminal } = await response.json();
     assert.equal(canFocusTerminal, true);
-    assert.equal(sessions.find(({ id }) => id === sessionManager.getSessionId())?.status, "ready");
-    assert.equal(sessions.find(({ id }) => id === saved[1].manager.getSessionId())?.status, "saved");
+    assert.equal(dashboardStatus, "Dashboard host");
+    const host = sessions.find(({ id }) => id === sessionManager.getSessionId());
+    assert.equal(host.status, "ready");
+    assert.equal(host.dashboardHost, true);
+    const other = sessions.find(({ id }) => id === saved[1].manager.getSessionId());
+    assert.equal(other.status, "saved");
+    assert.equal(other.dashboardHost, undefined);
     assert.equal(faux.state.callCount, 4);
     const beforeCompaction = await state();
     assert.equal(beforeCompaction.canCompact, true);
@@ -547,6 +554,7 @@ test("installed Pi accepts a browser prompt before the model finishes, then expo
       }
       const idle = await terminalState();
       assert.equal(idle.status, "disconnected");
+      assert.equal(idle.dashboardHost, true);
       assert.equal(idle.terminalWorking, undefined);
     }
     assert.deepEqual(errors, []);
