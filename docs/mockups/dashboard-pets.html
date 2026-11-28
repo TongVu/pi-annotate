@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard pets · Pi Chat mockup</title>
+<style>
+  :root {
+    color-scheme: light;
+    font: 14px/1.45 system-ui, sans-serif;
+    --page: #faf9f5; --side: #f2f0e9; --paper: #fff; --border: #e4e1d6;
+    --ink: #191b17; --muted: #64645a; --link: #276b70; --accent: #9c452c;
+    color: var(--ink); background: var(--page);
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body, h1, h2, h3, p { margin: 0; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .shell { max-width: 1500px; margin: auto; padding: 28px 32px; }
+  .bar { display: flex; justify-content: space-between; align-items: end; flex-wrap: wrap; gap: 16px; margin-bottom: 18px; }
+  .eyebrow, .nav-label, .stage-label { font: 600 10px/1.3 ui-monospace, monospace; letter-spacing: .13em; text-transform: uppercase; }
+  .eyebrow { color: var(--accent); }
+  h1 { font: 500 clamp(32px, 4vw, 46px)/1.1 Georgia, serif; letter-spacing: -.035em; margin: 4px 0 6px; }
+  .intro, .layout-note { color: var(--muted); }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .switch { display: inline-flex; flex-wrap: wrap; gap: 3px; padding: 3px; background: var(--side); border: 1px solid var(--border); border-radius: 10px; }
+  .switch button, #motion { padding: 6px 11px; border-radius: 7px; border: 1px solid transparent; background: transparent; font-size: 12px; }
+  .switch button[aria-pressed="true"] { background: var(--paper); border-color: var(--border); font-weight: 650; }
+  #motion { border-color: var(--border); background: var(--paper); }
+  #motion[aria-pressed="true"] { background: var(--side); }
+  .app { display: grid; grid-template-columns: 190px minmax(0, 1fr); border: 1px solid var(--border); border-radius: 16px; background: #f8f7f1; overflow: hidden; box-shadow: 0 12px 30px #4035260d; }
+  .side { padding: 20px 12px; background: var(--side); border-right: 1px solid var(--border); }
+  .brand { display: flex; align-items: center; gap: 8px; margin: 0 7px 14px; font: 500 21px Georgia, serif; }
+  .brand span { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 7px; background: #a6d5c3; color: #225448; font: 700 15px ui-monospace, monospace; }
+  .nav-label { color: var(--muted); margin: 18px 7px 5px; }
+  .nav-item { padding: 7px 8px; font-size: 13px; border-radius: 7px; }
+  .nav-item.selected { background: var(--paper); font-weight: 650; }
+  .main { min-width: 0; padding: 22px 24px 26px; }
+  .top { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+  .top h2 { font: 500 32px/1.2 Georgia, serif; letter-spacing: -.025em; }
+  .top p { color: var(--muted); margin-top: 2px; font-size: 13px; }
+  .sample-tag { border: 1px solid var(--border); border-radius: 99px; padding: 4px 9px; color: var(--muted); font: 11px ui-monospace, monospace; }
+  .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 20px; }
+  .stat, .card { background: var(--paper); border: 1px solid var(--border); border-radius: 13px; }
+  .stat { padding: 10px 12px; }
+  .stat b { display: block; margin-top: 2px; font-size: 19px; font-weight: 650; }
+  [data-state="working"] { --signal: #ab5c20; --tint: #fbf0df; }
+  [data-state="ready"] { --signal: #307a55; --tint: #eaf5ee; }
+  [data-state="error"] { --signal: #b13f35; --tint: #faeeeb; }
+  [data-state="disconnected"] { --signal: #6b7069; --tint: #eeefeb; }
+  [data-state="saved"] { --signal: #777469; --tint: #f3f1ea; }
+  .pill { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); text-align: left; font-size: 12px; line-height: 1.25; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--signal); }
+  [data-state="disconnected"] .dot { background: transparent; border: 2px solid var(--signal); }
+  .grid-label { margin: 0 0 9px; font-weight: 650; font-size: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 253px), 1fr)); gap: 13px; }
+  .card { display: flex; flex-direction: column; gap: 9px; padding: 12px 13px; min-width: 0; }
+  .card-head { display: flex; justify-content: space-between; align-items: center; min-height: 25px; }
+  button.pill { border: 1px solid transparent; border-radius: 99px; background: transparent; padding: 4px 7px; margin-left: -7px; }
+  button.pill:hover, button.pill:focus-visible { background: var(--tint); }
+  .bookmark { color: var(--link); flex: none; }
+  .card-main { display: grid; gap: 8px; min-height: 86px; }
+  .copy { min-width: 0; overflow-wrap: anywhere; }
+  .card h3 { margin-bottom: 5px; font-size: 15px; line-height: 1.3; }
+  .card p { color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+  .foot { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; margin-top: auto; padding-top: 9px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+  .action { color: var(--link); font-weight: 650; }
+
+  /* Both directions use the same bucket-hat sprite and the same card copy. */
+  .stage { position: relative; isolation: isolate; overflow: hidden; display: grid; justify-items: center; align-items: end; color: var(--signal); background-color: var(--tint); background-image: radial-gradient(color-mix(in srgb, var(--signal) 19%, transparent) 1px, transparent 1px); background-size: 9px 9px; border-radius: 8px; }
+  .pet { position: relative; width: var(--sprite); height: var(--sprite); margin-bottom: 8px; z-index: 1; overflow: visible; }
+  .shadow { position: absolute; bottom: 7px; left: 50%; transform: translateX(-50%); width: var(--sprite); height: 6px; border-radius: 50%; background: var(--signal); opacity: .17; }
+  .stage-label, .stage-signal { position: absolute; bottom: 10px; }
+  .stage-label { left: 10px; letter-spacing: .06em; }
+  .stage-signal { right: 10px; font: 700 10px ui-monospace, monospace; letter-spacing: .16em; }
+  [data-layout="compact"] .card:not([data-state="saved"]) .card-main { grid-template-columns: minmax(0, 1fr) 66px; }
+  [data-layout="compact"] .stage { --sprite: 50px; align-self: start; height: 71px; }
+  [data-layout="compact"] :is(.stage-label, .stage-signal, [data-state="saved"] .stage) { display: none; }
+  [data-layout="stage"] .stage { --sprite: 72px; height: 105px; }
+  [data-layout="stage"] .card-main { grid-template-rows: minmax(58px, auto) 105px; }
+  [data-layout="stage"] .stage::before { content: ""; position: absolute; left: 0; right: 0; bottom: 10px; border-top: 1px solid currentColor; opacity: .22; }
+
+  .pet { --body: #6eb4a9; --shade: #39766e; --screen: #152e2b; --eye: #9df4dd; --hat: #ebd49d; --brim: #bd985b; }
+  .body { fill: var(--body); } .shade { fill: var(--shade); } .screen { fill: var(--screen); }
+  .eye, .key { fill: var(--eye); } .lamp, .led { fill: currentColor; }
+  .hat { fill: var(--hat); } .brim { fill: var(--brim); }
+  .face-line { fill: none; stroke: var(--eye); stroke-width: .8; }
+  .cross { stroke: #fba49a; } .led { opacity: .35; }
+  .pet g, .pet rect { transform-box: fill-box; transform-origin: center; }
+  .eyes { animation: blink 5s infinite; }
+  .keyboard, .happy, .cross, .sleep, .alarm, .archive { display: none; }
+  [data-state="working"] .keyboard, [data-state="ready"] .happy, [data-state="error"] :is(.cross, .alarm),
+  [data-state="disconnected"] .sleep, [data-state="saved"] .archive { display: inline; }
+  [data-state="working"] .arm-left { transform: translate(3px, 4px); animation: type .55s steps(1) infinite; }
+  [data-state="working"] .arm-right { transform: translate(-3px, 4px); animation: type .55s .27s steps(1) infinite; }
+  [data-state="working"] .led { animation: led 1.2s steps(1) infinite; }
+  [data-state="working"] .led:nth-child(2) { animation-delay: .4s; }
+  [data-state="working"] .led:nth-child(3) { animation-delay: .8s; }
+  [data-state="ready"] .pet { animation: hop 3s ease-in-out infinite; }
+  [data-state="ready"] :is(.arm-left, .arm-right) { transform: translateY(-1.25px); }
+  [data-state="ready"] .led { opacity: 1; }
+  [data-state="error"] .pet { animation: wobble 2.8s ease-in-out infinite; }
+  [data-state="error"] .lamp { opacity: .7; }
+  [data-state="disconnected"] .robot { filter: grayscale(.92); opacity: .78; }
+  [data-state="disconnected"] .antenna { transform: rotate(34deg); transform-origin: center bottom; }
+  [data-state="disconnected"] .sleep-mark { animation: doze 3.2s ease-in-out infinite; }
+  [data-state="saved"] .robot, :is([data-state="ready"], [data-state="error"], [data-state="disconnected"]) .eyes { display: none; }
+  @keyframes blink { 0%, 94%, 100% { transform: scaleY(1); } 97% { transform: scaleY(.15); } }
+  @keyframes type { 50% { translate: 0 .65px; } }
+  @keyframes led { 0% { opacity: 1; } 33% { opacity: .35; } }
+  @keyframes hop { 0%, 14%, 100% { transform: none; } 6% { transform: translateY(-9px); } }
+  @keyframes wobble { 0%, 16%, 100% { transform: none; } 4%, 12% { transform: translateX(-1px) rotate(-3deg); } 8% { transform: translateX(1px) rotate(3deg); } }
+  @keyframes doze { 50% { transform: translateY(-1px); opacity: .65; } }
+  [data-paused] .pet, [data-paused] .pet * { animation: none !important; }
+  @media (prefers-reduced-motion: reduce) { .pet, .pet * { animation: none !important; } #motion { display: none; } }
+  .layout-note { margin-top: 11px; font-size: 12px; }
+  @media (max-width: 840px) {
+    .shell { padding: 18px; }
+    .app { grid-template-columns: minmax(0, 1fr); }
+    .side { display: none; }
+  }
+  @media (max-width: 500px) {
+    .shell { padding: 12px; }
+    .main { padding: 14px; }
+    .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+</style>
+</head>
+<body>
+<main class="shell">
+  <header class="bar">
+    <div>
+      <p class="eyebrow">Pi Chat / Design preview</p>
+      <h1>Dashboard pets</h1>
+      <p class="intro">Compare two layouts. Click a card’s status label to see its pet react.</p>
+    </div>
+    <div class="controls">
+      <div class="switch" role="group" aria-label="Card layout">
+        <button type="button" data-mode="compact" aria-pressed="true">A · Desk buddy</button>
+        <button type="button" data-mode="stage" aria-pressed="false">B · Pet stage</button>
+      </div>
+      <button id="motion" type="button" aria-pressed="false">Pause motion</button>
+    </div>
+  </header>
+  <div class="app" id="preview" data-layout="compact">
+    <aside class="side" aria-label="Sample dashboard sidebar">
+      <div class="brand"><span aria-hidden="true">π</span> Pi Chat</div>
+      <p class="nav-label">Views</p>
+      <p class="nav-item selected">All sessions</p>
+      <p class="nav-item">Needs attention</p>
+      <p class="nav-item">Bookmarks</p>
+      <p class="nav-label">Projects</p>
+      <p class="nav-item">field-notes</p>
+    </aside>
+    <section class="main" aria-labelledby="dashboard-title">
+      <header class="top">
+        <div><h2 id="dashboard-title">All sessions</h2><p id="summary"></p></div>
+        <span class="sample-tag">Sample sessions</span>
+      </header>
+      <div class="stats" id="stats" aria-label="Session counts"></div>
+      <h3 class="grid-label">field-notes</h3>
+      <div class="grid" id="cards"></div>
+    </section>
+  </div>
+  <p class="layout-note" id="layout-note" role="status">A · A small pet beside the preview. Saved cards stay plain.</p>
+</main>
+<template id="card-template">
+  <article class="card">
+    <header class="card-head">
+      <button type="button" class="pill" title="Cycle demo status"><span class="dot" aria-hidden="true"></span><span class="status" aria-live="polite"></span></button>
+      <svg class="bookmark" width="13" height="16" viewBox="0 0 13 16" aria-hidden="true" hidden><path fill="currentColor" d="M2 1h9v14l-4.5-3L2 15z"/></svg>
+    </header>
+    <div class="card-main">
+      <div class="copy"><h3></h3><p></p></div>
+      <div class="stage" aria-hidden="true">
+        <span class="shadow"></span>
+        <span class="stage-label"></span>
+        <svg class="pet" viewBox="0 -2 22 19" focusable="false">
+          <g class="robot">
+            <g class="antenna"><rect class="shade" x="10.6" y="1.1" width=".8" height="3"/><rect class="lamp" x="9.8" y="0" width="2.4" height="1.8"/></g>
+            <path class="shade" d="M6 13h2v2.5H6zM14 13h2v2.5h-2z"/>
+            <path class="body" d="M5 5h12v1h1v7h-1v1H5v-1H4V6h1z"/>
+            <path class="shade" d="M16.8 7h1.2v6h-1.2z"/>
+            <rect class="screen" x="5.7" y="7" width="10.6" height="4.2"/>
+            <g class="eyes"><path class="eye" d="M7.3 7.9h1.65v2.25H7.3zM13.05 7.9h1.65v2.25h-1.65z"/></g>
+            <path class="happy face-line" d="m7 9.45 1.15-1.15 1.15 1.15m3.4 0 1.15-1.15L15 9.45"/>
+            <path class="cross face-line" d="m7.2 8 1.85 1.9m0-1.9-1.85 1.9M13 8l1.85 1.9m0-1.9L13 9.9"/>
+            <path class="sleep face-line" d="M7.2 9.35h2m3.6 0h2"/>
+            <g><rect class="led" x="8.3" y="12" width="1" height="1"/><rect class="led" x="10.5" y="12" width="1" height="1"/><rect class="led" x="12.7" y="12" width="1" height="1"/></g>
+            <path class="hat" d="M8 2.6h6v1h1v1.9h2v.7h1v.9h-3V6.8H7v.3H4v-.9h1v-.7h2V3.6h1z"/>
+            <path class="brim" d="M7 4.75h8v.75H7zM5 6.5h2v.6H5zm10 0h2v.6h-2z"/>
+            <rect class="body arm-left" x="1.9" y="8.9" width="2.2" height="2"/>
+            <rect class="body arm-right" x="17.9" y="8.9" width="2.2" height="2"/>
+            <g class="keyboard"><rect class="screen" x="5.1" y="13.25" width="11.8" height="1.9"/><path class="key" d="M6 13.65h1v.6H6zm1.5 0h1v.6h-1zm1.5 0h1v.6H9zm1.5 0h1v.6h-1zm1.5 0h1v.6h-1zm1.5 0h1v.6h-1zm1.5 0h1v.6h-1z"/></g>
+            <path class="alarm lamp" d="M17.7 1h3v3h-3z"/><path class="alarm" fill="white" d="M18.9 1.4h.6v1.2h-.6zm0 1.65h.6v.55h-.6z"/>
+            <path class="sleep sleep-mark lamp" d="M16.8 1h2.3v.52L17.6 3h1.5v.52h-2.3V3l1.5-1.48h-1.5z"/>
+          </g>
+          <g class="archive"><path class="hat" d="M5 8h12v7.5H5z"/><path class="brim" d="M4.5 7h13v2.4h-13z"/><path class="lamp" d="M9 10.5h4v1H9z"/></g>
+        </svg>
+        <span class="stage-signal">▪ ▪ ▪</span>
+      </div>
+    </div>
+    <footer class="foot"><span class="age"></span><span class="action"></span></footer>
+  </article>
+</template>
+<script>
+  const states = {
+    working: ['In progress', 'Typing', 'Go to tab'],
+    ready: ['Ready to chat', 'Ready', 'Go to tab'],
+    error: ['Error', 'Needs help', 'Go to tab'],
+    disconnected: ['Disconnected', 'Asleep', 'Reopen chat'],
+    saved: ['Saved', 'On the shelf', 'Resume chat'],
+  };
+  const fixtures = [
+    ['Refactor note search', 'Read the search index and update tests for empty results.', '2m', 'working'],
+    ['Write release notes', 'Draft the highlights for the next release and list anything worth calling out.', 'Just now', 'ready'],
+    ['Debug flaky CI test', 'Look at the last three failed builds and find what they have in common.', '4m', 'error'],
+    ['Migrate the local database', 'Review the migration plan before changing the schema.', '12m', 'disconnected'],
+    ['Sketch onboarding ideas', 'Keep a short list of first-run improvements for the next sprint.', '2d', 'saved', true],
+  ];
+  const order = Object.keys(states);
+  const preview = document.querySelector('#preview');
+  const grid = document.querySelector('#cards');
+  const template = document.querySelector('#card-template');
+  const stats = document.querySelector('#stats');
+  const counters = {};
+  for (const state of order.slice(0, 4)) {
+    const stat = document.createElement('div');
+    stat.className = 'stat';
+    stat.dataset.state = state;
+    stat.innerHTML = '<span class="pill"><span class="dot" aria-hidden="true"></span><span></span></span><b></b>';
+    stat.querySelector('.pill span:last-child').textContent = state === 'error' ? 'Errors' : states[state][0];
+    counters[state] = stat.querySelector('b');
+    stats.append(stat);
+  }
+
+  function setState(card, state) {
+    const [label, reaction, action] = states[state];
+    card.dataset.state = state;
+    card.querySelector('.status').textContent = label;
+    card.querySelector('.stage-label').textContent = reaction;
+    card.querySelector('.action').textContent = action;
+  }
+
+  function countStates() {
+    const counts = Object.fromEntries(order.map(state => [state, 0]));
+    for (const card of grid.children) counts[card.dataset.state]++;
+    for (const state in counters) counters[state].textContent = counts[state];
+    const attention = counts.ready + counts.error;
+    document.querySelector('#summary').textContent = `${grid.children.length} sessions · ${attention} need${attention === 1 ? 's' : ''} attention · ${counts.saved} saved`;
+  }
+
+  for (const [title, snippet, age, state, bookmarked] of fixtures) {
+    const card = template.content.firstElementChild.cloneNode(true);
+    card.querySelector('h3').textContent = title;
+    card.querySelector('.copy p').textContent = snippet;
+    card.querySelector('.age').textContent = age === 'Just now' ? age : `Updated ${age}`;
+    card.querySelector('.bookmark').toggleAttribute('hidden', !bookmarked);
+    const badge = card.querySelector('button');
+    badge.setAttribute('aria-description', `Cycle demo status for ${title}`);
+    badge.addEventListener('click', () => {
+      setState(card, order[(order.indexOf(card.dataset.state) + 1) % order.length]);
+      countStates();
+    });
+    setState(card, state);
+    grid.append(card);
+  }
+  countStates();
+
+  const layouts = document.querySelectorAll('[data-mode]');
+  for (const button of layouts) button.addEventListener('click', () => {
+    preview.dataset.layout = button.dataset.mode;
+    for (const option of layouts) option.setAttribute('aria-pressed', String(option === button));
+    document.querySelector('#layout-note').textContent = button.dataset.mode === 'compact'
+      ? 'A · A small pet beside the preview. Saved cards stay plain.'
+      : 'B · A full-width pixel stage. Saved cards show a still archive box.';
+  });
+  document.querySelector('#motion').addEventListener('click', event => {
+    const paused = preview.toggleAttribute('data-paused');
+    event.currentTarget.setAttribute('aria-pressed', String(paused));
+  });
+</script>
+</body>
+</html>
