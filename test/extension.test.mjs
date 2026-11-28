@@ -14,11 +14,13 @@ function fixture(t, { dashboard = false, launchPage = async () => {}, sendUserMe
   const handlers = new Map();
   const commands = new Map();
   const flags = new Map();
+  const tools = new Map();
   const notices = [];
   registerChatExtension({
     on: (event, callback) => handlers.set(event, callback),
     registerCommand: (name, options) => commands.set(name, options),
     registerFlag: (name, options) => flags.set(name, options),
+    registerTool: (tool) => tools.set(tool.name, tool),
     getFlag: (name) => name === "dashboard" && dashboard,
     setSessionName: () => {},
     getSettings: () => ({}),
@@ -40,7 +42,7 @@ function fixture(t, { dashboard = false, launchPage = async () => {}, sendUserMe
     },
     ui: { notify: (message) => notices.push(message) },
   };
-  return { handlers, notices, ctx, commands, flags, run: (args = "link") => commands.get("chat").handler(args, ctx) };
+  return { handlers, notices, ctx, commands, flags, tools, run: (args = "link") => commands.get("chat").handler(args, ctx) };
 }
 
 function openedUrl(notices) {
@@ -172,6 +174,150 @@ test("completed Teams rounds hand off once to their Main chat, independent of th
   assert.ok(result.result);
   assert.deepEqual(branch, []);
   assert.equal(delivered.length, 2);
+});
+
+test("Main chat coordinates blockers and explicit feedback without forwarding the conversation", async (t) => {
+  const delivered = [], assignments = [];
+  const user = (id, content) => ({ id, type: "message", message: { role: "user", content } });
+  const branch = [user("private", "Unrelated private conversation")];
+  let attempts = 0;
+  const f = fixture(t, {
+    sendMessage(message, options) { delivered.push({ message, options }); },
+    createTeam: ({ captureBlocker, captureHandoff }) => createAgentTeam({
+      captureBlocker, captureHandoff,
+      prepare: async ({ workspace }) => workspace ?? { cwd: "/tmp/team-result", head: "base" },
+      inspectWorkspace: async () => ({ files: " M ui.js", diff: "patch", truncated: false }),
+      async openWorker() {
+        let listener;
+        return {
+          subscribe(fn) { listener = fn; return () => { listener = undefined; }; },
+          dispose() {},
+          async prompt(text) {
+            assignments.push(text);
+            const blocked = text.includes("Define the smallest viable design") && ++attempts < 3;
+            listener({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: JSON.stringify({
+              status: blocked ? "blocked" : "done", report: blocked ? "Which view should be the default?" : "Completed stage",
+            }) }] } });
+          },
+        };
+      },
+    }),
+  });
+  f.ctx.sessionManager.getBranch = () => branch;
+  const coordinate = (params) => f.tools.get("pi_chat_team").execute("call", params, undefined, undefined, f.ctx);
+  const request = (url, body) => fetch(`${url.origin}/api/team`, { headers: { Authorization: `Bearer ${url.hash.slice(1)}`, Origin: url.origin, "Content-Type": "application/json" },
+    ...(body && { method: "POST", body: JSON.stringify(body) }) });
+  const waitFor = async (count) => {
+    for (let i = 0; i < 100 && delivered.length < count; i++) await delay(10);
+    assert.equal(delivered.length, count);
+    return delivered[count - 1];
+  };
+  const blocker = ({ message }) => {
+    assert.equal(message.customType, "pi-chat-team-blocker");
+    const { round, role, pause } = JSON.parse(message.content.split("\n\n").at(-1));
+    return { round, role, pause };
+  };
+  await f.run();
+  const url = openedUrl(f.notices);
+  assert.equal((await request(url, { action: "start", brief: "Improve the dashboard" })).status, 202);
+  const first = await waitFor(1);
+  const direction = blocker(first);
+  assert.deepEqual(first.options, { triggerTurn: true, deliverAs: "followUp" });
+  assert.match(first.message.content, /Which view should be the default/);
+  assert.equal((await (await request(url)).json()).mainChatManaged, true);
+  assert.equal((await request(url, { action: "resume", ...direction, direction: "Bypass Main chat" })).status, 400);
+  await assert.rejects(() => coordinate({ ...direction, role: "frontend", text: "Wrong role" }), /no longer current/);
+  await assert.rejects(() => coordinate({ ...direction, returnTo: "frontend", text: "Not a final review" }), /Only a paused final review/);
+  await f.run("close");
+  await coordinate({ ...direction, text: "Check the existing default" });
+  const repeat = await waitFor(2);
+  const second = blocker(repeat);
+  assert.match(repeat.message.content, /Do not retry until the user responds/);
+  await assert.rejects(() => coordinate({ ...second, text: "Try indefinitely" }), /already tried/);
+  branch.push(user("answer", "Use the list view. Other private text."));
+  await coordinate({ ...second, text: "Use the list view" });
+  const completion = await waitFor(3);
+  assert.equal(completion.message.customType, teamHandoffType);
+  assert.match(completion.message.content, /Completed stage/);
+  await assert.rejects(() => coordinate({ round: 1, text: "Invented feedback" }), /explicit new user request/);
+  await f.run();
+  assert.equal((await request(openedUrl(f.notices), { action: "feedback", brief: "Bypass Main chat" })).status, 400);
+  branch.push(user("feedback", "Team feedback: make the list more compact"));
+  await coordinate({ round: 1, text: "Make the list more compact" });
+  await waitFor(4);
+  assert.match(assignments.at(-1), /User feedback for round 2:\nMake the list more compact/);
+  assert.match(assignments.join("\n"), /Main chat direction: Use the list view/);
+  assert.doesNotMatch(assignments.join("\n"), /private|Bypass Main chat|Try indefinitely/);
+  await assert.rejects(() => coordinate({ round: 2, finish: "discard" }), /exactly/);
+  branch.push(user("unrelated", "Do not discard team result"));
+  await assert.rejects(() => coordinate({ round: 2, finish: "discard" }), /exactly/);
+  branch.push(user("discard", "Discard team result"));
+  await coordinate({ round: 2, finish: "discard" });
+  const stopped = await (await request(openedUrl(f.notices))).json();
+  assert.equal(stopped.phase, "stopped");
+  assert.equal(stopped.disposition, "discarded");
+  f.handlers.get("session_before_tree")();
+  branch.push(user("other-branch", "Another request"));
+  await assert.rejects(() => coordinate({ round: 2, text: "Wrong branch" }), /No team to coordinate/);
+});
+
+for (const returnTo of ["frontend", "backend"]) test(`Main chat returns a review blocker to ${returnTo} for re-review in the same round`, async (t) => {
+  const messages = [], stages = [], workers = [];
+  let reviews = 0;
+  const f = fixture(t, {
+    sendMessage(message) { messages.push(message); },
+    createTeam: ({ captureBlocker, captureHandoff }) => createAgentTeam({
+      captureBlocker, captureHandoff,
+      prepare: async () => ({ cwd: "/tmp/team-result", head: "base" }),
+      inspectWorkspace: async () => ({ files: " M ui.js", diff: "patch", truncated: false }),
+      async openWorker() {
+        workers.push({});
+        let listener;
+        return {
+          subscribe(fn) { listener = fn; return () => { listener = undefined; }; },
+          dispose() {},
+          async prompt(text) {
+            const stage = text.includes("Read the combined changes") ? "review"
+              : text.includes("Implement the backend") ? "backend"
+              : text.includes("implement and wire the frontend") ? "frontend"
+              : text.includes("smallest viable design") ? "design" : "scope";
+            stages.push({ stage, text });
+            const blocked = stage === "review" && ++reviews === 1;
+            listener({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: JSON.stringify({
+              status: blocked ? "blocked" : "done", report: blocked ? "Fix the implementation" : `Reviewed ${stage}`,
+            }) }] } });
+          },
+        };
+      },
+    }),
+  });
+  await f.run();
+  const url = openedUrl(f.notices);
+  const response = await fetch(`${url.origin}/api/team`, { method: "POST", headers: { Authorization: `Bearer ${url.hash.slice(1)}`, Origin: url.origin, "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "start", brief: "Improve the dashboard" }) });
+  assert.equal(response.status, 202);
+  const waitFor = async (count) => {
+    for (let i = 0; i < 100 && messages.length < count; i++) await delay(10);
+    assert.equal(messages.length, count);
+    return messages[count - 1];
+  };
+  const blocker = await waitFor(1);
+  assert.equal(blocker.customType, "pi-chat-team-blocker");
+  assert.match(blocker.content, /set returnTo to frontend/);
+  const { round, role, pause } = JSON.parse(blocker.content.split("\n\n").at(-1));
+  const coordinate = (params) => f.tools.get("pi_chat_team").execute("call", params, undefined, undefined, f.ctx);
+  await assert.rejects(() => coordinate({ round, role, pause, returnTo: "review", text: "Invalid" }), /Only a paused final review/);
+  await coordinate({ round, role, pause, returnTo, text: "Fix the specific review finding" });
+  await assert.rejects(() => coordinate({ round, role, pause, returnTo, text: "Duplicate" }), /no longer current/);
+  const result = await waitFor(2);
+  assert.equal(result.customType, teamHandoffType);
+  const handoff = JSON.parse(result.content.split("\n\n").at(-1));
+  assert.equal(handoff.round, 1);
+  assert.equal(handoff.workspace.cwd, "/tmp/team-result");
+  assert.equal(workers.length, 4, "reuse all worker sessions");
+  assert.deepEqual(stages.map(({ stage }) => stage), ["scope", "design", "backend", "frontend", "review", ...(returnTo === "backend" ? ["backend"] : []), "frontend", "review"]);
+  assert.match(stages[5].text, /Main chat direction: Fix the specific review finding/);
+  assert.equal(handoff.directions[0].role, returnTo === "backend" ? "Backend implementer" : "Frontend implementer");
 });
 
 test("stop targets the active browser message, not queued, terminal, or later prompts", async (t) => {

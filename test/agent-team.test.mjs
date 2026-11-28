@@ -13,7 +13,7 @@ import { startChatPage } from "../web/app.js";
 import { mountAgentTeam } from "../web/chat/team.js";
 import { mountTranscript } from "../web/chat/transcript.js";
 
-test("role model defaults and selected models/efforts are validated without fallback", () => {
+test("the model resolver validates exact model and effort pairs without substituting a model", () => {
   const sol = { provider: "openai", id: "gpt-6.2-sol" };
   const luna = { provider: "openai", id: "gpt-6-luna" };
   assert.deepEqual(teamRoleDefaults, {
@@ -45,16 +45,37 @@ test("role settings can change only before start and are applied to that role's 
   } });
   assert.deepEqual(team.snapshot().settings.po, { model: "openai/gpt-6.2-sol", effort: "medium" });
   assert.deepEqual(team.snapshot().settings.backend, { model: "openai/gpt-6-luna", effort: "high" });
-  assert.throws(() => team.updateSettings("po", { model: "openai/nope", effort: "medium" }), /unavailable/);
-  assert.throws(() => team.updateSettings("po", { model: "openai/gpt-6-luna", effort: "medium" }), /unsupported/);
+  assert.match(team.updateSettings("po", { model: "openai/nope", effort: "medium" }).roles.find(({ id }) => id === "po").settingsFallback, /Using role defaults.*unavailable/);
+  assert.match(team.updateSettings("po", { model: "openai/gpt-6-luna", effort: "medium" }).roles.find(({ id }) => id === "po").settingsFallback, /Using role defaults.*unsupported/);
+  assert.deepEqual(team.snapshot().settings.po, teamRoleDefaults.po);
   team.updateSettings("po", { model: "openai/gpt-6-luna", effort: "high" });
   assert.deepEqual(team.snapshot().roles.find(({ id }) => id === "po").model, "openai/gpt-6-luna");
+  assert.equal(team.snapshot().roles.find(({ id }) => id === "po").settingsFallback, undefined);
   team.start("Run the task");
   await turn();
   assert.equal(calls[0].model.id, "gpt-6-luna");
   assert.equal(calls[0].thinkingLevel, "high");
   assert.throws(() => team.updateSettings("backend", { effort: "medium" }), /only be changed before/);
   team.close();
+});
+
+test("start revalidates role defaults and never substitutes an arbitrary model", async (t) => {
+  const unavailable = new Set();
+  const { team, calls } = mockTeam({ resolveRoleSettings: (_role, { model, effort }) => {
+    if (unavailable.has(model)) throw new Error(`${model} unavailable`);
+    return { model: { id: model }, thinkingLevel: effort };
+  } });
+  t.after(team.close);
+  team.updateSettings("po", { model: "custom/custom-model", effort: "medium" });
+  unavailable.add("custom/custom-model");
+  unavailable.add(teamRoleDefaults.po.model);
+  assert.throws(() => team.start("Test unavailable defaults"), /Product owner settings and defaults are unavailable/);
+  assert.equal(team.snapshot().phase, "idle");
+  unavailable.delete(teamRoleDefaults.po.model);
+  team.start("Use the validated default");
+  await until(() => calls.length === 1, "worker did not start");
+  assert.equal(calls[0].model.id, teamRoleDefaults.po.model);
+  assert.match(team.snapshot().roles[0].settingsFallback, /Using role defaults/);
 });
 
 const paths = { cwd: "/tmp/shared-team", head: "base" };
@@ -247,6 +268,64 @@ test("the shared worktree starts from committed HEAD, exposes the combined diff,
   }
 });
 
+test("team retains the requirement, caps feedback at three reviews, and stops on discard", async (t) => {
+  const { team, calls, disposed } = mockTeam();
+  t.after(team.close);
+  for (let index = 0; index < 3; index++) {
+    team.start(index ? `Feedback ${index}` : "Original requirement", undefined, index > 0);
+    for (let stage = 0; stage < 5; stage++) {
+      await turn();
+      calls[index * 5 + stage].finish("done", "Reviewed work");
+    }
+    await turn();
+    assert.equal(team.snapshot().phase, "done");
+    assert.equal(team.snapshot().round, index + 1);
+    assert.equal(team.snapshot().brief, "Original requirement");
+    assert.equal(team.snapshot().feedback, index ? `Feedback ${index}` : "");
+  }
+  assert.throws(() => team.start("Fourth round", undefined, true), /3-round limit/);
+  await team.finish("discard", paths.cwd, () => true);
+  assert.equal(team.snapshot().phase, "stopped");
+  assert.equal(team.snapshot().disposition, "discarded");
+  assert.deepEqual(team.snapshot().result, exampleChanges);
+  assert.equal(disposed.length, 4);
+});
+
+test("apply checks the reviewed Git patch and leaves the result unstaged", async (t) => {
+  const repo = await mkdtemp(join(tmpdir(), "team-apply-test-"));
+  t.after(() => rm(repo, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", ["-C", repo, ...args], { stdio: "pipe" }).toString();
+  git("init");
+  await writeFile(join(repo, "app.txt"), "base\n");
+  git("add", "app.txt");
+  git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "feat: add fixture");
+  const workspace = await prepareTeamWorkspace(repo);
+  t.after(() => rm(dirname(workspace.cwd), { recursive: true, force: true }));
+  const { team, calls } = mockTeam({ prepare: async () => workspace, inspectWorkspace: inspectTeamWorkspace });
+  t.after(team.close);
+  team.start("Edit the fixture");
+  for (let stage = 0; stage < 5; stage++) {
+    await until(() => calls.length > stage, "worker did not start");
+    if (stage === 2) await writeFile(join(workspace.cwd, "app.txt"), "team edit\n");
+    if (stage === 3) await writeFile(join(workspace.cwd, "new.txt"), "new file\n");
+    calls[stage].finish("done", "Reviewed work");
+  }
+  await until(() => team.snapshot().phase === "done", "review did not finish");
+  await writeFile(join(workspace.cwd, "app.txt"), "not reviewed\n");
+  await assert.rejects(team.finish("apply", repo, () => true), /changed after review/);
+  await writeFile(join(workspace.cwd, "app.txt"), "team edit\n");
+  await writeFile(join(repo, "app.txt"), "user edit\n");
+  await assert.rejects(team.finish("apply", repo, () => true), /clean checkout/);
+  assert.equal(await readFile(join(repo, "app.txt"), "utf8"), "user edit\n");
+  await writeFile(join(repo, "app.txt"), "base\n");
+  await assert.rejects(team.finish("apply", repo, () => false), /changed/);
+  await team.finish("apply", repo, () => true);
+  assert.equal(team.snapshot().disposition, "applied");
+  assert.equal(git("rev-parse", "HEAD").trim(), workspace.head);
+  assert.match(git("status", "--porcelain"), / M app\.txt\n\?\? new\.txt/);
+  assert.equal(await readFile(join(repo, "new.txt"), "utf8"), "new file\n");
+});
+
 test("team API requires the live chat token and same-origin POSTs; close disposes workers without handing off", async (t) => {
   let delivered = false;
   const { team, calls, disposed } = mockTeam({ captureHandoff: () => () => (delivered = true) });
@@ -361,7 +440,7 @@ test("served Teams view sends attachments, shows the combined result, and gives 
   for (const id of ["team-toggle", "team-back", "team-setup-back"]) assert.equal($(id), null);
   assert.ok(toggle.querySelector("svg.team-mode-icon[aria-hidden=true]"));
   assert.ok(toggle.querySelector("svg.chat-mode-icon[aria-hidden=true]"));
-  for (const [id, label] of [["team-attach", "Attach files"], ["team-submit", "Start team"]]) {
+  for (const [id, label] of [["team-attach", "Attach files"], ["team-submit", "Send requirement"]]) {
     assert.equal($(id).getAttribute("aria-label"), label);
     assert.equal($(id).textContent.trim(), "");
     assert.ok($(id).querySelector("svg[aria-hidden=true]"));
@@ -404,7 +483,12 @@ test("served Teams view sends attachments, shows the combined result, and gives 
   assert.equal($("team-brief").value, "Build the status screen");
   assert.equal($("team-attachments").children.length, 2);
   assert.equal(calls.length, 0);
-  $("team-submit").click();
+  const key = (options) => $("team-brief").dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", cancelable: true, bubbles: true, ...options }));
+  assert.equal(key({ shiftKey: true }), true);
+  assert.equal(key({ isComposing: true }), true);
+  assert.equal(key({ repeat: true }), false);
+  assert.equal(calls.length, 0);
+  assert.equal(key({}), false);
   await until(() => calls.length === 1 && $("team-setup").hidden, "Start did not reach the runner and show team status");
   assert.deepEqual(prepared, Array.from({ length: 2 }, () => ({ hasImages: true, workspace: undefined, settings: teamRoleDefaults })));
   assert.equal($("team-panel").hidden, false);
@@ -436,6 +520,9 @@ test("served Teams view sends attachments, shows the combined result, and gives 
   await until(() => !$("team-result").hidden, "Combined result did not open");
   assert.equal(heading.parentElement.tagName, "MAIN");
   assert.match($("team-result-workspace").textContent, /shared-team/);
+  assert.equal($("team-result-title").textContent, "Build the status screen");
+  assert.equal($("team-result-brief").textContent, "Build the status screen");
+  assert.match($("team-round").textContent, /Reviewed.*Round 1 of 3/);
   assert.match($("team-result-files").textContent, /api\.js[\s\S]+ui\.js/);
   assert.match($("team-result-diff").textContent, /<img src=x>/);
   assert.equal($("team-result-diff").querySelector("img"), null);
@@ -580,10 +667,22 @@ test("team role controls show backend choices, update a role, and lock after sta
   await turn();
   assert.deepEqual(posts, [{ action: "settings", role: "po", settings: { model: modelChoices[1].key, effort: "high" } }]);
   assert.deepEqual(settings.architect, { model: modelChoices[0].key, effort: "medium" }, "only the selected role is changed");
+  const backendGear = d.querySelector('.team-card[data-role="backend"]').parentElement.querySelector(".team-agent-gear");
+  backendGear.dispatchEvent(new dom.window.Event("pointerdown", { bubbles: true }));
+  assert.equal(poGear.getAttribute("aria-expanded"), "true", "pointerdown must not reposition another gear before click");
+  backendGear.click();
+  assert.equal(poGear.getAttribute("aria-expanded"), "false");
+  assert.equal(backendGear.getAttribute("aria-expanded"), "true");
+  assert.equal(d.querySelectorAll(".team-agent-settings:not([hidden])").length, 1);
+  d.activeElement.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  assert.equal(d.activeElement, backendGear);
   phase = "active";
   await ui.refresh(true);
-  assert.equal(poGear.disabled, true);
-  assert.match(poCard.querySelector(".team-agent-settings-status").textContent, /locked/);
+  assert.equal(poGear.disabled, false);
+  poGear.click();
+  assert.equal(modelInput.readOnly, true);
+  assert.equal(poCard.querySelector('[role="listbox"]').hidden, true);
+  assert.match(poCard.querySelector(".team-agent-settings-status").textContent, /Luna.*locked/);
 });
 
 test("Teams recovers from a temporary request failure even if the revision did not change", async (t) => {
@@ -614,6 +713,36 @@ test("Teams recovers from a temporary request failure even if the revision did n
   await ui.refresh();
   assert.equal(fetches, 4, "an expired listener is not polled again");
   assert.equal(gear.disabled, true);
+});
+
+test("Main-chat-managed role transcripts and results route the user back to Main chat", async (t) => {
+  const dom = new JSDOM(await readFile(new URL("../web/index.html", import.meta.url), "utf8"));
+  t.after(() => dom.window.close());
+  const d = dom.window.document;
+  const $ = (id) => d.getElementById(id);
+  let snapshot = { mainChatManaged: true, phase: "active", revision: 1, round: 1,
+    roles: [{ id: "po", name: "Product owner", status: "paused", report: "Need a decision" }] };
+  const ui = mountAgentTeam(dom.window, { onViewChange() {}, api: async (_path, body) => {
+    assert.equal(body, undefined, "observing or leaving Teams must not submit instructions");
+    return snapshot;
+  } });
+  await ui.refresh();
+  $("team-view-toggle").click();
+  d.querySelector('.team-card[data-role="po"]').click();
+  assert.equal($("team-attention").textContent, "Blocked · see Main chat");
+  assert.equal($("team-direction").hidden, true);
+  assert.equal($("team-blocker-note").textContent, "Need a decision");
+  d.querySelector('.team-card[data-role="lead"]').click();
+  assert.equal($("team-panel").hidden, true);
+  snapshot = { ...snapshot, phase: "done", revision: 2, roles: [{ id: "po", name: "Product owner", status: "done" }],
+    workspace: { cwd: "/tmp/team" }, result: { files: "", diff: "" } };
+  await ui.refresh(true);
+  $("team-view-toggle").click();
+  assert.equal($("team-result").hidden, false);
+  assert.equal($("team-feedback").getAttribute("aria-label"), "Discuss the result in Main chat");
+  $("team-feedback").click();
+  assert.equal($("team-panel").hidden, true);
+  assert.equal($("team-setup").hidden, true);
 });
 
 test("the sidebar opens a pet's transcript and routes direction only to its paused role", async (t) => {

@@ -42,29 +42,55 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
     setTooltip(viewToggle, label);
     if (!open) {
       if (snapshot?.phase === "done") composingFeedback = false;
+      closeSettings();
       setRole(undefined);
     }
     render();
     if (!setup.hidden) brief.focus();
   }
   viewToggle.addEventListener("click", () => togglePanel(!opened));
-  document.addEventListener("pointerdown", (event) => {
-    for (const wrapper of roles.querySelectorAll(".team-agent-wrap")) {
-      const popover = wrapper.querySelector(".team-agent-settings");
-      if (popover && !popover.hidden && !popover.contains(event.target) && !wrapper.querySelector(".team-agent-gear").contains(event.target)) {
-        popover.hidden = true;
-        wrapper.querySelector(".team-agent-gear").setAttribute("aria-expanded", "false");
-      }
+  let activeSettings;
+  function closeSettings(restoreFocus = false) {
+    if (!activeSettings) return;
+    const { popover, gear } = activeSettings;
+    activeSettings = undefined;
+    popover.hidden = true;
+    gear.setAttribute("aria-expanded", "false");
+    if (restoreFocus) gear.focus({ preventScroll: true });
+  }
+  function positionSettings() {
+    if (!activeSettings) return;
+    const { popover, gear } = activeSettings;
+    const anchor = gear.getBoundingClientRect(), roster = roles.getBoundingClientRect();
+    const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+    const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
+    const gap = 8, width = popover.offsetWidth;
+    let left, top, availableHeight = viewportHeight - 2 * gap;
+    if (roster.left >= width + 2 * gap || viewportWidth - roster.right >= width + 2 * gap) {
+      left = roster.left >= width + 2 * gap ? roster.left - width - gap : roster.right + gap;
+      popover.style.maxHeight = `${availableHeight}px`;
+      top = Math.min(anchor.top, viewportHeight - popover.offsetHeight - gap);
+    } else {
+      const bounds = panel.getBoundingClientRect();
+      const rosterTop = Math.max(roster.top, bounds.top), rosterBottom = Math.min(roster.bottom, bounds.bottom);
+      const above = rosterTop - 2 * gap, below = viewportHeight - rosterBottom - 2 * gap;
+      availableHeight = Math.max(0, above, below);
+      popover.style.maxHeight = `${availableHeight}px`;
+      left = anchor.right - width;
+      top = above >= below ? rosterTop - popover.offsetHeight - gap : rosterBottom + gap;
     }
+    popover.style.left = `${Math.max(gap, Math.min(left, viewportWidth - width - gap))}px`;
+    popover.style.top = `${Math.max(gap, top)}px`;
+  }
+  window.addEventListener("resize", positionSettings);
+  window.addEventListener("scroll", positionSettings, true);
+  document.addEventListener("pointerdown", (event) => {
+    if (activeSettings && !activeSettings.popover.contains(event.target) && !event.target.closest?.(".team-agent-gear")) closeSettings();
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || event.defaultPrevented) return;
-    const open = roles.querySelector(".team-agent-settings:not([hidden])");
-    if (!open) return;
-    const gear = open.parentElement.querySelector(".team-agent-gear");
-    open.hidden = true;
-    gear.setAttribute("aria-expanded", "false");
-    gear.focus();
+    if (event.key !== "Escape" || event.defaultPrevented || !activeSettings) return;
+    event.preventDefault();
+    closeSettings(true);
   });
 
   function card(id, name) {
@@ -81,7 +107,7 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
     state.className = "team-card-state";
     button.append(title, state);
     button.addEventListener("click", () => {
-      if (id === "lead" && snapshot?.phase === "done") { togglePanel(false); viewToggle.focus(); return; }
+      if (id === "lead" && (snapshot?.mainChatManaged || snapshot?.phase === "done")) { togglePanel(false); viewToggle.focus(); return; }
       setRole(id === "lead" ? undefined : id);
       if (id !== "lead") transcript.focus({ preventScroll: true });
     });
@@ -96,7 +122,10 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
       const popover = document.createElement("div");
       popover.className = "team-agent-settings";
       popover.hidden = true;
+      popover.id = `team-${id}-settings`;
+      popover.setAttribute("role", "group");
       popover.setAttribute("aria-label", `${name} model settings`);
+      gear.setAttribute("aria-controls", popover.id);
       const modelLabel = document.createElement("label");
       modelLabel.textContent = "Model";
       const modelInput = document.createElement("input");
@@ -129,16 +158,19 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
       popover.append(modelLabel, options, effortLabel, efforts, status, error);
       gear.addEventListener("click", (event) => {
         event.stopPropagation();
-        const open = popover.hidden;
-        document.querySelectorAll(".team-agent-settings:not([hidden])").forEach((other) => { other.hidden = true; other.parentElement.querySelector(".team-agent-gear")?.setAttribute("aria-expanded", "false"); });
-        popover.hidden = !open;
-        gear.setAttribute("aria-expanded", String(open));
-        if (open) modelInput.focus();
+        const open = activeSettings?.gear !== gear;
+        closeSettings();
+        if (!open) return;
+        activeSettings = { gear, popover };
+        popover.hidden = false;
+        gear.setAttribute("aria-expanded", "true");
+        positionSettings();
+        modelInput.focus({ preventScroll: true });
       });
       modelInput.addEventListener("input", () => populateRoleOptions(id, popover));
       modelInput.addEventListener("focus", () => { modelInput.select(); populateRoleOptions(id, popover); });
       modelInput.addEventListener("keydown", (event) => {
-        if (event.key === "Escape") { event.preventDefault(); popover.hidden = true; gear.setAttribute("aria-expanded", "false"); gear.focus(); }
+        if (modelInput.readOnly) return;
         if (event.key === "ArrowDown" || event.key === "ArrowUp") {
           event.preventDefault();
           const items = [...options.querySelectorAll('[role="option"]')];
@@ -184,7 +216,7 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
     const phase = snapshot?.phase;
     const visible = opened && !saved;
     const show = visible && (phase === "idle" || phase === "starting" || (phase === "done" && composingFeedback));
-    const showResult = visible && phase === "done" && !!snapshot.result && !show && !selected;
+    const showResult = visible && ["done", "finishing", "stopped"].includes(phase) && !!snapshot.result && !show && !selected;
     const changed = setup.hidden === show || resultView.hidden === showResult;
     const restoreFocus = !setup.hidden && !show && !saved && setup.contains(document.activeElement);
     setup.hidden = !show;
@@ -239,6 +271,11 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
     void addFiles(selected);
   });
   brief.addEventListener("input", syncSetup);
+  brief.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || event.isComposing || event.keyCode === 229) return;
+    event.preventDefault();
+    if (!event.repeat && !submit.disabled) start.requestSubmit(submit);
+  });
   brief.addEventListener("paste", (event) => {
     const selected = Array.from(event.clipboardData?.files ?? []);
     if (!selected.length) return;
@@ -260,7 +297,7 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
   function populateRoleOptions(roleId, popover) {
     const modelInput = popover.querySelector('[role="combobox"]');
     const list = popover.querySelector('[role="listbox"]');
-    if (!snapshot?.modelChoices) return;
+    if (!snapshot?.modelChoices || modelInput.readOnly) return;
     const allSelected = modelInput.selectionStart === 0 && modelInput.selectionEnd === modelInput.value.length;
     const query = allSelected ? "" : modelInput.value.trim().toLowerCase();
     const choices = snapshot.modelChoices.filter(({ key, label }) => label.toLowerCase().includes(query) || key.toLowerCase().includes(query));
@@ -275,6 +312,7 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
     }));
     list.hidden = !choices.length;
     modelInput.setAttribute("aria-expanded", String(!!choices.length));
+    positionSettings();
   }
 
   function renderRoleSettings() {
@@ -290,7 +328,7 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
       const config = role.model ? { model: role.model, effort: role.effort } : snapshot.settings[role.id];
       const choice = snapshot.modelChoices.find(({ key }) => key === config?.model);
       const modelInput = popover.querySelector('[role="combobox"]');
-      if (document.activeElement !== modelInput) modelInput.value = choice?.label ?? config?.model ?? "Unavailable model";
+      if (!editable || document.activeElement !== modelInput || modelInput.dataset.key !== config?.model) modelInput.value = choice?.label ?? config?.model ?? "Unavailable model";
       modelInput.dataset.key = config?.model ?? "";
       popover.dataset.model = config?.model ?? "";
       popover.dataset.effort = config?.effort ?? "";
@@ -309,12 +347,21 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
         control.setAttribute("aria-pressed", String(control.value === config?.effort));
         control.disabled = !editable || efforts.childElementCount < 2;
       }
-      gear.disabled = !editable;
-      modelInput.disabled = !editable;
-      gear.title = disconnected ? "Disconnected; role settings unavailable" : editable ? `Configure ${role.name}` : "Role settings lock when the team starts";
-      popover.querySelector(".team-agent-settings-status").textContent = disconnected ? "Disconnected." : snapshot.phase === "idle" ? `${choice?.label ?? "Model unavailable"} · ${config?.effort ?? "No effort"} effort` : "Settings locked after team start.";
-      popover.querySelector(".team-agent-settings-error").textContent = actionError;
+      gear.disabled = disconnected;
+      modelInput.readOnly = !editable;
+      if (!editable) {
+        popover.querySelector('[role="listbox"]').hidden = true;
+        modelInput.setAttribute("aria-expanded", "false");
+      }
+      const action = snapshot.phase === "idle" ? "Configure" : "View";
+      gear.setAttribute("aria-label", `${action} ${role.name} model and effort`);
+      gear.title = disconnected ? "Disconnected; role settings unavailable" : `${action} ${role.name}`;
+      popover.querySelector(".team-agent-settings-status").textContent = disconnected ? "Disconnected." :
+        `${choice?.label ?? "Model unavailable"} · ${config?.effort ?? "No effort"} effort${snapshot.phase === "idle" ? "" : " — locked after team start."}`;
+      popover.querySelector(".team-agent-settings-error").textContent = activeSettings?.gear === gear && actionError || role.settingsFallback || "";
     }
+    if (disconnected) closeSettings();
+    positionSettings();
   }
 
   async function saveRoleSettings(roleId, popover, settings) {
@@ -325,7 +372,28 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
 
   function render() {
     if (!snapshot) return;
-    const { phase, round, issue, workspace, result, messages } = snapshot;
+    const { phase, round, maxRounds, issue, workspace, result, messages, mainChatManaged, disposition, feedback } = snapshot;
+    const requirement = snapshot.brief ?? "";
+    const firstLine = requirement.split("\n").find((line) => line.trim())?.trim().replace(/^[-*#]+\s+/, "") ?? "";
+    const title = firstLine.length > 88 ? `${firstLine.slice(0, 87)}…` : firstLine;
+    const workingRole = snapshot.roles.find(({ status }) => status === "working");
+    const progress = phase === "done" ? "Reviewed · awaiting your decision" : phase === "finishing" ? "Applying reviewed result" : phase === "stopped" ?
+      (disposition === "applied" ? "Applied · team stopped" : disposition === "discarded" ? "Not applied · team stopped" : "Stopped") :
+      snapshot.roles.some(({ status }) => status === "paused") ? "Paused · see Main chat" :
+      workingRole ? `${workingRole.name} working` : "Preparing";
+    const roundLabel = `Round ${round}${maxRounds ? ` of ${maxRounds}` : ""}`;
+    $("team-task").hidden = !title;
+    $("team-task-title").textContent = title;
+    $("team-task-progress").textContent = `${progress} · ${roundLabel}`;
+    for (const prefix of ["team-task", "team-result"]) {
+      $(`${prefix}-brief`).textContent = requirement;
+      $(`${prefix}-feedback`).textContent = feedback ?? "";
+      $(`${prefix}-feedback`).parentElement.hidden = !feedback;
+    }
+    if (mainChatManaged) {
+      feedbackButton.setAttribute("aria-label", "Discuss the result in Main chat");
+      setTooltip(feedbackButton, "Discuss the result in Main chat");
+    }
     if (round > displayedRound) {
       displayedRound = round;
       composingFeedback = false;
@@ -335,14 +403,19 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
     }
     syncSetup();
     if (result) {
-      $("team-round").textContent = `TEAMS · ROUND ${round}`;
+      $("team-round").textContent = `${progress} · ${roundLabel}`;
+      $("team-result-title").textContent = title || "Team result";
+      $("team-result-note").textContent = disposition || phase === "stopped" ? "The team workspace was retained." :
+        round >= maxRounds ? "Round limit reached. In Main chat, decide whether to apply or discard the reviewed changes." :
+          "See Main chat for the review and recommendation. Nothing has been applied.";
       $("team-result-workspace").textContent = workspace.cwd;
       $("team-result-files").textContent = result.files || "No code changes.";
       $("team-result-diff").textContent = result.diff || "No patch to display.";
       $("team-result-truncated").hidden = !result.truncated;
     }
     const waiting = snapshot.roles.filter(({ status }) => status === "paused").length;
-    const attention = waiting ? `${waiting} ${waiting === 1 ? "role needs" : "roles need"} your input` : "";
+    const attention = !waiting ? "" : mainChatManaged ? "Blocked · see Main chat" : `${waiting} ${waiting === 1 ? "role needs" : "roles need"} your input`;
+    const roleLabel = (status) => status === "paused" && mainChatManaged ? "Paused" : labels[status];
     if ($("team-attention").textContent !== attention) $("team-attention").textContent = attention;
     $("team-attention-dot").hidden = !waiting;
     const preStart = phase === "idle" || phase === "starting";
@@ -361,15 +434,15 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
       button.disabled = preStart;
       button.setAttribute("aria-current", String(!preStart && role.id === selected));
       button.dataset.state = preStart ? "not-started" : role.status;
-      button.querySelector(".team-card-state").textContent = preStart ? "Not started" : labels[role.status];
+      button.querySelector(".team-card-state").textContent = preStart ? "Not started" : roleLabel(role.status);
     }
     renderRoleSettings();
     const role = snapshot.roles.find(({ id }) => id === selected);
     if (!role) return;
-    $("team-role-title").textContent = `${role.name} · ${labels[role.status]}`;
-    direction.hidden = role.status !== "paused";
+    $("team-role-title").textContent = `${role.name} · ${roleLabel(role.status)}`;
+    direction.hidden = mainChatManaged || role.status !== "paused";
     const blocker = $("team-blocker-note");
-    const showBlocker = !direction.hidden && role.report && !messages?.some(({ who, text }) => who === "Agent" && text === role.report);
+    const showBlocker = role.status === "paused" && role.report && !messages?.some(({ who, text }) => who === "Agent" && text === role.report);
     blocker.hidden = !showBlocker;
     blocker.textContent = showBlocker ? role.report : "";
     syncDirection();
@@ -444,7 +517,8 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
     void act({ action: composingFeedback ? "feedback" : "start", brief: brief.value.trim(), ...(attachments.length ? { attachments } : {}) }, submit);
   });
   feedbackButton.addEventListener("click", () => {
-    if (snapshot?.phase !== "done") return;
+    if (snapshot?.mainChatManaged) { togglePanel(false); viewToggle.focus(); return; }
+    if (snapshot?.phase !== "done" || snapshot.round >= snapshot.maxRounds) return;
     composingFeedback = true;
     actionError = fileError = "";
     $("team-setup-title").textContent = "Feedback for the team";

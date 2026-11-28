@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, lstat, mkdir, mkdtemp, open, readFile, realpath, rmdir, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, mkdtemp, open, readFile, realpath, rm, rmdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
@@ -7,6 +7,7 @@ import { INLINE_TEXT_LIMIT, inlineAttachmentBlocks, parseAttachments } from "./c
 
 const exec = promisify(execFile);
 export const teamThinkingLevel = "high";
+export const maxTeamRounds = 3;
 export const teamRoleDefaults = {
   po: { model: "openai/gpt-6.2-sol", effort: "medium" },
   architect: { model: "openai/gpt-6.2-sol", effort: "medium" },
@@ -112,6 +113,33 @@ export async function inspectTeamWorkspace({ cwd, head }: TeamWorkspace, include
   return { files, diff, truncated, ...(patchCheck && { patchCheck }) };
 }
 
+async function applyTeamResult(cwd: string, workspace: TeamWorkspace, reviewed: Awaited<ReturnType<typeof inspectTeamWorkspace>>, isCurrent: () => boolean) {
+  if (reviewed.truncated || reviewed.patchCheck?.status !== "passed") throw new Error("This result does not have a complete checked patch. Inspect and apply it manually.");
+  const current = await inspectTeamWorkspace(workspace, true);
+  if (current.truncated || current.diff !== reviewed.diff || current.files !== reviewed.files || current.patchCheck?.status !== "passed") {
+    throw new Error("The team workspace changed after review. No changes were applied.");
+  }
+  if (!reviewed.diff) return;
+  const root = (await teamGit(cwd, "rev-parse", "--show-toplevel")).trimEnd();
+  const directory = await mkdtemp(join(tmpdir(), "pi-team-apply-"));
+  try {
+    const patch = join(directory, "reviewed.patch");
+    await writeFile(patch, reviewed.diff, { mode: 0o600 });
+    const checkCheckout = async () => {
+      if ((await teamGit(root, "rev-parse", "HEAD")).trim() !== workspace.head || await teamGit(root, "status", "--porcelain", "--untracked-files=all")) {
+        throw new Error("Apply requires a clean checkout at the team's starting commit. No changes were applied.");
+      }
+    };
+    await checkCheckout();
+    await teamGit(root, "apply", "--check", "--", patch).catch(() => { throw new Error("The reviewed patch cannot be applied cleanly. No changes were applied."); });
+    await checkCheckout();
+    if (!isCurrent()) throw new Error("The Main chat or team changed. No changes were applied.");
+    await teamGit(root, "apply", "--", patch);
+  } finally {
+    await rm(directory, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 // Resolve existing ancestors too: a new file beneath a symlink must not escape.
 export async function teamWritePath(root: string, path: string) {
   const inside = (candidate: string) => {
@@ -159,7 +187,7 @@ export async function createTeamWorker({ cwd, writable, agentDir, model, thinkin
   return session;
 }
 
-const reportFormat = 'Finish with only a JSON object {"status":"done"|"blocked"|"retry","report":"brief, evidence-based report"}. Use done when the assigned step is complete, including if no changes are needed; blocked for a decision or missing prerequisite; retry only when another attempt could help. For blocked, say what you tried, what happened, and what you need from the user. Stop at a blocker or after two attempts without new evidence. Never claim a test passed without running it.';
+const reportFormat = 'Finish with only a JSON object {"status":"done"|"blocked"|"retry","report":"brief, evidence-based report"}. Use done when the assigned step is complete, including if no changes are needed; blocked for a decision or missing prerequisite; retry only when another attempt could help. For blocked, tell Main chat what you tried, what happened, and the smallest decision or prerequisite you need. Stop at a blocker or after two attempts without new evidence. Never claim a test passed without running it.';
 function resultOf(text) {
   try {
     const result = JSON.parse(text?.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i, "$1") ?? "");
@@ -219,10 +247,31 @@ export type TeamHandoff = {
 };
 
 type TeamCompletion = (handoff: TeamHandoff) => boolean;
+export type TeamBlocker = Pick<TeamHandoff, "round" | "brief" | "feedback" | "workspace"> & {
+  role: string; stage: string; pause: number; report: string;
+};
+type TeamEscalation = (blocker: TeamBlocker) => boolean;
 type StaleEditAssist = (blocker: StaleEdit & { workspace: TeamWorkspace; role: string }) => Promise<string | undefined>;
 export function createAgentTeam({ prepare, saveAttachments, openWorker, inspectWorkspace = inspectTeamWorkspace, modelChoices = [], resolveRoleSettings,
-  captureHandoff = undefined as (() => TeamCompletion) | undefined, assistStaleEdit = undefined as StaleEditAssist | undefined }) {
+  captureHandoff = undefined as (() => TeamCompletion) | undefined,
+  captureBlocker = undefined as (() => TeamEscalation) | undefined, assistStaleEdit = undefined as StaleEditAssist | undefined }) {
   const settings = structuredClone(teamRoleDefaults);
+  const settingsFallbacks: Record<string, string | undefined> = {};
+  function validatedSettings(role: string, selected: { model: string; effort: string }) {
+    const validate = (candidate: typeof selected) => {
+      if (resolveRoleSettings) resolveRoleSettings(role, candidate);
+      else if (modelChoices.length && !modelChoices.some((choice) => choice.key === candidate.model && choice.efforts.includes(candidate.effort))) {
+        throw new Error(`Unsupported model or effort: ${candidate.model} / ${candidate.effort}.`);
+      }
+    };
+    try { validate(selected); return { settings: selected, reason: undefined }; }
+    catch (error) {
+      const fallback = { ...teamRoleDefaults[role] };
+      try { validate(fallback); }
+      catch (fallbackError) { throw new Error(`${roles[role]} settings and defaults are unavailable: ${fallbackError.message}`); }
+      return { settings: fallback, reason: `Using role defaults: ${error.message}` };
+    }
+  }
   const state = Object.fromEntries(Object.entries(roles).map(([id, name]) => [id, { id, name, status: "queued", messages: [], report: "", pause: 0 }]));
   const jobs = Object.fromEntries(Object.keys(stages).map((id) => [id, "queued"]));
   const reports = {};
@@ -233,9 +282,11 @@ export function createAgentTeam({ prepare, saveAttachments, openWorker, inspectW
   let workspace: TeamWorkspace | undefined;
   let outcome: Awaited<ReturnType<typeof inspectTeamWorkspace>> | undefined;
   let issue = "";
+  let disposition: "applied" | "discarded" | undefined;
   let brief = "", feedback = "";
   let directions: TeamDirection[] = [], earlierDirectionsOmitted = false;
   let publishHandoff: ReturnType<NonNullable<typeof captureHandoff>> | undefined;
+  let publishBlocker: TeamEscalation | undefined;
   let revision = 0, round = 0;
   const change = () => { revision++; };
   const append = (role, who, text) => {
@@ -250,6 +301,7 @@ export function createAgentTeam({ prepare, saveAttachments, openWorker, inspectW
     workers.clear();
     attachmentBlocks = [];
     publishHandoff = undefined;
+    publishBlocker = undefined;
     change();
   }
   function schedule() {
@@ -344,9 +396,9 @@ export function createAgentTeam({ prepare, saveAttachments, openWorker, inspectW
       let recovery: { who: string; text: string } | undefined;
       for (let attempt = 0; phase === "active"; attempt++) {
         const message = recovery ? `${recovery.text} Resume the same assignment without changing its scope. ${reportFormat}`
-          : attempt === 0 ? `${prompt}${direction ? `\n\nUser direction: ${direction}` : ""}`
+          : attempt === 0 ? `${prompt}${direction ? `\n\n${captureBlocker ? "Main chat direction" : "User direction"}: ${direction}` : ""}`
           : `One final attempt. Previous result: ${result?.report ?? "No valid completion report."} Use a different approach or report what is blocking you. ${reportFormat}`;
-        append(role, recovery?.who ?? (direction && attempt === 0 ? "You" : "Assignment"), direction && attempt === 0 ? direction : message);
+        append(role, recovery?.who ?? (direction && attempt === 0 ? (captureBlocker ? "Main chat" : "You") : "Assignment"), direction && attempt === 0 ? direction : message);
         recovery = undefined;
         response = undefined;
         failed = false;
@@ -415,7 +467,15 @@ export function createAgentTeam({ prepare, saveAttachments, openWorker, inspectW
     } else {
       jobs[id] = role.status = "paused";
       role.pause++;
-      role.report = result?.status === "blocked" ? result.report : `Two attempts without a completed result. ${result?.report ?? "No valid report received."} Send direction to continue.`;
+      role.report = result?.status === "blocked" ? result.report : `Two attempts without a completed result. ${result?.report ?? "No valid report received."}`;
+      if (publishBlocker && workspace) {
+        let delivered = false;
+        try {
+          delivered = publishBlocker({ round, role: stage.role, stage: id, pause: role.pause,
+            report: role.report.slice(0, 4000), brief, feedback, workspace: { ...workspace } });
+        } catch { /* Keep the blocker visible in Teams if delivery fails. */ }
+        if (!delivered) issue = "Could not hand off this blocker to the original Main chat. The role is still paused.";
+      }
     }
     change();
     schedule();
@@ -423,7 +483,7 @@ export function createAgentTeam({ prepare, saveAttachments, openWorker, inspectW
   return {
     snapshot(role?) {
       if (role !== undefined && !Object.hasOwn(state, role)) throw new Error("Unknown team role.");
-      return { phase, revision, round, workspace, result: phase === "done" ? outcome : undefined, issue, modelChoices, settings: structuredClone(settings), roles: Object.values(state).map(({ messages, ...data }) => ({ ...data, ...settings[data.id] })), messages: role === undefined ? undefined : state[role].messages };
+      return { phase, revision, round, maxRounds: maxTeamRounds, brief, feedback, disposition, mainChatManaged: !!captureBlocker, workspace, result: outcome, issue, modelChoices, settings: structuredClone(settings), roles: Object.values(state).map(({ messages, ...data }) => ({ ...data, ...settings[data.id], settingsFallback: settingsFallbacks[data.id] })), messages: role === undefined ? undefined : state[role].messages };
     },
     updateSettings(role, requested) {
       if (!Object.hasOwn(settings, role)) throw new Error("Unknown team role.");
@@ -431,15 +491,15 @@ export function createAgentTeam({ prepare, saveAttachments, openWorker, inspectW
       if (!requested || typeof requested !== "object" || Array.isArray(requested) || Object.keys(requested).some((key) => !["model", "effort"].includes(key))) throw new Error("Choose a model and thinking effort.");
       const next = { ...settings[role], ...requested };
       if (typeof next.model !== "string" || typeof next.effort !== "string") throw new Error("Choose a model and thinking effort.");
-      if (resolveRoleSettings) resolveRoleSettings(role, next);
-      else if (modelChoices.length && !modelChoices.some((choice) => choice.key === next.model && choice.efforts.includes(next.effort))) throw new Error(`Unsupported model or effort: ${next.model} / ${next.effort}.`);
-      settings[role] = next;
+      const resolved = validatedSettings(role, next);
+      settings[role] = resolved.settings;
+      settingsFallbacks[role] = resolved.reason;
       change();
       return this.snapshot();
     },
     start(task, attachments, followUp = false) {
       const previous = phase;
-      if (previous === "idle" && resolveRoleSettings) for (const [id, value] of Object.entries(settings)) resolveRoleSettings(id, value);
+      if (followUp && round >= maxTeamRounds) throw new Error(`The team has reached its ${maxTeamRounds}-round limit. Apply or discard the result in Main chat.`);
       if (previous !== (followUp ? "done" : "idle")) throw new Error(followUp ? "Wait for the team’s result before sending feedback." : "This chat already started a team.");
       if (typeof task !== "string" || task.length > 32_000 || (!task.trim() && attachments === undefined)) {
         throw new Error("Enter a task brief (up to 32,000 characters) or attach files.");
@@ -447,7 +507,11 @@ export function createAgentTeam({ prepare, saveAttachments, openWorker, inspectW
       const { items, textTotal } = attachments === undefined ? { items: [], textTotal: 0 } : parseAttachments(attachments, { allowAnsiColor: true });
       if (textTotal > INLINE_TEXT_LIMIT && !saveAttachments) throw new Error("Large team attachments are unavailable for this chat.");
       const request = task.trim() || "Use the attached materials. If there is no clear goal, ask the user before proceeding.";
+      const revalidated = !followUp ? Object.entries(settings).map(([role, value]) => [role, validatedSettings(role, value)] as const) : [];
+      const roundSettings = structuredClone(settings);
+      for (const [role, resolved] of revalidated) roundSettings[role] = resolved.settings;
       publishHandoff = captureHandoff?.();
+      publishBlocker = captureBlocker?.();
       phase = "starting";
       issue = "";
       change();
@@ -456,9 +520,13 @@ export function createAgentTeam({ prepare, saveAttachments, openWorker, inspectW
         try {
           if (textTotal > INLINE_TEXT_LIMIT) upload = await saveAttachments(items);
           if (phase !== "starting") { await upload?.discard(); return; }
-          workspace = await prepare({ hasImages: items.some((item) => item.type === "image"), workspace, settings: structuredClone(settings) });
+          workspace = await prepare({ hasImages: items.some((item) => item.type === "image"), workspace, settings: roundSettings });
           change();
           if (phase !== "starting") { await upload?.discard(); return; }
+          for (const [role, resolved] of revalidated) {
+            settings[role] = resolved.settings;
+            if (resolved.reason) settingsFallbacks[role] = resolved.reason;
+          }
           if (followUp) feedback = request;
           else brief = request;
           directions = [];
@@ -475,22 +543,51 @@ export function createAgentTeam({ prepare, saveAttachments, openWorker, inspectW
           if (phase !== "starting") return;
           phase = previous;
           publishHandoff = undefined;
+          publishBlocker = undefined;
           issue = error.message;
           change();
         }
       })();
     },
-    resume(role, pause, direction) {
+    resume(role, pause, direction, returnTo?: "backend" | "frontend") {
       if (phase !== "active" || !Object.hasOwn(state, role) || state[role].status !== "paused" || state[role].pause !== pause) throw new Error("That role is not waiting for this direction.");
       if (typeof direction !== "string" || !direction.trim() || direction.length > 8000) throw new Error("Enter direction (up to 8,000 characters).");
       const id = Object.keys(jobs).find((id) => jobs[id] === "paused" && stages[id].role === role);
+      if (returnTo !== undefined) {
+        if (id !== "review" || (returnTo !== "backend" && returnTo !== "frontend")) {
+          throw new Error("Only a paused final review can return work to Backend or Frontend.");
+        }
+        for (const stage of returnTo === "backend" ? ["backend", "frontend", "review"] : ["frontend", "review"]) {
+          jobs[stage] = "queued";
+          const worker = state[stages[stage].role];
+          worker.status = "queued";
+          worker.report = "";
+          delete reports[stage];
+        }
+      }
+      const nextStage = returnTo ?? id;
       const text = direction.trim();
-      directions.push({ role: roles[role], text });
+      directions.push({ role: roles[stages[nextStage].role], text });
       while (directions.reduce((size, item) => size + item.text.length + item.role.length, 0) > 16_000) {
         directions.shift();
         earlierDirectionsOmitted = true;
       }
-      void run(id, text);
+      issue = "";
+      void run(nextStage, text);
+    },
+    async finish(action: "apply" | "discard", cwd: string, isCurrent: () => boolean) {
+      if (phase !== "done" || !workspace || !outcome) throw new Error("Wait for the reviewed Teams result before finishing.");
+      if (action === "apply") {
+        phase = "finishing";
+        change();
+        try { await applyTeamResult(cwd, workspace, outcome, () => phase === "finishing" && isCurrent()); }
+        catch (error) {
+          if (phase === "finishing") { phase = "done"; change(); }
+          throw error;
+        }
+      }
+      disposition = action === "apply" ? "applied" : "discarded";
+      close();
     },
     close,
   };

@@ -101,6 +101,9 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
           if (!isSameOriginJson(req.headers, origin)) return reply(403, { error: "Expected a same-origin JSON request." });
           const body = JSON.parse((await readBody(req, CHAT_BODY_LIMIT)).toString("utf8"));
           if (!checkCurrent()) return;
+          if ((body?.action === "resume" || body?.action === "feedback") && chat.team.snapshot().mainChatManaged) {
+            throw new Error("Use Main chat for team direction and feedback.");
+          }
           if (body?.action === "start" || body?.action === "feedback") chat.team.start(body.brief, body.attachments, body.action === "feedback");
           else if (body?.action === "resume") chat.team.resume(body.role, body.pause, body.direction);
           else if (body?.action === "settings") {

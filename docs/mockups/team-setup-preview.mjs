@@ -18,8 +18,13 @@ await writeFile(join(repo, "api.js"), 'export const status = { label: "Not start
 git("add", "api.js");
 git("-c", "user.name=Preview", "-c", "user.email=preview@example.invalid", "commit", "-m", "chore: seed preview fixture");
 const branch = [{ id: "preview-intro", type: "message", message: { role: "assistant", content:
-  "**Teams preview · simulated workers.** Click **🎮** in the title bar. Write a brief and press the **up arrow** to start. The simulated implementers edit two files in one temporary Git checkout. Open the combined result, then use the **speech bubble with a plus** to send feedback to the same team. No model requests or changes to your repository." } }];
+  "**Teams preview · simulated workers.** Open **Teams** in the title bar. Click a role’s gear to try the floating settings, then switch directly to another gear. Write a brief and press **Enter** to start. Gears still open after start, with settings read-only. The simulated implementers edit two files in a temporary Git checkout. No model requests or changes to your repository." } }];
 const team = createAgentTeam({
+  modelChoices: [
+    { key: "openai/gpt-6.2-astra", label: "GPT-6.2 Astra (openai)", efforts: ["low", "medium", "high", "xhigh", "max"] },
+    { key: "openai/gpt-6.2-sol", label: "GPT-6.2 Sol (openai)", efforts: ["low", "medium", "high", "xhigh", "max"] },
+    { key: "openai/gpt-6-luna", label: "GPT-6 Luna (openai)", efforts: ["low", "medium", "high", "xhigh"] },
+  ],
   prepare: async ({ workspace }) => workspace ?? prepareTeamWorkspace(repo, scratch),
   saveAttachments: (items) => saveChatAttachments(scratch, "preview", items),
   openWorker: async ({ cwd, writable }) => {
