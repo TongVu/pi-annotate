@@ -2,10 +2,10 @@ import { teamPet } from "./team-pets.js";
 
 const labels = { queued: "Queued", working: "Working", paused: "Needs you", done: "Done", stopped: "Stopped" };
 
-export function mountAgentTeam(window, { api, attachmentUi, onViewChange, focusMain = () => {}, setTooltip = (target, text) => { target.title = text; } }) {
+export function mountAgentTeam(window, { api, attachmentUi, onViewChange, focusMain = () => {}, status = () => {}, setTooltip = (target, text) => { target.title = text; } }) {
   const { document } = window;
   const $ = (id) => document.getElementById(id);
-  const panel = $("team-panel"), viewToggle = $("team-view-toggle");
+  const panel = $("team-panel"), viewToggle = $("team-view-toggle"), autoDelegateToggle = $("team-auto-delegate");
   const rosterTab = $("team-roster-tab"), contextTab = $("team-context-tab");
   const roles = $("team-roles"), transcript = $("team-transcript");
   const setup = $("team-setup"), start = $("team-start"), submit = $("team-submit"), pick = $("team-attach"), files = $("team-files");
@@ -18,7 +18,33 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, focusM
   const cards = new Map(), drafts = new Map();
   let selected, saved = false, opened = false, supported = false, disconnected = false, unavailable = false;
   let snapshot, pending = false, actionError = "", selection = 0;
+  let autoDelegate, savingAutoDelegate = false;
   let transcriptRole, renderedMessages = [];
+
+  function updateAutoDelegate() {
+    if (!autoDelegateToggle) return;
+    autoDelegateToggle.hidden = saved || typeof autoDelegate !== "boolean";
+    autoDelegateToggle.disabled = savingAutoDelegate || disconnected || snapshot?.phase !== "idle";
+    autoDelegateToggle.setAttribute("aria-checked", String(autoDelegate === true));
+    setTooltip(autoDelegateToggle, autoDelegate ? "Auto-delegate to Teams is on. Main chat can start Teams when a request benefits from multiple roles." :
+      "Auto-delegate to Teams is off. Ask Main chat to delegate and review the brief before it starts.");
+  }
+  autoDelegateToggle?.addEventListener("click", async () => {
+    if (autoDelegateToggle.hidden || autoDelegateToggle.disabled) return;
+    const enabled = !autoDelegate;
+    savingAutoDelegate = true;
+    updateAutoDelegate();
+    try {
+      const result = await api("/api/team", { action: "auto-delegate", enabled });
+      autoDelegate = result.autoDelegate;
+    } catch (error) {
+      status(error.message, true);
+    } finally {
+      savingAutoDelegate = false;
+      updateAutoDelegate();
+      void refresh(true);
+    }
+  });
 
   function setView(id, result = false) {
     const roleChanged = id !== selected;
@@ -650,11 +676,14 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, focusM
       disconnected = false;
       viewToggle.hidden = false;
       if (result.roles) snapshot = result;
+      if (!savingAutoDelegate) autoDelegate = result.autoDelegate;
+      updateAutoDelegate();
       if (result.roles || reconnecting) render();
     } catch (error) {
       if (!current()) return;
       disconnected = true;
       unavailable = [401, 404, 410].includes(error.status);
+      updateAutoDelegate();
       render();
     } finally {
       if (sequence === request) refreshing = false;
@@ -730,6 +759,7 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, focusM
     setSavedView(value) {
       if (saved === value) return;
       saved = value;
+      updateAutoDelegate();
       if (saved) {
         viewToggle.hidden = true;
         togglePanel(false);

@@ -67,6 +67,131 @@ test("/chat is the sole registered browser command and opens a live session", as
   await assert.rejects(() => fetch(url.origin));
 });
 
+test("Main chat can prepare and confirm a note brief without forwarding unrelated messages or later note edits", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-chat-delegation-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const starts = [], branch = [];
+  const f = fixture(t, { createTeam: () => ({
+    snapshot: () => ({ phase: starts.length ? "active" : "idle", revision: starts.length, roles: [] }),
+    start: (...args) => starts.push(args), close() {},
+  }) });
+  f.ctx.sessionManager.getSessionDir = () => dir;
+  f.ctx.sessionManager.getBranch = () => branch;
+  const user = (id, content) => branch.push({ id, type: "message", message: { role: "user", content } });
+  const delegate = (params) => f.tools.get("pi_chat_delegate").execute("call", params, undefined, undefined, f.ctx);
+  await f.run();
+  const url = openedUrl(f.notices);
+  const headers = { Authorization: `Bearer ${url.hash.slice(1)}`, Origin: url.origin, "Content-Type": "application/json" };
+  const api = async (path, body) => {
+    const response = await fetch(url.origin + path, { headers, ...(body && { method: "POST", body: JSON.stringify(body) }) });
+    assert.ok(response.ok);
+    return response.json();
+  };
+  const original = { name: "reference.txt", mimeType: "text/plain", data: Buffer.from("Apply a muted blue border.").toString("base64") };
+  await api("/api/note", { markdown: "## Requirement\nChange the borders." });
+  await api("/api/note/attachments", { attachments: [original] });
+  user("private", "Unrelated private conversation");
+  await assert.rejects(delegate({ action: "read_note" }), /must specify the Markdown note/);
+  user("prepare", "Send my Markdown note and its attachments to Teams");
+  assert.equal((await api("/api/team")).autoDelegate, false);
+  const note = await delegate({ action: "read_note" });
+  assert.match(note.content[0].text, /Change the borders/);
+  const brief = "Update the **panel border**. Keep `<img>` as literal text.";
+  const draft = await delegate({ action: "prepare", brief, includeNoteAttachments: true });
+  assert.deepEqual(draft.details.delegation, { started: false, brief, attachments: ["reference.txt"] });
+  assert.deepEqual(starts, []);
+  branch.push({ id: "draft", type: "message", message: { role: "toolResult", toolName: "pi_chat_delegate", ...draft } });
+  const card = (await api("/api/response")).messages.at(-1);
+  assert.equal(card.role, "team-delegation");
+  assert.equal(card.html, undefined, "the brief is shown as literal text");
+  assert.equal(card.text, `${brief}\n\nAttachments:\nreference.txt\n\nReply ‘Start team’ to send this brief and these attachments.`);
+  await assert.rejects(delegate({ action: "confirm" }), /reply ‘Start team’/);
+  await api("/api/note", { markdown: "Do not send this later change." });
+  await api("/api/note/attachments", { attachments: [] });
+  user("confirm", "Start team");
+  await assert.rejects(delegate({ action: "prepare", brief: "Different work" }), /existing brief/);
+  await delegate({ action: "confirm" });
+  assert.deepEqual(starts, [[brief, [original]]]);
+  await assert.rejects(delegate({ action: "confirm" }), /already started/);
+});
+
+test("Auto-delegate grants a scoped start only to a new user run and can be revoked", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-chat-delegation-fast-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const starts = [], branch = [];
+  const f = fixture(t, { createTeam: () => ({
+    snapshot: () => ({ phase: "idle", revision: 0, roles: [] }),
+    start: (...args) => starts.push(args), close() {},
+  }) });
+  f.ctx.sessionManager.getBranch = () => branch;
+  let session = "first";
+  f.ctx.sessionManager.getSessionId = () => session;
+  f.ctx.sessionManager.getSessionDir = () => dir;
+  const user = (id, content) => branch.push({ id, type: "message", message: { role: "user", content } });
+  const delegate = (params) => f.tools.get("pi_chat_delegate").execute("call", params, undefined, undefined, f.ctx);
+  await f.run();
+  const request = async (body, { origin = true, revision = "" } = {}) => {
+    const url = openedUrl(f.notices);
+    return fetch(url.origin + "/api/team" + revision, { headers: { Authorization: `Bearer ${url.hash.slice(1)}`,
+      ...(origin && { Origin: url.origin }), "Content-Type": "application/json" }, ...(body && { method: "POST", body: JSON.stringify(body) }) });
+  };
+  const set = (enabled, options) => request({ action: "auto-delegate", enabled }, options);
+  const begin = (messageType = "user") => {
+    const sections = {};
+    f.handlers.get("before_agent_start")({ messageType, systemPromptOptions: { sections } }, f.ctx);
+    return sections.pi_chat_auto_delegation;
+  };
+  const end = () => f.handlers.get("agent_end")();
+  const brief = "Add an inactive status to the API and Dashboard. Test both layers and review the combined change.";
+  const auto = (extra = {}) => delegate({ action: "start", brief, ...extra });
+  const requirement = "Implement inactive session status in the API and Dashboard, with tests.";
+  assert.equal((await set(true, { origin: false })).status, 403);
+  assert.equal((await set("true")).status, 400);
+  assert.equal(begin(), undefined, "the default-off setting gives the model no auto-routing instructions");
+  user("off", requirement);
+  await assert.rejects(auto(), /not authorized/);
+  assert.deepEqual(starts, []);
+  assert.deepEqual(await (await set(true)).json(), { autoDelegate: true });
+  await assert.rejects(auto(), /not authorized/, "turning on the setting does not authorize an already-running prompt");
+  await f.run();
+  assert.deepEqual(await (await request(undefined, { revision: "?revision=0" })).json(), { revision: 0, autoDelegate: true });
+
+  assert.equal(begin("custom"), undefined);
+  await assert.rejects(auto(), /not authorized/, "a custom follow-up cannot authorize a start");
+  const guidance = begin();
+  assert.match(guidance, /Answer questions and brainstorming/);
+  assert.match(guidance, /Do small, focused changes yourself/);
+  assert.match(guidance, /multiple roles and a separate review/);
+  assert.match(guidance, /No special wording or confirmation/);
+  user("question", "What's an inactive status?");
+  end();
+  await assert.rejects(auto(), /not authorized/, "a settled run cannot start a team later");
+  assert.deepEqual(starts, []);
+
+  begin();
+  user("revoked", requirement);
+  assert.equal((await set(false)).status, 200);
+  assert.equal((await set(true)).status, 200);
+  await assert.rejects(auto(), /not authorized/, "revoking the setting invalidates the current turn even if re-enabled");
+  begin();
+  user("normal", requirement);
+  await assert.rejects(auto({ includeNoteAttachments: true }), /brief for review/);
+  assert.deepEqual(starts, []);
+  const result = await auto();
+  assert.deepEqual(result.details.delegation, { started: true, brief, attachments: [] });
+  assert.deepEqual(starts, [[brief, undefined]]);
+  await assert.rejects(auto(), /already prepared or started/);
+
+  f.handlers.get("session_before_tree")({}, f.ctx);
+  await assert.rejects(auto(), /this Main chat branch/);
+  assert.equal(begin(), undefined);
+  await f.run();
+  assert.equal((await (await request()).json()).autoDelegate, false, "the setting resets after moving branches");
+  session = "second";
+  await f.run();
+  assert.equal((await (await request()).json()).autoDelegate, false);
+});
+
 test("completed Teams rounds hand off once to their Main chat, independent of the browser", async (t) => {
   const delivered = [];
   const assignments = [];

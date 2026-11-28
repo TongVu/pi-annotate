@@ -93,14 +93,23 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
         if (req.method === "GET") {
           const role = url.searchParams.get("role") ?? undefined;
           const data = chat.team.snapshot(role);
-          if (url.searchParams.get("revision") === String(data.revision)) reply(200, { revision: data.revision });
-          else reply(200, data);
+          const autoDelegate = chat.teamDelegation?.get();
+          const snapshot = url.searchParams.get("revision") === String(data.revision) ? { revision: data.revision } : data;
+          reply(200, { ...snapshot, autoDelegate });
           return;
         }
         if (req.method === "POST") {
           if (!isSameOriginJson(req.headers, origin)) return reply(403, { error: "Expected a same-origin JSON request." });
           const body = JSON.parse((await readBody(req, CHAT_BODY_LIMIT)).toString("utf8"));
           if (!checkCurrent()) return;
+          if (body?.action === "auto-delegate") {
+            if (!chat.teamDelegation || typeof body.enabled !== "boolean" || Object.keys(body).length !== 2) {
+              throw new Error("Choose whether to auto-delegate to Teams.");
+            }
+            chat.teamDelegation.set(body.enabled);
+            reply(200, { autoDelegate: chat.teamDelegation.get() });
+            return;
+          }
           if (body?.action === "apply") {
             const snapshot = chat.team.snapshot();
             // This predicate is also called after awaits immediately before Git writes. It must

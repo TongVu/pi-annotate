@@ -212,7 +212,8 @@ textarea { width: 100%; resize: vertical; background: var(--bg); color: var(--te
 .user-turn::before, .user-turn::after { content: ""; position: absolute; top: 100%; right: -2px; width: 18px; height: 13px; pointer-events: none; }
 .user-turn::before { background: var(--muted); clip-path: path("M0 0H18V11Q18 14 15.5 12L2 2H0Z"); }
 .user-turn::after { background: var(--bg); clip-path: polygon(3px 0, 16px 0, 16px 9.5px); }
-.user-turn > .plain-message { white-space: pre-wrap; }
+.user-turn > .plain-message, .team-delegation-turn > div { white-space: pre-wrap; }
+.team-delegation-turn { padding-inline: 12px; border-inline-start: 2px solid var(--accent); font-size: 14px; }
 #response .user-turn > div > :first-child { margin-top: 0; }
 #response .user-turn > div > :last-child { margin-bottom: 0; }
 .chat-page #chat-tools { display: grid; grid-area: 1 / tools / -1 / rail; grid-template-rows: minmax(0, 1fr); min-height: 0; padding-top: calc((var(--chat-toolbar-height) - var(--chat-note-button-size)) / 2); overflow: hidden; }

@@ -140,6 +140,16 @@ export function mountTranscript(window, { fetchImage, isViewingLive, isCommentOp
 
   function renderTurn(message, session) {
     const turn = document.createElement("section");
+    if (message.role === "team-delegation") {
+      turn.className = "chat-turn team-delegation-turn";
+      turn.dataset.entryId = message.id;
+      const title = document.createElement("h2");
+      title.textContent = message.started ? "Team start requested" : "Team brief to review";
+      const body = document.createElement("div");
+      body.textContent = message.text;
+      turn.append(title, body);
+      return turn;
+    }
     const assistant = message.role === "assistant";
     const teamReport = message.role === "team-report";
     const handoff = message.role === "team-handoff";

@@ -123,6 +123,41 @@ test("chat polls slowly when idle or hidden and only fetches changed Teams detai
   assert.deepEqual(requests, ["/api/team?revision=1"], "opening Teams refreshes without waiting for the timer");
 });
 
+test("Auto-delegate to Teams sits beside Teams and reflects the chat preference", async (t) => {
+  let enabled = false;
+  const posts = [];
+  const f = await fixture(t, { chatFetch: async (path, body) => {
+    if (path === "/api/response") return { ok: true, json: async () => ({ mode: "chat", protocol: 2, team: true, cursor: null, busy: false, messages: [
+      { id: "draft", role: "team-delegation", started: false, text: "Add <img> literally.\n\nAttachments:\nreference.png" },
+    ] }) };
+    assert.match(path, /^\/api\/team\??/);
+    if (body) {
+      posts.push(body);
+      enabled = body.enabled;
+    }
+    return { ok: true, json: async () => ({ phase: "idle", revision: 0, roles: [], autoDelegate: enabled }) };
+  } });
+  const control = f.$("team-auto-delegate");
+  for (let i = 0; control.hidden && i < 50; i++) await tick();
+  assert.equal(control.hidden, false);
+  assert.equal(control.previousElementSibling, f.$("team-view-toggle"));
+  assert.equal(control.getAttribute("role"), "switch");
+  assert.equal(control.getAttribute("aria-label"), "Auto-delegate to Teams");
+  assert.equal(control.getAttribute("aria-checked"), "false");
+  const card = f.$("response").querySelector(".team-delegation-turn");
+  assert.match(card.textContent, /Team brief to review.*Add <img> literally/s);
+  assert.equal(card.querySelector("img"), null);
+  control.click();
+  assert.equal(control.disabled, true);
+  await tick();
+  assert.equal(control.getAttribute("aria-checked"), "true");
+  control.click();
+  await tick();
+  assert.equal(control.getAttribute("aria-checked"), "false");
+  assert.deepEqual(posts, [{ action: "auto-delegate", enabled: true }, { action: "auto-delegate", enabled: false }]);
+  assert.equal(f.$("team-panel").hidden, true, "switching the preference does not open or start Teams");
+});
+
 test("the composer model picker shows supported efforts and only allows changes while idle", async (t) => {
   const sol = { key: "openai/sol", label: "Sol" };
   const luna = { key: "openai/luna", label: "Luna" };

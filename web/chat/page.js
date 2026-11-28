@@ -435,7 +435,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     updateChat(data);
     status("");
     if (data.team === true) void import("./team.js").then(({ mountAgentTeam }) => {
-      team = mountAgentTeam(window, { api, attachmentUi, setTooltip, focusMain: composer.focus, onViewChange() {
+      team = mountAgentTeam(window, { api, attachmentUi, setTooltip, status, focusMain: composer.focus, onViewChange() {
         annotations.hideSelectionAction();
         updateControls();
       } });
