@@ -12,8 +12,8 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, focusM
   const direction = $("team-direction"), stop = $("team-stop"), cancelStart = $("team-cancel-start");
   const brief = $("team-brief"), input = $("team-input"), resume = $("team-resume");
   const attachmentList = $("team-attachments"), resultView = $("team-result");
-  const feedbackButton = $("team-feedback"), resultButton = $("team-open-result");
-  let composingFeedback = false, showingResult = false, displayedRound = 0;
+  const feedbackButton = $("team-feedback"), resultButton = $("team-open-result"), applyButton = $("team-apply-result");
+  let composingFeedback = false, showingResult = false, displayedRound = 0, selectedFileKey = "", applyInFlight = false;
   let attachments = [], readingFiles = false, fileError = "";
   const cards = new Map(), drafts = new Map();
   let selected, saved = false, opened = false, supported = false, disconnected = false, unavailable = false;
@@ -51,10 +51,69 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, focusM
   }
   rosterTab.addEventListener("click", () => selectTab(false));
   contextTab.addEventListener("click", () => selectTab(true));
+  const workspacePath = $("team-result-workspace"), copyWorkspace = $("team-copy-workspace"), copyStatus = $("team-workspace-copy-status");
+  for (const button of [resultButton, applyButton, copyWorkspace]) setTooltip(button, button.getAttribute("aria-label"));
+  copyWorkspace.addEventListener("click", async () => {
+    const path = workspacePath.textContent;
+    if (!path) return;
+    let message;
+    try {
+      await window.navigator.clipboard.writeText(path);
+      message = "Workspace path copied.";
+    } catch {
+      message = "Could not copy the workspace path. Select it to copy manually.";
+    }
+    if (workspacePath.textContent === path) copyStatus.textContent = message;
+  });
   resultButton.addEventListener("click", () => {
     if (resultButton.hidden) return;
     setView(undefined, true);
     $("team-result-title").focus();
+  });
+  applyButton.addEventListener("click", () => {
+    if (applyButton.hidden || applyInFlight || !snapshot?.applyToken) return;
+    const dialog = $("team-apply-dialog");
+    dialog.dataset.round = String(snapshot.round);
+    dialog.dataset.token = snapshot.applyToken;
+    $("team-apply-status").textContent = "";
+    $("team-apply-confirm").disabled = false;
+    dialog.showModal();
+    $("team-apply-cancel").focus();
+  });
+  $("team-apply-cancel").addEventListener("click", () => $("team-apply-dialog").close());
+  $("team-result-files").addEventListener("keydown", (event) => {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    const options = [...$("team-result-files").querySelectorAll('[role="option"]')];
+    if (!options.length) return;
+    event.preventDefault();
+    const current = options.indexOf(document.activeElement);
+    const index = event.key === "Home" ? 0 : event.key === "End" ? options.length - 1 :
+      Math.max(0, Math.min(options.length - 1, (current < 0 ? 0 : current) + (event.key === "ArrowDown" ? 1 : -1)));
+    options[index].click();
+  });
+  $("team-apply-confirm").addEventListener("click", async () => {
+    const dialog = $("team-apply-dialog"), confirm = $("team-apply-confirm");
+    if (applyInFlight) return;
+    const round = Number(dialog.dataset.round), applyToken = dialog.dataset.token;
+    if (!snapshot || snapshot.phase !== "done" || round !== snapshot.round || applyToken !== snapshot.applyToken) {
+      $("team-apply-status").textContent = "This confirmation is stale. Close it and review the current result.";
+      return;
+    }
+    applyInFlight = true; confirm.disabled = true; applyButton.disabled = true;
+    $("team-apply-status").textContent = "Applying reviewed changes…";
+    try {
+      await api("/api/team", { action: "apply", round, applyToken });
+      $("team-apply-status").textContent = "Applied to the original checkout, unstaged.";
+      await refresh(true);
+      window.setTimeout(() => { if (dialog.open) dialog.close(); }, 900);
+    } catch (error) {
+      $("team-apply-status").textContent = `${error.message} Your review is still available; refresh and review before retrying.`;
+      confirm.disabled = false;
+      await refresh(true);
+    } finally {
+      applyInFlight = false;
+      render();
+    }
   });
 
   function togglePanel(open) {
@@ -247,6 +306,8 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, focusM
     resultView.hidden = !showResult;
     panel.hidden = !visible;
     resultButton.hidden = !hasResult;
+    applyButton.hidden = !(phase === "done" && snapshot.applyToken);
+    applyButton.disabled = pending || applyInFlight;
     if (changed) onViewChange();
     if (restoreFocus) {
       if (visible && phase === "active") focusMain();
@@ -396,6 +457,75 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, focusM
     await act({ action: "settings", role: roleId, settings }, button);
   }
 
+  function renderFileDiff(result) {
+    const list = $("team-result-files"), pane = $("team-result-diff"), heading = $("team-diff-heading");
+    // Only backend-verified character ranges may associate a file with patch text.
+    const source = String(result.diff || "");
+    const entries = Array.isArray(result.changedFiles) ? result.changedFiles.map((file) => {
+      const start = file.start, end = file.end;
+      const hasRange = Number.isInteger(start) && Number.isInteger(end) && start >= 0 && end > start && end <= source.length;
+      return { key: String(file.key), path: String(file.path), status: String(file.status || "M"), patch: hasRange ? source.slice(start, end) : "" };
+    }) : [];
+    const count = entries.length;
+    $("team-result-file-count").textContent = count ? (result.truncated ? `${count} shown` : `${count} ${count === 1 ? "file" : "files"}`) : "";
+    if (!entries.some(({ key }) => key === selectedFileKey)) selectedFileKey = entries[0]?.key || "";
+    list.replaceChildren();
+    list.hidden = !count;
+    for (const file of entries) {
+      const button = document.createElement("button");
+      button.type = "button"; button.className = "team-file-button"; button.setAttribute("role", "option");
+      button.setAttribute("aria-selected", String(file.key === selectedFileKey));
+      const status = file.status === "?" ? "A" : file.status;
+      const label = { A: "Added", M: "Modified", D: "Deleted", R: "Renamed", C: "Copied", T: "Type changed" }[status];
+      if (label) button.setAttribute("aria-label", `${label}: ${file.path}`);
+      const badge = document.createElement("span"), path = document.createElement("span");
+      badge.className = "team-file-status";
+      badge.dataset.status = status;
+      badge.textContent = status;
+      path.textContent = file.path;
+      button.append(badge, " ", path);
+      button.addEventListener("click", () => {
+        selectedFileKey = file.key;
+        renderFileDiff(result);
+        list.querySelector('[aria-selected="true"]')?.focus({ preventScroll: true });
+      });
+      list.append(button);
+    }
+    const selected = entries.find(({ key }) => key === selectedFileKey);
+    heading.textContent = selected ? selected.path : "File diff";
+    pane.replaceChildren();
+    if (!entries.length) {
+      pane.textContent = result.files ? "Changed-file metadata is unavailable for this result; no file diff can be safely associated." : "No changes to display.";
+      return;
+    }
+    if (!selected?.patch || /^(?:Binary files .* differ|GIT binary patch)$/m.test(selected.patch)) {
+      pane.textContent = "No displayable text patch is available for this file (it may be binary or outside the preview).";
+      return;
+    }
+    const lines = document.createElement("div");
+    lines.className = "team-diff-lines";
+    let oldLine = 0, newLine = 0, inHunk = false;
+    for (let line of selected.patch.replace(/\n$/, "").split("\n")) {
+      if (line.startsWith("@@")) {
+        const match = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+        if (!match) { inHunk = false; continue; }
+        oldLine = Number(match[1]); newLine = Number(match[2]); inHunk = true;
+        const row = document.createElement("div"); row.className = "team-diff-hunk"; row.textContent = line; lines.append(row); continue;
+      }
+      if (!inHunk || /^\\ /.test(line)) continue;
+      const row = document.createElement("div"), oldNo = document.createElement("span"), newNo = document.createElement("span"), mark = document.createElement("span"), text = document.createElement("span");
+      row.className = "team-diff-line";
+      let kind = "context";
+      if (line.startsWith("+")) { kind = "add"; newNo.textContent = String(newLine++); mark.textContent = "+"; text.textContent = line.slice(1); }
+      else if (line.startsWith("-")) { kind = "remove"; oldNo.textContent = String(oldLine++); mark.textContent = "−"; text.textContent = line.slice(1); }
+      else { if (line.startsWith(" ")) line = line.slice(1); oldNo.textContent = String(oldLine++); newNo.textContent = String(newLine++); text.textContent = line; }
+      row.classList.add(`team-diff-${kind}`); oldNo.className = "team-diff-number"; newNo.className = "team-diff-number"; mark.className = "team-diff-marker"; text.className = "team-diff-text";
+      row.append(oldNo, newNo, mark, text); lines.append(row);
+    }
+    if (lines.childElementCount) pane.append(lines);
+    else pane.textContent = "No text diff is available for this file (metadata-only change).";
+  }
+
   function render() {
     if (!snapshot) return;
     const { phase, round, maxRounds, issue, workspace, result, messages, mainChatManaged, disposition, feedback } = snapshot;
@@ -429,13 +559,19 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, focusM
     if (result) {
       $("team-round").textContent = `${progress} · ${roundLabel}`;
       $("team-result-title").textContent = title || "Team result";
-      $("team-result-note").textContent = disposition || phase === "stopped" ? "The team workspace was retained." :
-        round >= maxRounds ? "Round limit reached. In Main chat, decide whether to apply or discard the reviewed changes." :
-          "See Main chat for the review and recommendation. Nothing has been applied.";
-      $("team-result-workspace").textContent = workspace.cwd;
-      $("team-result-files").textContent = result.files || "No code changes.";
-      $("team-result-diff").textContent = result.diff || "No patch to display.";
+      $("team-result-note").textContent = disposition === "applied" ? "Applied to the original checkout, unstaged." : disposition === "discarded" ? "The reviewed result was discarded; the original checkout was not changed." : phase === "stopped" ? "The team workspace was retained; nothing was applied." :
+        round >= maxRounds ? "Round limit reached. Review in Main chat, then apply here or in Main chat, or discard the result." :
+          "See Main chat for the review and recommendation. Apply here or in Main chat, or discard. Nothing has been applied.";
+      const path = workspace?.cwd ?? "";
+      if (workspacePath.textContent !== path) {
+        workspacePath.textContent = path;
+        copyStatus.textContent = "";
+      }
+      copyWorkspace.disabled = !path;
+      renderFileDiff(result);
       $("team-result-truncated").hidden = !result.truncated;
+      applyButton.hidden = !(phase === "done" && snapshot.applyToken);
+      applyButton.disabled = pending || applyInFlight;
     }
     const waiting = snapshot.roles.filter(({ status }) => status === "paused").length;
     const attention = !waiting ? "" : mainChatManaged ? "Blocked · see Main chat" : `${waiting} ${waiting === 1 ? "role needs" : "roles need"} your input`;

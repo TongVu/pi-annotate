@@ -232,12 +232,24 @@
         </div>
         <p id="team-result-note" class="team-result-note"></p>
         <details class="team-requirement"><summary>Original requirement and feedback</summary><p id="team-result-brief"></p><section><h3>Latest feedback</h3><p id="team-result-feedback"></p></section></details>
-        <p>Workspace: <code id="team-result-workspace"></code></p>
-        <h2>Changed files</h2>
-        <pre id="team-result-files"></pre>
-        <h2 id="team-diff-heading">Combined diff</h2>
-        <pre id="team-result-diff" tabindex="0" aria-labelledby="team-diff-heading"></pre>
+        <div class="team-workspace-card">
+          <div>
+            <h2>Workspace</h2>
+            <code id="team-result-workspace"></code>
+            <p id="team-workspace-copy-status" role="status"></p>
+          </div>
+          <button id="team-copy-workspace" type="button" class="secondary team-icon" aria-label="Copy workspace path" title="Copy workspace path">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>
+          </button>
+        </div>
         <p id="team-result-truncated" class="team-result-note" hidden>The preview is limited. Open the workspace for the full changes.</p>
+        <section class="team-diff-card" aria-labelledby="team-files-heading">
+          <header class="team-diff-header"><h2 id="team-files-heading">Changed files</h2><span id="team-result-file-count"></span></header>
+          <div class="team-diff-layout">
+            <div id="team-result-files" role="listbox" aria-labelledby="team-files-heading"></div>
+            <section class="team-diff-panel" aria-labelledby="team-diff-heading"><h3 id="team-diff-heading">Select a file to review</h3><div id="team-result-diff" tabindex="0" aria-labelledby="team-diff-heading"></div></section>
+          </div>
+        </section>
       </div>
     </section>
     <section id="team-conversation" aria-labelledby="team-role-title" hidden>
@@ -316,7 +328,10 @@
     <p id="team-attention" role="status"></p>
     <div id="team-roster-view">
       <div id="team-roles" role="group" aria-label="Team roles" hidden></div>
-      <button id="team-open-result" type="button" class="secondary" aria-controls="team-result" hidden>View team result</button>
+      <div class="team-result-actions">
+        <button id="team-open-result" type="button" class="secondary" aria-label="View team result" title="View team result" aria-controls="team-result" hidden><span class="team-result-action-icon" aria-hidden="true">⁉️</span> <span>View team result</span></button>
+        <button id="team-apply-result" type="button" class="secondary" aria-label="Apply team result" title="Apply team result" aria-haspopup="dialog" aria-controls="team-apply-dialog" hidden><span class="team-result-action-icon" aria-hidden="true">✅</span> <span>Apply team result</span></button>
+      </div>
       <button id="team-stop" type="button" class="secondary" hidden>
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
         <span>Stop team</span>
@@ -330,6 +345,10 @@
     </section>
     <p id="team-status" role="status"></p>
   </aside>
+  <dialog id="team-apply-dialog" aria-labelledby="team-apply-title" aria-describedby="team-apply-description">
+    <h2 id="team-apply-title">Apply team result?</h2><p id="team-apply-description">This applies the whole reviewed patch to the original checkout, unstaged. It does not commit or push.</p>
+    <p id="team-apply-status" role="status" aria-live="polite"></p><div class="actions"><button id="team-apply-cancel" type="button" class="secondary">Cancel</button><button id="team-apply-confirm" type="button">Apply team result</button></div>
+  </dialog>
   <dialog id="chat-note-dialog" aria-labelledby="chat-note-title"></dialog>
   <dialog id="rename-session-dialog" aria-labelledby="rename-session-title">
     <form id="rename-session-form">

@@ -79,7 +79,15 @@ test("start revalidates role defaults and never substitutes an arbitrary model",
 });
 
 const paths = { cwd: "/tmp/shared-team", head: "base" };
-const exampleChanges = { files: " M api.js\n?? ui.js", diff: "diff --git a/api.js b/api.js\n+<img src=x>\n+renderPanel()", truncated: false };
+const apiPatch = "diff --git a/api.js b/api.js\nindex 1..2 100644\n--- a/api.js\n+++ b/api.js\n@@ -1,2 +1,3 @@\n--- old content\n+++ new content\n context survives\n+<img src=x>\n";
+const uiPatch = "diff --git a/ui.js b/ui.js\nnew file mode 100644\n--- /dev/null\n+++ b/ui.js\n@@ -0,0 +1 @@\n+UI file content\n";
+const emptyPatch = "diff --git a/dev/null b/empty.txt\nnew file mode 100644\nindex 0000000..e69de29\n";
+const exampleDiff = apiPatch + uiPatch + emptyPatch;
+const exampleChanges = { files: " M api.js\n?? ui.js\n?? empty.txt", diff: exampleDiff, truncated: false, changedFiles: [
+  { key: "api", path: "api.js", status: "M", start: 0, end: apiPatch.length },
+  { key: "ui", path: "ui.js", status: "?", start: apiPatch.length, end: apiPatch.length + uiPatch.length },
+  { key: "empty", path: "empty.txt", status: "?", start: apiPatch.length + uiPatch.length, end: exampleDiff.length },
+] };
 function mockTeam({ prepare = async ({ workspace }) => workspace ?? paths, saveAttachments, inspectWorkspace = async () => exampleChanges, modelChoices, resolveRoleSettings, captureHandoff, assistStaleEdit } = {}) {
   const calls = [];
   const disposed = [];
@@ -244,12 +252,18 @@ test("the shared worktree starts from committed HEAD, exposes the combined diff,
   assert.equal(await readFile(join(root, "app.txt"), "utf8"), "base");
   await writeFile(await teamWritePath(root, "app.txt"), "backend edits");
   await writeFile(await teamWritePath(root, "ui.txt"), "frontend uses backend edits");
+  const pathspecName = ":(glob)*.txt";
+  await writeFile(await teamWritePath(root, pathspecName), "pathspec-like filename");
   const result = await inspectTeamWorkspace(workspace, true);
-  assert.match(result.files, / M app\.txt\n\?\? ui\.txt/);
+  assert.match(result.files, / M app\.txt/);
+  assert.match(result.files, /\?\? ui\.txt/);
   assert.match(result.diff, /\+backend edits/);
   assert.match(result.diff, /\+frontend uses backend edits/);
   assert.equal(result.truncated, false);
   assert.deepEqual(result.patchCheck, { status: "passed" });
+  const pathspecFile = result.changedFiles.find(({ path }) => path === pathspecName);
+  assert.ok(pathspecFile && pathspecFile.start !== null && pathspecFile.end !== null);
+  assert.match(result.diff.slice(pathspecFile.start, pathspecFile.end), /\+pathspec-like filename/);
   await writeFile(join(root, "ui.txt"), "trailing whitespace \n");
   const bad = await inspectTeamWorkspace(workspace, true);
   assert.equal(bad.patchCheck.status, "issues");
@@ -311,11 +325,25 @@ test("apply checks the reviewed Git patch and leaves the result unstaged", async
     calls[stage].finish("done", "Reviewed work");
   }
   await until(() => team.snapshot().phase === "done", "review did not finish");
+  const confirmation = team.snapshot();
+  assert.equal(typeof confirmation.applyToken, "string");
+  assert.equal(team.validateApplyToken(confirmation.applyToken), true);
+  assert.equal(team.validateApplyToken(`${confirmation.applyToken}stale`), false);
+  const originalToken = confirmation.applyToken;
+  assert.deepEqual(confirmation.result.changedFiles.map(({ path, start, end }) => [path, start, end]), [
+    ["app.txt", confirmation.result.diff.indexOf("diff --git"), confirmation.result.diff.lastIndexOf("diff --git")],
+    ["new.txt", confirmation.result.diff.lastIndexOf("diff --git"), confirmation.result.diff.length],
+  ]);
   await writeFile(join(workspace.cwd, "app.txt"), "not reviewed\n");
   await assert.rejects(team.finish("apply", repo, () => true), /changed after review/);
+  assert.equal(team.validateApplyToken(originalToken), false, "failed confirmation receives a fresh token");
   await writeFile(join(workspace.cwd, "app.txt"), "team edit\n");
   await writeFile(join(repo, "app.txt"), "user edit\n");
+  const dirtyCheckoutToken = team.snapshot().applyToken;
   await assert.rejects(team.finish("apply", repo, () => true), /clean checkout/);
+  assert.equal(team.validateApplyToken(dirtyCheckoutToken), false, "dirty-checkout rejection invalidates its token");
+  assert.equal(typeof team.snapshot().applyToken, "string");
+  assert.notEqual(team.snapshot().applyToken, dirtyCheckoutToken);
   assert.equal(await readFile(join(repo, "app.txt"), "utf8"), "user edit\n");
   await writeFile(join(repo, "app.txt"), "base\n");
   await assert.rejects(team.finish("apply", repo, () => false), /changed/);
@@ -324,6 +352,65 @@ test("apply checks the reviewed Git patch and leaves the result unstaged", async
   assert.equal(git("rev-parse", "HEAD").trim(), workspace.head);
   assert.match(git("status", "--porcelain"), / M app\.txt\n\?\? new\.txt/);
   assert.equal(await readFile(join(repo, "new.txt"), "utf8"), "new file\n");
+});
+
+test("team API binds explicit apply to a same-origin current-round token and rejects stale confirmations", async (t) => {
+  let accepted = 0;
+  let branchCurrent = false;
+  const team = {
+    snapshot: () => ({ round: 2, phase: "done" }),
+    validateApplyToken: (token) => token === "current-token",
+    finish: async (action, cwd, isCurrent) => { assert.equal(action, "apply"); assert.equal(cwd, "/checkout"); assert.equal(isCurrent(), true); accepted++; },
+    close() {},
+  };
+  const opened = await startChatServer({ chat: { team, getCwd: () => "/checkout", isTeamApplyCurrent: () => branchCurrent } });
+  t.after(opened.close);
+  const url = new URL(opened.url);
+  const headers = { Authorization: `Bearer ${url.hash.slice(1)}`, Origin: url.origin, "Content-Type": "application/json" };
+  const send = (body, overrides) => fetch(`${url.origin}/api/team`, { method: "POST", headers: { ...headers, ...overrides }, body: JSON.stringify(body) });
+  const confirmation = { action: "apply", round: 2, applyToken: "current-token" };
+  assert.equal((await send(confirmation, { Authorization: "" })).status, 401);
+  assert.equal((await send(confirmation, { Origin: "http://another.invalid" })).status, 403);
+  assert.equal((await send({ action: "apply", round: 1, applyToken: "current-token" })).status, 400);
+  assert.equal((await send({ action: "apply", round: 2, applyToken: "stale-token" })).status, 400);
+  assert.equal(accepted, 0);
+  assert.equal((await send(confirmation)).status, 400, "reopened/old-branch listener cannot apply");
+  assert.equal(accepted, 0);
+  branchCurrent = true;
+  assert.equal((await send(confirmation)).status, 200);
+  assert.equal(accepted, 1);
+});
+
+test("apply listener currency predicate rejects a post-confirmation stale transition once before writing", async (t) => {
+  const checkout = await mkdtemp(join(tmpdir(), "team-stale-listener-"));
+  t.after(() => rm(checkout, { recursive: true, force: true }));
+  const target = join(checkout, "reviewed.txt");
+  await writeFile(target, "unchanged checkout\\n");
+  let listenerCurrent = true;
+  let writes = 0;
+  const team = {
+    snapshot: () => ({ round: 1, phase: "done" }),
+    validateApplyToken: (token) => token === "valid-token",
+    finish: async (_action, _cwd, isCurrent) => {
+      listenerCurrent = false; // Simulate a branch/listener transition after confirmation but before the write.
+      if (!isCurrent()) throw new Error("The Main chat or team changed. No changes were applied.");
+      writes++;
+      await writeFile(target, "unexpected write\\n");
+    },
+    close() {},
+  };
+  const opened = await startChatServer({ chat: { team, getCwd: () => checkout, isTeamApplyCurrent: () => listenerCurrent }, isCurrent: () => listenerCurrent });
+  t.after(opened.close);
+  const url = new URL(opened.url);
+  const response = await fetch(`${url.origin}/api/team`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${url.hash.slice(1)}`, Origin: url.origin, "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "apply", round: 1, applyToken: "valid-token" }),
+  });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /changed/);
+  assert.equal(writes, 0);
+  assert.equal(await readFile(target, "utf8"), "unchanged checkout\\n");
 });
 
 test("team API requires the live chat token and same-origin POSTs; close disposes workers without handing off", async (t) => {
@@ -421,9 +508,16 @@ test("served Teams view sends attachments, shows the combined result, and gives 
   const dom = new JSDOM(await (await fetch(opened.url)).text(), { url: opened.url });
   const { window } = dom;
   t.after(() => window.close());
-  window.fetch = (path, opts = {}) => fetch(url.origin + path, { ...opts,
-    headers: { ...opts.headers, ...(opts.method === "POST" ? { Origin: url.origin } : {}) },
-  });
+  let postRequests = 0;
+  window.fetch = (path, opts = {}) => {
+    if (opts.method === "POST") postRequests++;
+    return fetch(url.origin + path, { ...opts,
+      headers: { ...opts.headers, ...(opts.method === "POST" ? { Origin: url.origin } : {}) },
+    });
+  };
+  // jsdom does not implement native dialog methods; retain the browser's open/close state for this UI test.
+  window.HTMLDialogElement.prototype.showModal = function() { this.open = true; };
+  window.HTMLDialogElement.prototype.close = function() { this.open = false; };
   const polls = [];
   const originalSetTimeout = window.setTimeout.bind(window);
   window.setTimeout = (fn, ms, ...args) => ms === 1000 && fn.name === "poll" ? polls.push(fn) : originalSetTimeout(fn, ms, ...args);
@@ -539,16 +633,73 @@ test("served Teams view sends attachments, shows the combined result, and gives 
   await until(() => !$("team-open-result").hidden, "Combined result did not become available");
   assert.equal($("team-result").hidden, true, "completion must not interrupt Main chat");
   assert.equal(composer.readOnly, false);
+  for (const [id, icon, label] of [["team-open-result", "⁉️", "View team result"], ["team-apply-result", "✅", "Apply team result"]]) {
+    assert.equal($(id).textContent, `${icon} ${label}`);
+    assert.equal($(id).getAttribute("aria-label"), label);
+    assert.equal($(id).firstElementChild.getAttribute("aria-hidden"), "true");
+  }
   $("team-open-result").click();
   assert.equal($("team-result").hidden, false);
   assert.equal(heading.parentElement.id, "conversation");
   assert.match($("team-result-workspace").textContent, /shared-team/);
+  const copied = [];
+  const clipboard = { writeText: async (text) => { copied.push(text); } };
+  Object.defineProperty(window.navigator, "clipboard", { value: clipboard });
+  assert.equal($("team-copy-workspace").getAttribute("aria-label"), "Copy workspace path");
+  $("team-copy-workspace").click();
+  await until(() => $("team-workspace-copy-status").textContent === "Workspace path copied.");
+  assert.deepEqual(copied, [$("team-result-workspace").textContent]);
+  clipboard.writeText = async () => { throw new Error("Not permitted"); };
+  $("team-copy-workspace").click();
+  await until(() => $("team-workspace-copy-status").textContent.includes("copy manually"));
   assert.equal($("team-result-title").textContent, "Build the status screen");
   assert.equal($("team-result-brief").textContent, "Build the status screen");
   assert.match($("team-round").textContent, /Reviewed.*Round 1 of 3/);
   assert.match($("team-result-files").textContent, /api\.js[\s\S]+ui\.js/);
+  assert.equal($("team-result-file-count").textContent, "3 files");
+  const resultFiles = [...$("team-result-files").querySelectorAll('[role="option"]')];
+  assert.equal(resultFiles.length, 3);
+  assert.equal(resultFiles[0].getAttribute("aria-selected"), "true", "select the first changed file by default");
   assert.match($("team-result-diff").textContent, /<img src=x>/);
+  assert.match($("team-result-diff").textContent, /@@ -1,2 \+1,3 @@/);
   assert.equal($("team-result-diff").querySelector("img"), null);
+  const displayedDiffRows = [...$("team-result-diff").querySelectorAll(".team-diff-line")];
+  assert.equal(displayedDiffRows.length, 4);
+  assert.deepEqual([...displayedDiffRows[0].children].map((node) => node.textContent), ["1", "", "−", "-- old content"]);
+  assert.equal(displayedDiffRows[0].classList.contains("team-diff-remove"), true);
+  assert.deepEqual([...displayedDiffRows[1].children].map((node) => node.textContent), ["", "1", "+", "++ new content"]);
+  assert.equal(displayedDiffRows[1].classList.contains("team-diff-add"), true);
+  assert.deepEqual([...displayedDiffRows[2].children].map((node) => node.textContent), ["2", "2", "", "context survives"]);
+  assert.deepEqual([...displayedDiffRows[3].children].map((node) => node.textContent), ["", "3", "+", "<img src=x>"]);
+  resultFiles[1].click();
+  assert.equal($("team-result-files").querySelector('[aria-selected="true"]').textContent, "A ui.js");
+  assert.equal($("team-result-files").querySelector('[aria-selected="true"]').getAttribute("aria-label"), "Added: ui.js");
+  assert.match($("team-result-diff").textContent, /UI file content/);
+  assert.doesNotMatch($("team-result-diff").textContent, /<img src=x>/, "file switching never shows another file's patch");
+  $("team-result-files").querySelectorAll('[role="option"]')[2].click();
+  assert.equal($("team-result-files").querySelector('[aria-selected="true"]').textContent, "A empty.txt");
+  assert.match($("team-result-diff").textContent, /No text diff is available.*metadata-only change/);
+  assert.equal($("team-result-diff").querySelectorAll(".team-diff-line, .team-diff-hunk").length, 0, "file metadata is not shown as numbered diff content");
+  $("team-result-files").querySelector('[role="option"]').click();
+  const currentFirstFile = $("team-result-files").querySelector('[role="option"]');
+  currentFirstFile.focus();
+  currentFirstFile.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+  assert.equal($("team-result-files").querySelector('[aria-selected="true"]').textContent, "A ui.js", "arrow keys switch files");
+  $("team-result-files").querySelector('[role="option"]').click();
+  assert.equal($("team-apply-result").hidden, false, "Apply is available for the reviewed result");
+  assert.equal($("team-apply-result").previousElementSibling, $("team-open-result"), "Apply sits beside View");
+  const postsBeforeCancel = postRequests;
+  $("team-apply-result").click();
+  assert.equal($("team-apply-dialog").open, true);
+  assert.match($("team-apply-description").textContent, /original checkout.*unstaged.*does not commit or push/i);
+  $("team-apply-cancel").click();
+  assert.equal($("team-apply-dialog").open, false);
+  assert.equal(postRequests, postsBeforeCancel, "Cancel sends no apply request");
+  $("team-apply-result").click();
+  const escapeCancel = new window.Event("cancel", { cancelable: true });
+  assert.equal($("team-apply-dialog").dispatchEvent(escapeCancel), true, "Escape cancellation is not prevented");
+  if (!escapeCancel.defaultPrevented) $("team-apply-dialog").close();
+  assert.equal(postRequests, postsBeforeCancel, "Escape sends no apply request");
   toggle.click();
   assert.equal($("team-result").hidden, true, "main chat view replaces the team result without discarding it");
   toggle.click();
@@ -568,6 +719,35 @@ test("served Teams view sends attachments, shows the combined result, and gives 
   assert.match(calls[5].text, /Build the status screen[\s\S]+User feedback for round 2:\nMake the status easier to read/);
   assert.equal(calls[5].options.images, undefined, "do not resend past round attachments");
   assert.match(JSON.stringify(team.snapshot("po").messages), /Scope approved/, "the role transcript is retained");
+});
+
+test("team result distinguishes binary, unavailable, truncated, and empty previews", async (t) => {
+  const dom = new JSDOM(await readFile(new URL("../web/index.html", import.meta.url), "utf8"));
+  t.after(() => dom.window.close());
+  const d = dom.window.document;
+  const binaryPatch = `diff --git a/image "quoted".png b/image "quoted".png
+GIT binary patch
+literal 1
+`;
+  const snapshot = { phase: "done", revision: 1, round: 1, maxRounds: 3, brief: "Preview files", roles: [],
+    workspace: { cwd: "/tmp/team" }, result: { files: "binary and text", diff: binaryPatch, truncated: true, changedFiles: [
+      { key: "binary", path: 'image "quoted".png', status: "M", start: 0, end: binaryPatch.length },
+      { key: "text", path: "src/not-in-preview.txt", status: "M", start: null, end: null },
+    ] } };
+  const ui = mountAgentTeam(dom.window, { onViewChange() {}, api: async (_path) => snapshot });
+  await ui.refresh();
+  d.getElementById("team-view-toggle").click();
+  d.getElementById("team-open-result").click();
+  assert.equal(d.getElementById("team-result-truncated").hidden, false);
+  assert.match(d.getElementById("team-result-files").textContent, /image "quoted"\.png/, "paths render literally");
+  assert.match(d.getElementById("team-result-diff").textContent, /No displayable text patch/);
+  d.getElementById("team-result-files").querySelectorAll('[role="option"]')[1].click();
+  assert.match(d.getElementById("team-result-diff").textContent, /No displayable text patch/, "null range does not borrow another file's diff");
+  snapshot.result = { files: "", diff: "", truncated: false, changedFiles: [] };
+  snapshot.revision++;
+  await ui.refresh(true);
+  assert.match(d.getElementById("team-result-diff").textContent, /No changes to display/);
+  assert.equal(d.getElementById("team-result-truncated").hidden, true);
 });
 
 test("the composer shows its stop icon while the team is preparing worktrees", async (t) => {

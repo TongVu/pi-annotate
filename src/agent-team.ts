@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { access, lstat, mkdir, mkdtemp, open, readFile, realpath, rm, rmdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -68,6 +69,7 @@ export async function inspectTeamWorkspace({ cwd, head }: TeamWorkspace, include
   let truncated = changes.length > 150 || status.length > 16_000;
   const files = changes.slice(0, 150).join("\n").slice(0, 16_000);
   let diff = "";
+  let changedFiles: { key: string; path: string; status: string; start: number | null; end: number | null }[] = [];
   let patchCheck: PatchCheck | undefined;
   if (includeDiff) {
     const warnings: string[] = [];
@@ -109,8 +111,43 @@ export async function inspectTeamWorkspace({ cwd, head }: TeamWorkspace, include
     }
     patchCheck = warnings.length ? { status: "issues", details: warnings.join("\n").slice(0, 2000) }
       : { status: truncated || checksIncomplete ? "incomplete" : "passed" };
+    // Build file metadata from NUL-delimited Git path records and exact per-path patches.
+    // Ranges point into this captured bounded diff; no path decoding from Git's quoted headers is used.
+    const records = (await teamGit(cwd, "status", "--porcelain=v1", "-z", "--untracked-files=all")).split("\0").filter(Boolean);
+    const paths: { path: string; status: string }[] = [];
+    for (let index = 0; index < records.length; index++) {
+      const record = records[index];
+      if (record.length < 4) continue;
+      const status = record.slice(0, 2).trim() || "?";
+      const path = record.slice(3);
+      if (status.includes("R") || status.includes("C")) index++; // NUL format stores the original path next.
+      paths.push({ path, status: status === "??" ? "?" : status });
+    }
+    const diffSections = [...diff.matchAll(/^diff --git .*$/gm)];
+    const sections = diffSections.map((match, index) => ({
+      text: diff.slice(match.index!, diffSections[index + 1]?.index ?? diff.length),
+      start: match.index!,
+    }));
+    const locate = (patch: string): [number, number] | null => {
+      if (!patch || patch.length > diff.length) return null;
+      // A path's independently captured patch must equal one whole diff section, not merely occur within one.
+      const matches = sections.filter(({ text }) => text === patch);
+      if (matches.length !== 1) return null;
+      return [matches[0].start, matches[0].start + patch.length];
+    };
+    const metadata: typeof changedFiles = [];
+    for (const { path, status } of paths.slice(0, 150)) {
+      let patch = "";
+      if (status === "?") {
+        const stat = await lstat(join(cwd, path)).catch(() => undefined);
+        if (stat?.isFile() && stat.size <= limit) patch = await capture("--no-index", "--", "/dev/null", path);
+      } else patch = await capture(head, "--", `:(literal)${path}`);
+      const range = locate(patch);
+      metadata.push({ key: randomBytes(12).toString("hex"), path, status, start: range?.[0] ?? null, end: range?.[1] ?? null });
+    }
+    changedFiles = metadata;
   }
-  return { files, diff, truncated, ...(patchCheck && { patchCheck }) };
+  return { files, diff, truncated, ...(includeDiff ? { changedFiles } : {}), ...(patchCheck && { patchCheck }) };
 }
 
 async function applyTeamResult(cwd: string, workspace: TeamWorkspace, reviewed: Awaited<ReturnType<typeof inspectTeamWorkspace>>, isCurrent: () => boolean) {
@@ -288,6 +325,9 @@ export function createAgentTeam({ prepare, saveAttachments, openWorker, inspectW
   let publishHandoff: ReturnType<NonNullable<typeof captureHandoff>> | undefined;
   let publishBlocker: TeamEscalation | undefined;
   let revision = 0, round = 0;
+  const teamInstance = randomBytes(24).toString("hex");
+  let applyToken: string | undefined;
+  let applyTokenBinding: string | undefined;
   const change = () => { revision++; };
   const append = (role, who, text) => {
     role.messages.push({ who, text: text.slice(0, 12_000) });
@@ -322,6 +362,8 @@ export function createAgentTeam({ prepare, saveAttachments, openWorker, inspectW
           issue = "Could not hand off to Main chat. The result is still available in Teams.";
         }
       }
+      applyToken = randomBytes(32).toString("hex");
+      applyTokenBinding = `${teamInstance}:${round}:${revision + 1}:${JSON.stringify(outcome)}`;
       change();
       return;
     }
@@ -483,7 +525,7 @@ export function createAgentTeam({ prepare, saveAttachments, openWorker, inspectW
   return {
     snapshot(role?) {
       if (role !== undefined && !Object.hasOwn(state, role)) throw new Error("Unknown team role.");
-      return { phase, revision, round, maxRounds: maxTeamRounds, brief, feedback, disposition, mainChatManaged: !!captureBlocker, workspace, result: outcome, issue, modelChoices, settings: structuredClone(settings), roles: Object.values(state).map(({ messages, ...data }) => ({ ...data, ...settings[data.id], settingsFallback: settingsFallbacks[data.id] })), messages: role === undefined ? undefined : state[role].messages };
+      return { phase, revision, round, maxRounds: maxTeamRounds, brief, feedback, disposition, mainChatManaged: !!captureBlocker, workspace, result: outcome, ...(phase === "done" && outcome && applyToken ? { applyToken } : {}), issue, modelChoices, settings: structuredClone(settings), roles: Object.values(state).map(({ messages, ...data }) => ({ ...data, ...settings[data.id], settingsFallback: settingsFallbacks[data.id] })), messages: role === undefined ? undefined : state[role].messages };
     },
     updateSettings(role, requested) {
       if (!Object.hasOwn(settings, role)) throw new Error("Unknown team role.");
@@ -575,6 +617,10 @@ export function createAgentTeam({ prepare, saveAttachments, openWorker, inspectW
       issue = "";
       void run(nextStage, text);
     },
+    validateApplyToken(token: unknown) {
+      return typeof token === "string" && !!applyToken && token === applyToken && phase === "done" &&
+        applyTokenBinding === `${teamInstance}:${round}:${revision}:${JSON.stringify(outcome)}`;
+    },
     async finish(action: "apply" | "discard", cwd: string, isCurrent: () => boolean) {
       if (phase !== "done" || !workspace || !outcome) throw new Error("Wait for the reviewed Teams result before finishing.");
       if (action === "apply") {
@@ -582,10 +628,17 @@ export function createAgentTeam({ prepare, saveAttachments, openWorker, inspectW
         change();
         try { await applyTeamResult(cwd, workspace, outcome, () => phase === "finishing" && isCurrent()); }
         catch (error) {
-          if (phase === "finishing") { phase = "done"; change(); }
+          if (phase === "finishing") {
+            phase = "done";
+            applyToken = randomBytes(32).toString("hex");
+            change();
+            applyTokenBinding = `${teamInstance}:${round}:${revision}:${JSON.stringify(outcome)}`;
+          }
           throw error;
         }
       }
+      applyToken = undefined;
+      applyTokenBinding = undefined;
       disposition = action === "apply" ? "applied" : "discarded";
       close();
     },

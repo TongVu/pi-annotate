@@ -101,6 +101,20 @@ export async function startChatServer({ chat, onClose, isCurrent = () => true, t
           if (!isSameOriginJson(req.headers, origin)) return reply(403, { error: "Expected a same-origin JSON request." });
           const body = JSON.parse((await readBody(req, CHAT_BODY_LIMIT)).toString("utf8"));
           if (!checkCurrent()) return;
+          if (body?.action === "apply") {
+            const snapshot = chat.team.snapshot();
+            // This predicate is also called after awaits immediately before Git writes. It must
+            // never send a response; the request handler owns the single rejection response.
+            const teamCurrent = () => !expired && isCurrent() && (chat.isTeamApplyCurrent?.() ?? true);
+            if (Object.keys(body).sort().join(",") !== "action,applyToken,round" || body.round !== snapshot.round ||
+                !teamCurrent() || !chat.team.validateApplyToken(body.applyToken)) {
+              throw new Error("This apply confirmation is stale or no longer available. Review the current team result.");
+            }
+            // No await between token validation and finish: finish acquires its phase lock synchronously.
+            await chat.team.finish("apply", chat.getCwd(), teamCurrent);
+            if (checkCurrent()) reply(200, { ok: true });
+            return;
+          }
           if ((body?.action === "resume" || body?.action === "feedback") && chat.team.snapshot().mainChatManaged) {
             throw new Error("Use Main chat for team direction and feedback.");
           }
