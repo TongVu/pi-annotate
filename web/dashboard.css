@@ -209,13 +209,12 @@ body[data-layout="compact"] .card-content { grid-template-columns: minmax(0, 1fr
 body[data-layout="compact"] .card-content + .row { margin-top: auto; }
 body[data-layout="compact"] .card-content:has(.pet-stage) + .row { margin-top: auto; }
 body:not([data-layout="compact"]) .card-content:has(.pet-stage) { margin-top: auto; }
-body[data-layout="compact"] .card-content:has([data-pet="saved"]) { grid-template-columns: minmax(0, 1fr); }
-body[data-layout="compact"] .card-content:has([data-pet="saved"]) .pet-stage { display: none; }
 body[data-layout="compact"] .pet-stage { --pet-size: 50px; align-self: start; height: 71px; margin-top: 0; }
 body[data-layout="compact"] .pet-stage::before { display: none; }
 body[data-layout="compact"] .pet-stage :is(.pet-caption, .pet-indicators) { display: none; }
 body[data-layout="compact"] .pet-sprite { bottom: 8px; }
 body[data-layout="compact"] .pet-shadow { bottom: 6px; }
+body[data-layout="compact"] [data-pet="saved"] :is(.pet-sprite, .pet-shadow) { transform: translateY(-12px); }
 
 .pet-body { fill: #6eb4a9; }
 .pet-shade { fill: #39766e; }

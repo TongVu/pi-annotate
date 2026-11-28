@@ -168,7 +168,8 @@ marks a saved session that isn't running. Status updates even when the chat tab 
 Each session card also has a **Pet Stage**: the robot types while working,
 celebrates when ready, signals an error, or dozes when disconnected and idle.
 A disconnected session still working in Terminal shows the typing robot.
-Saved sessions show a still archive box. The stage respects your system’s
+Saved sessions show a still archive box. In **Compact** view, the robot or
+archive box sits beside the chat preview. The stage respects your system’s
 reduced-motion setting.
 The status legend shows **5-hour · N% left** when the local Codex CLI or the CLI
 bundled with the macOS ChatGPT app reports a five-hour quota. The badge uses the

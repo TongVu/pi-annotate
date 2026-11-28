@@ -89,7 +89,10 @@ test("dashboard pet stages follow session status without changing card actions",
   const script = await readFile(new URL("../web/dashboard.js", import.meta.url), "utf8");
   const dom = new JSDOM(html, { url: "http://127.0.0.1:3456/#dashboard-test", runScripts: "outside-only" });
   t.after(() => dom.window.close());
-  const { document } = dom.window;
+  const { document, getComputedStyle } = dom.window;
+  const style = document.createElement("style");
+  style.textContent = await readFile(new URL("../web/dashboard.css", import.meta.url), "utf8");
+  document.head.append(style);
   const cases = [
     ["working", "focus", false, "working"],
     ["ready", "focus", false, "ready"],
@@ -156,7 +159,12 @@ test("dashboard pet stages follow session status without changing card actions",
   assert.equal(cardFor("saved").querySelector(".pet-stage").getAttribute("aria-hidden"), "true");
   assert.equal(cardFor("saved").querySelector(".pet-stage").parentElement.className, "card-content");
   compactButton.click();
-  assert.equal(cardFor("saved").querySelector(".pet-stage").dataset.pet, "saved", "compact saved cards omit pet space via layout styling");
+  const savedStage = cardFor("saved").querySelector('.pet-stage[data-pet="saved"]');
+  assert.notEqual(getComputedStyle(savedStage).display, "none", "compact saved cards show the box tile");
+  assert.notEqual(getComputedStyle(savedStage.querySelector(".pet-archive")).display, "none");
+  assert.equal(getComputedStyle(savedStage.querySelector(".pet-robot")).display, "none");
+  assert.equal(getComputedStyle(savedStage.parentElement).gridTemplateColumns, getComputedStyle(cardFor("working").querySelector(".card-content")).gridTemplateColumns);
+  assert.equal(cardFor("saved").querySelector(".open").textContent, "Resume chat");
   stageButton.click();
   assert.equal(document.querySelectorAll(".card").length, cases.length);
   const card = cardFor("disconnected");
