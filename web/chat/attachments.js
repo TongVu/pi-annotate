@@ -116,8 +116,12 @@ export function mountAttachmentUi(window, setTooltip) {
 
   function checkAttachmentLimits(files) {
     const sizes = files.map(attachmentSize);
-    if (files.length > MAX_ATTACHMENTS || sizes.some((size) => size > FILE_LIMIT)) {
-      throw new Error(`Attach up to ${MAX_ATTACHMENTS} files, each 5 MiB or smaller.`);
+    if (files.length > MAX_ATTACHMENTS) {
+      throw new Error(`Attach up to ${MAX_ATTACHMENTS} files.`);
+    }
+    const oversized = sizes.findIndex((size) => size > FILE_LIMIT);
+    if (oversized !== -1) {
+      throw new Error(`${files[oversized].name || "This file"} exceeds the 5 MiB per-file limit.`);
     }
     if (sizes.reduce((total, size) => total + size, 0) > ATTACHMENTS_LIMIT) {
       throw new Error("Attachments must be 10 MiB or less in total.");

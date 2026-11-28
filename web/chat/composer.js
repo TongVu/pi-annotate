@@ -3,6 +3,7 @@ export function mountComposerDraft(window, { sender, attachmentUi, status, setTo
   const form = $("chat-form");
   const chatInput = $("chat-input");
   const chatFile = $("chat-file");
+  const attachmentError = $("chat-attachment-error");
   const action = $("chat-send");
   const { renderAttachmentList, readAttachments } = attachmentUi;
   let attachments = [];
@@ -46,15 +47,20 @@ export function mountComposerDraft(window, { sender, attachmentUi, status, setTo
     updateControls();
   }
 
+  function showAttachmentError(message) {
+    attachmentError.textContent = `${message} To edit a file that’s already on Pi’s machine, paste its full path into your message instead.`;
+  }
+
   async function attachFiles(files) {
     if (!files.length || chatInput.readOnly || readingFiles) return;
+    attachmentError.textContent = "";
     readingFiles = true;
     updateControls();
     try {
       setAttachments([...attachments, ...await readAttachments(files, attachments)]);
       status(`${files.length === 1 ? "File" : `${files.length} files`} attached. Press Enter or click Send when ready.`);
     } catch (error) {
-      status(error.message, true);
+      showAttachmentError(error.message);
     } finally {
       readingFiles = false;
       updateControls();
@@ -118,7 +124,12 @@ export function mountComposerDraft(window, { sender, attachmentUi, status, setTo
     const files = Array.from(event.dataTransfer?.files ?? []);
     if (!files.length && !event.dataTransfer?.types.includes("Files")) return;
     event.preventDefault();
-    if (!chatInput.readOnly) chatInput.focus({ preventScroll: true });
+    if (chatInput.readOnly || readingFiles) return;
+    chatInput.focus({ preventScroll: true });
+    if (!files.length) {
+      showAttachmentError("No file was available from the drop. Try using Attach files.");
+      return;
+    }
     void attachFiles(files);
   });
   $("chat-attach").addEventListener("click", () => chatFile.click());
@@ -135,6 +146,7 @@ export function mountComposerDraft(window, { sender, attachmentUi, status, setTo
         const requestId = result?.stoppableRequestId;
         sentDraft = requestId ? { requestId, text: chatInput.value, attachments } : undefined;
         chatInput.value = "";
+        attachmentError.textContent = "";
         setAttachments([]);
       });
     }

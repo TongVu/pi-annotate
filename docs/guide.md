@@ -76,7 +76,8 @@ up to 10 UTF-8 text/code files or PNG, JPEG, GIF, WebP, and SVG images, with or
 without a message. The browser converts SVGs to PNG for preview and sending,
 scaling the longest edge to at most 2048 pixels. Limits are 5 MiB per file
 and 10 MiB combined, before and after conversion. The same image limits apply
-across an annotation batch.
+across an annotation batch. To edit an original file already on Pi’s machine,
+paste its full path into your message instead of attaching it.
 
 UTF-8 build logs can contain ANSI color codes, which are removed from inline
 text. If text attachments total more than 512 KiB, Pi Chat saves the original

@@ -1840,6 +1840,55 @@ test("dropping a log on the composer keeps the draft and waits for Send", async 
   assert.deepEqual(posts[0].attachments, [{ name: "consoleText", mimeType: "", data: Buffer.from(log).toString("base64") }]);
 });
 
+test("rejected composer drops explain the problem without changing the draft", async (t) => {
+  const f = await fixture(t, { chatFetch: async (path) => {
+    assert.equal(path, "/api/response");
+    return { ok: true, json: async () => ({ mode: "chat", protocol: 2, cursor: null, messages: [], busy: false }) };
+  } });
+  const w = f.window;
+  const input = f.$("chat-input");
+  const alert = f.$("chat-attachment-error");
+  const list = f.$("chat-attachments");
+  input.value = "Edit the original SVG";
+  assert.equal(alert.getAttribute("role"), "alert");
+  assert.ok(f.$("chat-form").contains(alert));
+
+  function drop(files) {
+    const event = new w.Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "dataTransfer", { value: { types: ["Files"], files } });
+    input.dispatchEvent(event);
+    assert.equal(event.defaultPrevented, true);
+  }
+
+  drop([]);
+  assert.match(alert.textContent, /No file was available from the drop/);
+  drop([new w.File([new Uint8Array(5 * 1024 * 1024 + 1)], "components.svg", { type: "image/svg+xml" })]);
+  await tick();
+  assert.match(alert.textContent, /components\.svg exceeds the 5 MiB per-file limit/);
+  assert.match(alert.textContent, /paste its full path/);
+  assert.equal(input.value, "Edit the original SVG");
+  assert.equal(list.hidden, true);
+  assert.equal(f.$("chat-send").disabled, false);
+
+  const attachmentReady = new Promise((resolve, reject) => {
+    const observer = new w.MutationObserver(() => {
+      if (!list.children.length) return;
+      clearTimeout(timeout);
+      observer.disconnect();
+      resolve();
+    });
+    const timeout = setTimeout(() => {
+      observer.disconnect();
+      reject(new Error("Dropped reference was not attached"));
+    }, 1000);
+    observer.observe(list, { childList: true });
+  });
+  drop([new w.File(["notes"], "reference.txt")]);
+  assert.equal(alert.textContent, "");
+  await attachmentReady;
+  assert.match(list.textContent, /reference\.txt/);
+});
+
 test("live annotations can paste and pick images, edit them, and retry without touching the composer", async (t) => {
   const posts = [];
   const f = await fixture(t, { chatFetch: async (path, body) => {

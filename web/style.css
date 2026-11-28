@@ -298,8 +298,10 @@ textarea { width: 100%; resize: vertical; background: var(--bg); color: var(--te
 @media (hover: hover) {
   .image-attachment:not(:hover):not(:focus-within) .attachment-remove { opacity: 0; pointer-events: none; }
 }
-#comment-file-status.error { color: var(--attachment-error, #ffb4a6); }
-@media (prefers-color-scheme: light) { #comment-file-status.error, #chat-note-status.error { --attachment-error: #a12d20; } }
+#chat-attachment-error { margin: 4px 12px 6px; font-size: 13px; overflow-wrap: anywhere; }
+#chat-attachment-error:empty { margin: 0; }
+#chat-attachment-error, #comment-file-status.error { color: var(--attachment-error, #ffb4a6); }
+@media (prefers-color-scheme: light) { #chat-attachment-error, #comment-file-status.error, #chat-note-status.error { --attachment-error: #a12d20; } }
 #image-preview { width: fit-content; max-width: calc(100vw - 32px); }
 .image-preview-header { margin-bottom: 12px; }
 #preview-title { overflow-wrap: anywhere; }
