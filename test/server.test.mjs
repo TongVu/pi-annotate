@@ -310,6 +310,8 @@ test("chat protects the active transcript and validates quotes from each assista
   assert.match(state.messages[0].html, /<strong>First<\/strong> question/);
   assert.match(state.messages[0].html, /&lt;b&gt;literal HTML&lt;\/b&gt;/);
   assert.match(state.messages[1].html, /<strong>One<\/strong>/);
+  assert.equal(state.messages[1].markdown, "**One**");
+  assert.equal(state.messages[1].text, "One\n");
   assert.equal((await fetch(`${f.base}/api/image?id=missing&index=0`, { headers: f.headers })).status, 404);
   assert.equal((await fetch(`${f.base}/api/image?id=a1&index=0`, { headers: f.headers })).status, 404);
   assert.equal((await fetch(`${f.base}/api/markdown`, { method: "POST", headers: { Origin: f.base, "Content-Type": "application/json" }, body: JSON.stringify({ markdown: "**note**" }) })).status, 401);
@@ -419,6 +421,7 @@ test("chat explorer lists limited metadata and reads only catalogued sessions wi
   assert.equal(opened, 1);
   assert.deepEqual(transcript.messages.map(({ id }) => id), ["reply"]);
   assert.match(transcript.messages[0].html, /<strong>Saved reply<\/strong>/);
+  assert.equal(transcript.messages[0].markdown, "**Saved reply**");
   assert.deepEqual((await (await read("/api/response")).json()).messages, []);
   current = false;
   assert.equal((await read("/api/session?id=saved")).status, 410);

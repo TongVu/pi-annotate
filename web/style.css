@@ -194,8 +194,15 @@ textarea { width: 100%; resize: vertical; background: var(--bg); color: var(--te
 #subchat-parent:is(:hover, :focus-visible) #subchat-parent-name { text-decoration: underline; text-underline-offset: 3px; }
 #response .subchat-divider { display: flex; align-items: center; gap: 12px; margin: 12px 0; color: var(--muted); font-size: 13px; }
 .subchat-divider::before, .subchat-divider::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
-.reply-branch { display: grid; place-items: center; width: 32px; height: 32px; margin-inline-start: auto; padding: 0; border: 0; background: transparent; color: var(--muted); }
-.reply-branch:is(:hover, :focus-visible) { background: var(--panel); color: var(--text); }
+.reply-actions { display: flex; justify-content: flex-end; align-items: center; gap: 4px; }
+.reply-branch, .transcript-copy { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; background: transparent; color: var(--muted); }
+.reply-branch:is(:hover, :focus-visible), .transcript-copy:is(:hover, :focus-visible) { background: var(--panel); color: var(--text); }
+.reply-code-block { position: relative; margin-block-end: 1em; }
+:is(#response, #saved-response) .reply-code-block > pre { margin: 0; padding: 16px; padding-inline-end: 38px; background: var(--panel); border: 1px solid var(--border); border-radius: 9px; line-height: 1.5; }
+.code-copy { position: absolute; inset-block-start: 5px; inset-inline-end: 5px; width: 26px; height: 26px; background: var(--panel); }
+@media (hover: hover) {
+  .reply-code-block:not(:hover):not(:focus-within) > .code-copy { opacity: 0; pointer-events: none; }
+}
 .chat-turn { padding: 14px 0; }
 .chat-turn h2 { color: var(--muted); font-size: 13px; margin: 0 0 6px; }
 .user-turn { position: relative; width: fit-content; max-width: min(85%, 64ch); margin: 8px 0 20px auto; padding: 8px 14px; border: 2px solid var(--muted); border-radius: 16px 16px 0 16px; line-height: 1.55; }

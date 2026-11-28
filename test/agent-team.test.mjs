@@ -530,12 +530,13 @@ test("Main chat shows a handoff receipt, not the raw handoff, and still renders 
 
   const dom = new JSDOM(await readFile(new URL("../web/index.html", import.meta.url), "utf8"));
   t.after(() => dom.window.close());
-  const transcript = mountTranscript(dom.window, { isViewingLive: () => true, isCommentOpen: () => false });
+  const transcript = mountTranscript(dom.window, { isViewingLive: () => true, isCommentOpen: () => false, setTooltip: () => {} });
   transcript.appendLive(messages);
   const report = dom.window.document.querySelector("#response .team-report-turn");
   assert.equal(report.querySelector("h2").textContent, "Software architect · Team report");
   assert.equal(report.querySelector("strong").textContent, "Tests still needed.");
   assert.equal(report.querySelector("img, [data-response-id], .reply-branch"), null);
+  assert.ok(report.querySelector('[aria-label="Copy response"]'));
   const receipt = dom.window.document.querySelector("#response .team-handoff-turn");
   assert.equal(receipt.querySelector("h2").textContent, "Team handoff");
   assert.match(receipt.textContent, /Round 2 received/);

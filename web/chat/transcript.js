@@ -114,6 +114,30 @@ export function mountTranscript(window, { fetchImage, isViewingLive, isCommentOp
     turn.append(images);
   }
 
+  function copyButton(className, label, text, copied, session) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `transcript-copy ${className}`;
+    button.setAttribute("aria-label", label);
+    button.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>`;
+    setTooltip(button, label);
+    button.addEventListener("click", async () => {
+      let message;
+      let failed = false;
+      try {
+        await window.navigator.clipboard.writeText(text);
+        message = copied;
+      } catch {
+        failed = true;
+        message = "Could not copy to clipboard. Select the text to copy it manually.";
+      }
+      if (!button.isConnected) return;
+      if (session) document.getElementById("saved-status").textContent = message;
+      else status(message, failed);
+    });
+    return button;
+  }
+
   function renderTurn(message, session) {
     const turn = document.createElement("section");
     const assistant = message.role === "assistant";
@@ -132,7 +156,8 @@ export function mountTranscript(window, { fetchImage, isViewingLive, isCommentOp
     // The server renders restricted Markdown for both roles. Only live Pi replies
     // with matching DOM text can provide annotation offsets.
     if (typeof message.html === "string") content.innerHTML = message.html;
-    if (typeof message.html === "string" && content.textContent === message.text) {
+    const rendered = typeof message.html === "string" && content.textContent === message.text;
+    if (rendered) {
       if (assistant && !session) content.dataset.responseId = message.id;
     } else if (assistant) {
       content.textContent = "This reply could not be rendered safely. See Pi in the terminal.";
@@ -142,6 +167,20 @@ export function mountTranscript(window, { fetchImage, isViewingLive, isCommentOp
     }
     if (message.text || message.html || assistant) turn.append(content);
     if (message.role === "user") appendTranscriptImages(turn, message, session);
+    const actions = document.createElement("footer");
+    actions.className = "reply-actions";
+    if ((assistant || teamReport) && rendered && message.text.trim()) {
+      for (const code of content.querySelectorAll("pre > code")) {
+        const pre = code.parentElement;
+        const block = document.createElement("div");
+        block.className = "reply-code-block";
+        pre.replaceWith(block);
+        // Keep the control outside <pre> so it doesn't scroll with or change the code text.
+        block.append(pre, copyButton("code-copy", "Copy code", code.textContent, "Code copied.", session));
+      }
+      const markdown = typeof message.markdown === "string" ? message.markdown : message.text;
+      actions.append(copyButton("reply-copy", "Copy response", markdown, "Response copied.", session));
+    }
     if (assistant && !session && message.canBranch) {
       const branch = document.createElement("button");
       branch.type = "button";
@@ -154,8 +193,9 @@ export function mountTranscript(window, { fetchImage, isViewingLive, isCommentOp
       </svg>`;
       setTooltip(branch, "Branch from here");
       branch.addEventListener("click", () => onBranchReply(message.id));
-      turn.append(branch);
+      actions.append(branch);
     }
+    if (actions.childElementCount) turn.append(actions);
     return turn;
   }
 

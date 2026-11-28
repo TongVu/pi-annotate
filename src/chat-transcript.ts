@@ -12,10 +12,14 @@ export function renderChatEntry(entry) {
     return { id: entry.id, role: "team-handoff", ...renderMarkdown(`Round ${round} received. Main chat will review the result and report back here.`) };
   }
   if (entry.type === "custom_message" && entry.customType === teamReportType && entry.display && typeof entry.content === "string") {
-    return { id: entry.id, role: "team-report", ...renderMarkdown(entry.content) };
+    return { id: entry.id, role: "team-report", markdown: entry.content, ...renderMarkdown(entry.content) };
   }
   const message = visibleChatMessage(entry);
-  return message && { ...message, ...renderMarkdown(message.text) };
+  if (!message) return;
+  const rendered = renderMarkdown(message.text);
+  return message.role === "assistant"
+    ? { ...message, ...rendered, markdown: message.text }
+    : { ...message, ...rendered };
 }
 
 export function readChatImage(branch, id, index) {

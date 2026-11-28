@@ -421,6 +421,48 @@ test("selecting a reply offers an annotation without blocking copy or opening th
   assert.equal(f.window.document.activeElement, f.$("comment"));
 });
 
+test("copy response uses original Markdown, copy code omits fences, and annotations use rendered text", async (t) => {
+  const highlighted = "  const html = '<tag>&';\n";
+  const plain = "    second block  \n";
+  const user = { id: "u1", role: "user", ...renderMarkdown("```\nuser code\n```") };
+  const markdown = `Copy **this reply**.\n\n\`\`\`js\n${highlighted}\`\`\`\n\n\`\`\`text\n${plain}\`\`\``;
+  const reply = { id: "a1", role: "assistant", canBranch: true, markdown, ...renderMarkdown(markdown) };
+  const copied = [];
+  const clipboard = { writeText: async (text) => copied.push(text) };
+  const f = await fixture(t, { chatFetch: async () => ({ ok: true, json: async () => ({
+    mode: "chat", protocol: 2, cursor: "a1", busy: false, messages: [user, reply],
+  }) }) });
+  Object.defineProperty(f.window.navigator, "clipboard", { value: clipboard });
+  const response = f.$("response");
+  const turn = response.querySelector(".assistant-turn");
+  const content = turn.querySelector('[data-response-id="a1"]');
+  const footer = turn.lastElementChild;
+  const copy = footer.querySelector('[aria-label="Copy response"]');
+  const code = [...content.querySelectorAll('[aria-label="Copy code"]')];
+  assert.ok(footer.querySelector(".reply-branch"));
+  assert.equal(response.querySelector(".user-turn button"), null);
+  assert.equal(content.textContent, reply.text);
+  assert.equal(content.querySelector("pre button"), null);
+  assert.ok(content.querySelector(".hljs-keyword"));
+  assert.equal(code.length, 2);
+  assert.equal(copy.querySelector("svg").innerHTML, f.$("chat-note-copy").querySelector("svg").innerHTML);
+  copy.click();
+  code[0].click();
+  code[1].click();
+  await tick();
+  assert.deepEqual(copied, [markdown, highlighted, plain]);
+  assert.equal(f.$("status").textContent, "Code copied.");
+  clipboard.writeText = async () => { throw new Error("Clipboard unavailable"); };
+  copy.click();
+  await tick();
+  assert.match(f.$("status").textContent, /Could not copy to clipboard/);
+
+  const start = reply.text.indexOf("<tag>&");
+  f.select(start, start + 6, content);
+  f.$("annotate-selection").click();
+  assert.equal(f.$("selected-quote").textContent, "<tag>&");
+});
+
 test("sent images fetch a separate thumbnail and open a larger preview", async (t) => {
   const calls = [];
   const thumbnail = Promise.withResolvers();
@@ -899,7 +941,7 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
     if (path === "/api/session/resume?id=b") return { ok: true, json: async () => ({ command: "cd -- '/work/beta' && pi --session '/store/b.jsonl'" }) };
     if (path === "/api/session/clone") return { ok: true, json: async () => ({ ok: true }) };
     if (path === "/api/session?id=b") return { ok: true, json: async () => ({
-      messages: [{ id: "r1", role: "assistant", ...renderMarkdown("**Saved reply**") }],
+      messages: [{ id: "r1", role: "assistant", markdown: "**Saved reply**", ...renderMarkdown("**Saved reply**") }],
     }) };
     assert.match(path, /^\/api\/response/);
     return { ok: true, json: async () => ({
@@ -1046,6 +1088,11 @@ test("explorer groups chat branches and filters chats, then opens a saved transc
   assert.match(f.$("saved-directory").textContent, /Read-only · \/work\/beta/);
   assert.equal(f.$("saved-response").querySelector("strong").textContent, "Saved reply");
   assert.equal(f.$("saved-response").querySelector("[data-response-id]"), null);
+  clipboard.writeText = async (text) => copied.push(text);
+  f.$("saved-response").querySelector('[aria-label="Copy response"]').click();
+  await tick();
+  assert.equal(copied.at(-1), "**Saved reply**");
+  assert.equal(f.$("saved-status").textContent, "Response copied.");
   assert.equal(f.$("conversation").hidden, true);
   assert.equal(f.$("chat-tools").hidden, true);
   const heading = f.$("session-title-pill").parentElement;

@@ -13,7 +13,11 @@ terminal modes work.
    to open the link yourself. A named session appears by name in its browser tab.
 2. Type a message in the bottom composer, or select text in a Pi reply and click
    **Add annotation** to write a question. You can also copy the selected text
-   normally without opening the dialog. Keep reusable Markdown in the left sidebar's note;
+   normally without opening the dialog. Use **Copy response** at the bottom of a
+   reply to copy its original Markdown, or hover over a code block and use
+   **Copy code** to copy just the code without the Markdown fences. The code
+   button is also available via Tab and is always visible on touch screens.
+   Keep reusable Markdown in the left sidebar's note;
    it saves locally per chat in Pi's data directory, survives closing and
    reopening `/chat`, and can be previewed or copied as Markdown. The dots stay
    centered on the left as you scroll; the current turn is blue.
