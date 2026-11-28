@@ -1,4 +1,4 @@
-export function mountComposerDraft(window, { sender, attachmentUi, status, setTooltip, canStopReply, stopReply }) {
+export function mountComposerDraft(window, { sender, attachmentUi, status, setTooltip, canStopReply, stopReply, isViewingLive }) {
   const $ = (id) => window.document.getElementById(id);
   const form = $("chat-form");
   const chatInput = $("chat-input");
@@ -30,7 +30,7 @@ export function mountComposerDraft(window, { sender, attachmentUi, status, setTo
       setTooltip(action, stopMode ? "Stop and edit" : "Send message (Enter)");
     }
     action.disabled = stopMode ? stopping : (!body.text && !body.attachments) || readingFiles || !sender.canSend(body);
-    chatInput.readOnly = sender.sending || stopMode;
+    chatInput.readOnly = sender.sending || stopMode || !isViewingLive();
     $("chat-attach").disabled = chatInput.readOnly || readingFiles;
     for (const button of $("chat-attachments").querySelectorAll("button")) button.disabled = chatInput.readOnly || readingFiles;
   }

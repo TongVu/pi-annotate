@@ -2,48 +2,71 @@ import { teamPet } from "./team-pets.js";
 
 const labels = { queued: "Queued", working: "Working", paused: "Needs you", done: "Done", stopped: "Stopped" };
 
-export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setTooltip = (target, text) => { target.title = text; } }) {
+export function mountAgentTeam(window, { api, attachmentUi, onViewChange, focusMain = () => {}, setTooltip = (target, text) => { target.title = text; } }) {
   const { document } = window;
   const $ = (id) => document.getElementById(id);
   const panel = $("team-panel"), viewToggle = $("team-view-toggle");
-  const notes = $("chat-tools-content");
+  const rosterTab = $("team-roster-tab"), contextTab = $("team-context-tab");
   const roles = $("team-roles"), transcript = $("team-transcript");
   const setup = $("team-setup"), start = $("team-start"), submit = $("team-submit"), pick = $("team-attach"), files = $("team-files");
   const direction = $("team-direction"), stop = $("team-stop"), cancelStart = $("team-cancel-start");
   const brief = $("team-brief"), input = $("team-input"), resume = $("team-resume");
   const attachmentList = $("team-attachments"), resultView = $("team-result");
-  const feedbackButton = $("team-feedback");
-  let composingFeedback = false, displayedRound = 0;
+  const feedbackButton = $("team-feedback"), resultButton = $("team-open-result");
+  let composingFeedback = false, showingResult = false, displayedRound = 0;
   let attachments = [], readingFiles = false, fileError = "";
   const cards = new Map(), drafts = new Map();
   let selected, saved = false, opened = false, supported = false, disconnected = false, unavailable = false;
   let snapshot, pending = false, actionError = "", selection = 0;
   let transcriptRole, renderedMessages = [];
 
-  function setRole(id) {
-    if (id === selected) return;
-    if (selected) drafts.set(selected, input.value);
-    selected = id;
-    if (snapshot) snapshot = { ...snapshot, messages: undefined };
-    input.value = drafts.get(id) ?? "";
-    selection++;
-    document.querySelector("main").classList.toggle("team-viewing", Boolean(id));
-    $("team-conversation").hidden = !id;
-    onViewChange();
+  function setView(id, result = false) {
+    const roleChanged = id !== selected;
+    if (!roleChanged && showingResult === result) return;
+    showingResult = result;
+    if (roleChanged) {
+      if (selected) drafts.set(selected, input.value);
+      selected = id;
+      if (snapshot) snapshot = { ...snapshot, messages: undefined };
+      input.value = drafts.get(id) ?? "";
+      selection++;
+      $("team-conversation").hidden = !id;
+    }
     render();
-    if (id) void refresh(true);
+    onViewChange();
+    if (roleChanged && id) void refresh(true);
   }
+
+  function backToMain() {
+    setView(undefined);
+    focusMain();
+  }
+
+  function selectTab(context) {
+    closeSettings();
+    rosterTab.setAttribute("aria-pressed", String(!context));
+    contextTab.setAttribute("aria-pressed", String(context));
+    $("team-roster-view").hidden = context;
+    $("team-context").hidden = !context;
+  }
+  rosterTab.addEventListener("click", () => selectTab(false));
+  contextTab.addEventListener("click", () => selectTab(true));
+  resultButton.addEventListener("click", () => {
+    if (resultButton.hidden) return;
+    setView(undefined, true);
+    $("team-result-title").focus();
+  });
 
   function togglePanel(open) {
     opened = open;
-    const label = open ? "Return to main chat" : "Open Teams";
+    const label = open ? "Hide Teams" : "Open Teams";
     viewToggle.setAttribute("aria-expanded", String(open));
     viewToggle.setAttribute("aria-label", label);
     setTooltip(viewToggle, label);
     if (!open) {
       if (snapshot?.phase === "done") composingFeedback = false;
       closeSettings();
-      setRole(undefined);
+      setView(undefined);
     }
     render();
     if (!setup.hidden) brief.focus();
@@ -107,9 +130,9 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
     state.className = "team-card-state";
     button.append(title, state);
     button.addEventListener("click", () => {
-      if (id === "lead" && (snapshot?.mainChatManaged || snapshot?.phase === "done")) { togglePanel(false); viewToggle.focus(); return; }
-      setRole(id === "lead" ? undefined : id);
-      if (id !== "lead") transcript.focus({ preventScroll: true });
+      if (id === "lead") { backToMain(); return; }
+      setView(id);
+      transcript.focus({ preventScroll: true });
     });
     wrapper.append(button);
     if (id !== "lead") {
@@ -216,16 +239,19 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
     const phase = snapshot?.phase;
     const visible = opened && !saved;
     const show = visible && (phase === "idle" || phase === "starting" || (phase === "done" && composingFeedback));
-    const showResult = visible && ["done", "finishing", "stopped"].includes(phase) && !!snapshot.result && !show && !selected;
+    const hasResult = ["done", "finishing", "stopped"].includes(phase) && !!snapshot.result;
+    const showResult = visible && hasResult && showingResult && !show;
     const changed = setup.hidden === show || resultView.hidden === showResult;
     const restoreFocus = !setup.hidden && !show && !saved && setup.contains(document.activeElement);
     setup.hidden = !show;
     resultView.hidden = !showResult;
-    const showPanel = opened && !saved;
-    panel.hidden = !showPanel;
-    notes.hidden = showPanel;
+    panel.hidden = !visible;
+    resultButton.hidden = !hasResult;
     if (changed) onViewChange();
-    if (restoreFocus) viewToggle.focus();
+    if (restoreFocus) {
+      if (visible && phase === "active") focusMain();
+      else viewToggle.focus();
+    }
     const locked = pending || phase === "starting" || readingFiles;
     renderRoleSettings();
     brief.readOnly = locked;
@@ -382,11 +408,9 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
       snapshot.roles.some(({ status }) => status === "paused") ? "Paused · see Main chat" :
       workingRole ? `${workingRole.name} working` : "Preparing";
     const roundLabel = `Round ${round}${maxRounds ? ` of ${maxRounds}` : ""}`;
-    $("team-task").hidden = !title;
-    $("team-task-title").textContent = title;
-    $("team-task-progress").textContent = `${progress} · ${roundLabel}`;
+    $("team-task-progress").textContent = phase === "idle" ? "Not started" : `${progress} · ${roundLabel}`;
     for (const prefix of ["team-task", "team-result"]) {
-      $(`${prefix}-brief`).textContent = requirement;
+      $(`${prefix}-brief`).textContent = requirement || (round ? "Requirement supplied as attachments." : "No requirement sent yet.");
       $(`${prefix}-feedback`).textContent = feedback ?? "";
       $(`${prefix}-feedback`).parentElement.hidden = !feedback;
     }
@@ -396,7 +420,7 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
     }
     if (round > displayedRound) {
       displayedRound = round;
-      composingFeedback = false;
+      composingFeedback = showingResult = false;
       brief.value = "";
       attachments = [];
       renderAttachments();
@@ -426,9 +450,9 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
       $("team-workspace").hidden = false;
       $("team-paths").textContent = workspace.cwd;
     }
-    const lead = card("lead", "Main chat");
-    lead.hidden = preStart;
-    lead.setAttribute("aria-current", String(!preStart && !selected));
+    const lead = card("lead", "Main conversation");
+    lead.disabled = preStart;
+    lead.setAttribute("aria-current", String(!preStart && !selected && !showingResult));
     for (const role of snapshot.roles) {
       const button = card(role.id, role.name);
       button.disabled = preStart;
@@ -517,7 +541,7 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
     void act({ action: composingFeedback ? "feedback" : "start", brief: brief.value.trim(), ...(attachments.length ? { attachments } : {}) }, submit);
   });
   feedbackButton.addEventListener("click", () => {
-    if (snapshot?.mainChatManaged) { togglePanel(false); viewToggle.focus(); return; }
+    if (snapshot?.mainChatManaged) { backToMain(); return; }
     if (snapshot?.phase !== "done" || snapshot.round >= snapshot.maxRounds) return;
     composingFeedback = true;
     actionError = fileError = "";

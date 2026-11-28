@@ -396,10 +396,10 @@ function assertPreStartRoster(document) {
   assert.equal(roster.closest("#team-panel").hidden, false);
   assert.equal(roster.hidden, false);
   assert.deepEqual(cards.map((card) => card.querySelector("strong").textContent), [
-    "Product owner", "Backend implementer", "Frontend implementer", "Software architect",
+    "Main conversation", "Product owner", "Backend implementer", "Frontend implementer", "Software architect",
   ]);
   for (const card of cards) {
-    assert.equal(card.querySelector(".team-card-state").textContent, "Not started");
+    if (card.dataset.role !== "lead") assert.equal(card.querySelector(".team-card-state").textContent, "Not started");
     assert.equal(card.disabled, true, "there is no role transcript to open yet");
   }
 }
@@ -433,23 +433,28 @@ test("served Teams view sends attachments, shows the combined result, and gives 
   const toggle = $("team-view-toggle");
   const composer = $("chat-input");
   composer.value = "Unsent main draft";
-  assert.equal(toggle.parentElement.id, "session-title-pill");
-  const heading = toggle.closest(".chat-heading");
-  assert.equal($("chat-form").previousElementSibling, heading);
+  assert.ok($("chat-form").contains(toggle));
+  assert.equal(toggle.previousElementSibling, $("status"));
+  const heading = $("chat-form").previousElementSibling;
+  assert.ok(heading.matches(".chat-heading"));
+  assert.equal($("session-title-status").textContent, "Ready");
   assert.equal(toggle.getAttribute("aria-label"), "Open Teams");
   for (const id of ["team-toggle", "team-back", "team-setup-back"]) assert.equal($(id), null);
   assert.ok(toggle.querySelector("svg.team-mode-icon[aria-hidden=true]"));
-  assert.ok(toggle.querySelector("svg.chat-mode-icon[aria-hidden=true]"));
   for (const [id, label] of [["team-attach", "Attach files"], ["team-submit", "Send requirement"]]) {
     assert.equal($(id).getAttribute("aria-label"), label);
     assert.equal($(id).textContent.trim(), "");
     assert.ok($(id).querySelector("svg[aria-hidden=true]"));
   }
   toggle.click();
-  assert.equal(toggle.getAttribute("aria-label"), "Return to main chat");
+  assert.equal(toggle.getAttribute("aria-label"), "Hide Teams");
   assert.equal(toggle.getAttribute("aria-expanded"), "true");
   assert.equal($("team-setup").hidden, false);
-  assert.equal(heading.parentElement.tagName, "MAIN", "Teams must not hide the toolbar with the live composer");
+  assert.equal($("chat-form").previousElementSibling, heading, "Teams keeps the session toolbar beside the same composer");
+  assert.equal(heading.parentElement.id, "conversation");
+  assert.equal($("chat-tools-content").hidden, false);
+  assert.equal($("team-panel").parentElement, window.document.body, "the team sidebar is outside the notes and the conversation");
+  assert.equal(composer.readOnly, true);
   assertPreStartRoster(window.document);
   const setupActions = window.document.querySelector(".team-setup-actions");
   assert.ok(setupActions, "the setup footer exists");
@@ -497,9 +502,19 @@ test("served Teams view sends attachments, shows the combined result, and gives 
   assert.deepEqual(prepared, Array.from({ length: 2 }, () => ({ hasImages: true, workspace: undefined, settings: teamRoleDefaults })));
   assert.equal($("team-panel").hidden, false);
   assert.deepEqual([...$("team-roles").querySelectorAll(".team-card:not([hidden]):not(:disabled) strong")].map((name) => name.textContent), [
-    "Main chat", "Product owner", "Backend implementer", "Frontend implementer", "Software architect",
+    "Main conversation", "Product owner", "Backend implementer", "Frontend implementer", "Software architect",
   ]);
   assert.equal(composer.value, "Unsent main draft");
+  assert.equal(composer.readOnly, false);
+  assert.equal(window.document.activeElement, composer);
+  $("team-context-tab").click();
+  assert.equal($("team-roster-view").hidden, true);
+  assert.equal($("team-context").hidden, false);
+  assert.equal($("team-task-brief").textContent, "Build the status screen");
+  assert.match($("team-context").textContent, /coordinates the team/);
+  $("team-roster-tab").click();
+  assert.equal($("team-roster-view").hidden, false);
+  assert.equal($("team-context").hidden, true);
   calls[0].finish("done", "Scope approved");
   await turn();
   calls[1].finish("done", "Design ready");
@@ -521,8 +536,12 @@ test("served Teams view sends attachments, shows the combined result, and gives 
   calls[4].finish("done", "Reviewed both changes");
   await turn();
   await polls.shift()();
-  await until(() => !$("team-result").hidden, "Combined result did not open");
-  assert.equal(heading.parentElement.tagName, "MAIN");
+  await until(() => !$("team-open-result").hidden, "Combined result did not become available");
+  assert.equal($("team-result").hidden, true, "completion must not interrupt Main chat");
+  assert.equal(composer.readOnly, false);
+  $("team-open-result").click();
+  assert.equal($("team-result").hidden, false);
+  assert.equal(heading.parentElement.id, "conversation");
   assert.match($("team-result-workspace").textContent, /shared-team/);
   assert.equal($("team-result-title").textContent, "Build the status screen");
   assert.equal($("team-result-brief").textContent, "Build the status screen");
@@ -533,7 +552,8 @@ test("served Teams view sends attachments, shows the combined result, and gives 
   toggle.click();
   assert.equal($("team-result").hidden, true, "main chat view replaces the team result without discarding it");
   toggle.click();
-  assert.equal($("team-result").hidden, false, "returning to Teams restores the completed result");
+  assert.equal($("team-result").hidden, true, "reopening the sidebar does not leave Main chat");
+  $("team-open-result").click();
   assert.match($("team-result-diff").textContent, /<img src=x>/);
   $("team-feedback").click();
   assert.equal($("team-result").hidden, true);
@@ -737,15 +757,18 @@ test("Main-chat-managed role transcripts and results route the user back to Main
   assert.equal($("team-direction").hidden, true);
   assert.equal($("team-blocker-note").textContent, "Need a decision");
   d.querySelector('.team-card[data-role="lead"]').click();
-  assert.equal($("team-panel").hidden, true);
+  assert.equal($("team-panel").hidden, false);
+  assert.equal($("team-conversation").hidden, true);
   snapshot = { ...snapshot, phase: "done", revision: 2, roles: [{ id: "po", name: "Product owner", status: "done" }],
     workspace: { cwd: "/tmp/team" }, result: { files: "", diff: "" } };
   await ui.refresh(true);
-  $("team-view-toggle").click();
+  assert.equal($("team-result").hidden, true);
+  $("team-open-result").click();
   assert.equal($("team-result").hidden, false);
   assert.equal($("team-feedback").getAttribute("aria-label"), "Discuss the result in Main chat");
   $("team-feedback").click();
-  assert.equal($("team-panel").hidden, true);
+  assert.equal($("team-panel").hidden, false);
+  assert.equal($("team-result").hidden, true);
   assert.equal($("team-setup").hidden, true);
 });
 

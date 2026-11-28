@@ -341,7 +341,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   const isViewingLive = () => !explorer.isSaved() && !team?.viewingTeam();
   const attachmentUi = mountAttachmentUi(window, setTooltip);
   const composer = mountComposerDraft(window, {
-    sender, attachmentUi, status, setTooltip,
+    sender, attachmentUi, status, setTooltip, isViewingLive,
     canStopReply: (id) => connected && isViewingLive() && busy && id === stoppableRequestId,
     stopReply: (requestId) => api("/api/chat/stop", { requestId }),
   });
@@ -378,9 +378,8 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
   });
 
   function placeChatHeading() {
-    // The live toolbar is above the composer. Views that hide the composer need
-    // the same toolbar outside the live conversation so the return control stays usable.
-    const next = explorer.isSaved() || team?.viewingTeam() ? $("chat-rail") : $("chat-form");
+    // Saved sessions hide the live composer, but still need the chat toolbar.
+    const next = explorer.isSaved() ? $("chat-rail") : $("chat-form");
     if (next.previousElementSibling === chatHeading) return;
     const focused = document.activeElement;
     next.before(chatHeading);
@@ -419,7 +418,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
       note.hidden = false;
     }
     $("page-intro").hidden = true;
-    $("chat-state").after($("status"));
+    $("chat-status-actions").prepend($("status"));
     $("conversation").setAttribute("aria-label", "Conversation");
     $("conversation-label").hidden = true;
     for (const id of ["chat-rail", "turns", "chat-form", "chat-state"]) $(id).hidden = false;
@@ -433,8 +432,7 @@ export async function mountChatPage(window, { token, tooltipFactory, loadNotes =
     updateChat(data);
     status("");
     if (data.team === true) void import("./team.js").then(({ mountAgentTeam }) => {
-      team = mountAgentTeam(window, { api, attachmentUi, setTooltip, onViewChange() {
-        placeChatHeading();
+      team = mountAgentTeam(window, { api, attachmentUi, setTooltip, focusMain: composer.focus, onViewChange() {
         annotations.hideSelectionAction();
         updateControls();
       } });

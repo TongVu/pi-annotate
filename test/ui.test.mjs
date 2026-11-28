@@ -601,7 +601,8 @@ test("chat tab follows the Pi session name and moves chat controls out of the he
   assert.equal(f.$("page-intro").hidden, true);
   assert.equal(f.$("chat-state").hidden, false);
   assert.equal(f.$("chat-state").parentElement, f.$("chat-form").querySelector(".actions"));
-  assert.equal(f.$("chat-state").nextElementSibling, f.$("status"));
+  assert.equal(f.$("chat-state").nextElementSibling, f.$("chat-status-actions"));
+  assert.equal(f.$("status").parentElement, f.$("chat-status-actions"));
   assert.equal(f.$("explorer-toggle").parentElement, f.$("session-title-pill"));
   assert.equal(f.$("turns").parentElement, f.$("chat-rail"));
   assert.equal(f.$("status").textContent, "");

@@ -130,7 +130,9 @@ textarea { width: 100%; resize: vertical; background: var(--bg); color: var(--te
 .chat-page.explorer-open { --explorer-width: var(--chat-explorer-size, clamp(220px, 22vw, 280px)); }
 .chat-page:has(#saved-conversation[hidden]) { --chat-heading-height: 0px; }
 .chat-page > header { display: none; }
-.chat-page #status { flex: 1 1 auto; min-width: 0; padding: 0; margin: 0; border: 0; overflow-wrap: anywhere; color: var(--muted); font-size: 12px; line-height: 1.35; }
+#chat-status-actions { display: flex; align-items: center; flex: 1 1 0; min-width: 0; }
+.chat-page #status { min-width: 0; padding: 0; margin: 0; border: 0; overflow-wrap: anywhere; color: var(--muted); font-size: 12px; line-height: 1.35; }
+#chat-status-actions #status:not(:empty) + button { margin-inline-start: 4px; }
 .chat-page #status.error { color: #ffb4a6; }
 @media (prefers-color-scheme: light) { .chat-page #status.error { color: #a12d20; } }
 .chat-page main { --turn-rail-width: 26px; --turn-blue: #74baff; grid-area: 1 / 1; grid-template-columns: [tools] var(--chat-tools-width, var(--chat-tools-size, minmax(220px, 340px))) [rail] var(--turn-rail-width) [transcript] minmax(0, 1fr); grid-template-rows: var(--chat-heading-height, var(--chat-toolbar-height)) minmax(0, 1fr) auto auto; width: 100%; max-width: none; min-height: 0; margin: 0 auto; }

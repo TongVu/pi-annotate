@@ -17,9 +17,12 @@ git("init");
 await writeFile(join(repo, "api.js"), 'export const status = { label: "Not started", round: 0 };\n');
 git("add", "api.js");
 git("-c", "user.name=Preview", "-c", "user.email=preview@example.invalid", "commit", "-m", "chore: seed preview fixture");
-const branch = [{ id: "preview-intro", type: "message", message: { role: "assistant", content:
-  "**Teams preview · simulated workers.** Open **Teams** in the title bar. Click a role’s gear to try the floating settings, then switch directly to another gear. Write a brief and press **Enter** to start. Gears still open after start, with settings read-only. The simulated implementers edit two files in a temporary Git checkout. No model requests or changes to your repository." } }];
+const branch = [];
+const addMessage = (role, content) => branch.push({ id: `preview-${branch.length + 1}`, type: "message", message: { role, content } });
+addMessage("assistant", "**Teams preview · simulated workers.** Open **Teams** in the Main chat composer. Send one requirement and you’ll return here automatically. The roster stays on the right; **Context** shows the brief. No model requests or changes to your repository.");
 const team = createAgentTeam({
+  captureBlocker: () => () => { addMessage("assistant", "The simulated team needs a decision. In the live app, I would ask for it here in Main chat."); return true; },
+  captureHandoff: () => () => { addMessage("assistant", "The simulated team finished. **View team result** in the sidebar to inspect the combined changes. Main chat stays open until you choose to inspect them."); return true; },
   modelChoices: [
     { key: "openai/gpt-6.2-astra", label: "GPT-6.2 Astra (openai)", efforts: ["low", "medium", "high", "xhigh", "max"] },
     { key: "openai/gpt-6.2-sol", label: "GPT-6.2 Sol (openai)", efforts: ["low", "medium", "high", "xhigh", "max"] },
@@ -64,6 +67,10 @@ const server = await startChatServer({
     isIdle: () => true,
     getSessionName: () => "Teams preview",
     getSessionId: () => "preview",
+    onSend: (prompt) => {
+      addMessage("user", prompt);
+      addMessage("assistant", "This message stayed in Main chat. This offline preview doesn’t contact Pi or the team.");
+    },
     noteStore: { read: async () => "", readAttachments: async () => [], write: async () => {} },
   },
 });
