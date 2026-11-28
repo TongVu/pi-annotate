@@ -269,7 +269,7 @@ export function registerChatExtension(pi: ExtensionAPI, launchPage: (url: string
         // A missing catalog must not stop an otherwise usable Main chat from opening.
         const catalog = ctx.modelRegistry ? await import("@earendil-works/pi-ai").catch(() => undefined) : undefined;
         if (!isCurrent()) return;
-        const models = () => catalog ? ctx.modelRegistry.getAvailable() : [];
+        const models = () => catalog ? availableModels() : [];
         const modelChoices = catalog ? teamModelChoices(models(), catalog.getSupportedThinkingLevels) : [];
         const resolveRoleSettings = (_role: string, selected: { model: string; effort: string }) => {
           if (!catalog) throw new Error("Team model options are unavailable. Check Pi's model configuration and reopen /chat.");

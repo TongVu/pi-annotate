@@ -86,6 +86,50 @@ test("Pi reload picks up changed local helper modules in the same process for /c
   assert.match((await responseState.json()).messages[0].text, /Reload marker/);
 });
 
+test("Teams lists and validates role models using the same model scope as Main chat", {
+  skip: !loaderPath && "Requires an installed Pi loader",
+}, async (t) => {
+  const { loadExtensions } = await import(pathToFileURL(loaderPath).href);
+  const { fauxProvider } = await import(new URL("../../../../pi-ai/dist/index.js", pathToFileURL(loaderPath)));
+  if (!fauxProvider) return t.skip("Requires Pi's faux provider");
+  const ids = ["gpt-6.2-astra", "gpt-6.2-sol", "gpt-6-luna", "gpt-4.1"];
+  const faux = fauxProvider({ provider: "openai", models: ids.map((id) => ({ id, reasoning: true })) });
+  const models = ids.map((id) => faux.getModel(id));
+  const cwd = await mkdtemp(join(tmpdir(), "pi-chat-team-model-scope-"));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  const path = fileURLToPath(new URL("../src/index.ts", import.meta.url));
+  const loaded = await loadExtensions([path], cwd);
+  assert.deepEqual(loaded.errors, []);
+  const extension = loaded.extensions[0];
+  t.after(async () => { for (const close of extension.handlers.get("session_shutdown")) await close({}, {}); });
+  let link;
+  await extension.commands.get("chat").handler("link", {
+    mode: "tui", isIdle: () => true, getContextUsage: () => undefined,
+    scopedModels: models.slice(0, 3).map((model) => ({ model })), modelRegistry: { getAvailable: () => models },
+    sessionManager: {
+      getSessionId: () => "team-model-scope", getSessionName: () => undefined, getSessionDir: () => cwd,
+      getCwd: () => cwd, getSessionFile: () => undefined, getBranch: () => [],
+    },
+    ui: { notify: (message) => { if (message.includes("http://127.0.0.1:")) link = message.split(": ").at(-1); } },
+  });
+  const url = new URL(link);
+  const headers = { Authorization: `Bearer ${url.hash.slice(1)}`, Origin: url.origin, "Content-Type": "application/json" };
+  const endpoint = `${url.origin}/api/team`;
+  const snapshot = await (await fetch(endpoint, { headers })).json();
+  assert.deepEqual(snapshot.modelChoices.map(({ key }) => key), ids.slice(0, 3).map((id) => `openai/${id}`));
+  const select = async (id) => {
+    const response = await fetch(endpoint, { method: "POST", headers, body: JSON.stringify({
+      action: "settings", role: "po", settings: { model: `openai/${id}`, effort: "medium" },
+    }) });
+    assert.equal(response.status, 200, await response.clone().text());
+    return response.json();
+  };
+  assert.equal((await select("gpt-6.2-astra")).settings.po.model, "openai/gpt-6.2-astra");
+  const rejected = await select("gpt-4.1");
+  assert.equal(rejected.settings.po.model, "openai/gpt-6.2-sol");
+  assert.match(rejected.roles.find(({ id }) => id === "po").settingsFallback, /gpt-4\.1 is unavailable/);
+});
+
 test("Pi branches a saved reply into a named child without replacing the parent chat", {
   skip: !loaderPath || process.platform !== "linux" ? "Requires the installed Pi loader and Linux for the Kitty launch fixture" : false,
 }, async (t) => {
