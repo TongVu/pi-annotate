@@ -14,7 +14,7 @@ export function mountChatNotes(window, { sessionId, api, setTooltip, attachmentU
   const filePicker = $("chat-note-file");
   const fileList = $("chat-note-attachments");
   const fileStatus = $("chat-note-attachments-status");
-  const { renderAttachmentList, readAttachment, checkAttachmentLimits } = attachmentUi;
+  const { renderAttachmentList, readAttachments } = attachmentUi;
   let attachments = [];
   let canAttach = false;
   let updatingAttachments = false;
@@ -68,10 +68,7 @@ export function mountChatNotes(window, { sessionId, api, setTooltip, attachmentU
 
   function attachFiles(files) {
     if (!files.length) return;
-    void updateAttachments(async () => {
-      checkAttachmentLimits(files, attachments);
-      return [...attachments, ...await Promise.all(files.map(readAttachment))];
-    });
+    void updateAttachments(async () => [...attachments, ...await readAttachments(files, attachments)]);
   }
 
   async function load() {

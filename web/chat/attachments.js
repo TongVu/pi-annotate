@@ -2,6 +2,9 @@ export function mountAttachmentUi(window, setTooltip) {
   const { document, FileReader } = window;
   const $ = (id) => document.getElementById(id);
   const previewTypes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+  const svgType = "image/svg+xml";
+  const isSvg = (file) => file.type === svgType || /\.svg$/i.test(file.name);
+  const MAX_SVG_EDGE = 2048;
   const MAX_ATTACHMENTS = 10;
   const FILE_LIMIT = 5 * 1024 * 1024;
   const ATTACHMENTS_LIMIT = 10 * 1024 * 1024;
@@ -71,6 +74,27 @@ export function mountAttachmentUi(window, setTooltip) {
     }
   }
 
+  async function rasterizeSvg({ name, data }) {
+    try {
+      // SVG loaded as an image cannot run scripts or fetch external resources.
+      const image = new window.Image();
+      image.src = `data:${svgType};base64,${data}`;
+      await image.decode();
+      const { naturalWidth: width, naturalHeight: height } = image;
+      if (!width || !height) throw new Error("Empty image");
+      const scale = Math.min(1, MAX_SVG_EDGE / Math.max(width, height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(width * scale));
+      canvas.height = Math.max(1, Math.round(height * scale));
+      canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+      const png = canvas.toDataURL("image/png");
+      if (!png.startsWith("data:image/png;base64,")) throw new Error("PNG encoding failed");
+      return { name, mimeType: "image/png", data: png.split(",")[1] };
+    } catch {
+      throw new Error(`Could not render ${name} as an SVG image.`);
+    }
+  }
+
   function readAttachment(file) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -84,17 +108,34 @@ export function mountAttachmentUi(window, setTooltip) {
     });
   }
 
-  function checkAttachmentLimits(files, existing) {
-    if (existing.length + files.length > MAX_ATTACHMENTS || files.some((file) => file.size > FILE_LIMIT)) {
+  function attachmentSize(file) {
+    if (typeof file.size === "number") return file.size;
+    const { data } = file;
+    return data.length * 3 / 4 - (data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0);
+  }
+
+  function checkAttachmentLimits(files) {
+    const sizes = files.map(attachmentSize);
+    if (files.length > MAX_ATTACHMENTS || sizes.some((size) => size > FILE_LIMIT)) {
       throw new Error(`Attach up to ${MAX_ATTACHMENTS} files, each 5 MiB or smaller.`);
     }
-    const total = files.reduce((size, file) => size + file.size, 0) + existing.reduce((size, { data }) =>
-      size + data.length * 3 / 4 - (data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0), 0);
-    if (total > ATTACHMENTS_LIMIT) throw new Error("Attachments must be 10 MiB or less in total.");
+    if (sizes.reduce((total, size) => total + size, 0) > ATTACHMENTS_LIMIT) {
+      throw new Error("Attachments must be 10 MiB or less in total.");
+    }
+  }
+
+  async function readAttachments(files, existing) {
+    checkAttachmentLimits([...existing, ...files]);
+    const attachments = await Promise.all(files.map(async (file) => {
+      const attachment = await readAttachment(file);
+      return isSvg(file) ? rasterizeSvg(attachment) : attachment;
+    }));
+    checkAttachmentLimits([...existing, ...attachments]);
+    return attachments;
   }
 
   return {
-    showImagePreview, renderAttachmentList, readAttachment, checkAttachmentLimits,
-    isPreviewImage: (type) => previewTypes.has(type),
+    showImagePreview, renderAttachmentList, readAttachments,
+    isImageFile: (file) => previewTypes.has(file.type) || isSvg(file),
   };
 }

@@ -1,7 +1,7 @@
 export function mountAnnotationDraft(window, { sender, attachmentUi, status, setTooltip, isViewingLive, renderMarkdown }) {
   const { document, Node } = window;
   const $ = (id) => document.getElementById(id);
-  const { renderAttachmentList, readAttachment, checkAttachmentLimits, isPreviewImage } = attachmentUi;
+  const { renderAttachmentList, readAttachments, isImageFile } = attachmentUi;
   const responseElement = $("response");
   const dialog = $("comment-dialog");
   const selectionAction = $("annotate-selection");
@@ -46,10 +46,9 @@ export function mountAnnotationDraft(window, { sender, attachmentUi, status, set
     readingAnnotationFiles = true;
     updateControls();
     try {
-      if (files.some((file) => !isPreviewImage(file.type))) throw new Error("Choose PNG, JPEG, GIF, or WebP images.");
+      if (files.some((file) => !isImageFile(file))) throw new Error("Choose PNG, JPEG, GIF, WebP, or SVG images.");
       const otherImages = annotations.flatMap((annotation, index) => index === editing ? [] : annotation.images ?? []);
-      checkAttachmentLimits(files, [...otherImages, ...annotationFiles]);
-      const images = await Promise.all(files.map(readAttachment));
+      const images = await readAttachments(files, [...otherImages, ...annotationFiles]);
       if (draft !== pending || !dialog.open) return;
       setAnnotationFiles([...annotationFiles, ...images]);
       commentFileStatus("");
@@ -217,7 +216,7 @@ export function mountAnnotationDraft(window, { sender, attachmentUi, status, set
   });
   comment.addEventListener("paste", (event) => {
     if (!annotationImagesSupported) return;
-    const images = Array.from(event.clipboardData?.files ?? []).filter((file) => file.type.startsWith("image/"));
+    const images = Array.from(event.clipboardData?.files ?? []).filter((file) => file.type.startsWith("image/") || isImageFile(file));
     if (!images.length) return;
     event.preventDefault();
     void attachAnnotationImages(images);

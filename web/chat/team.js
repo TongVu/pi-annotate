@@ -223,8 +223,7 @@ export function mountAgentTeam(window, { api, attachmentUi, onViewChange, setToo
     actionError = fileError = "";
     syncSetup();
     try {
-      attachmentUi.checkAttachmentLimits(selected, attachments);
-      attachments.push(...await Promise.all(selected.map(attachmentUi.readAttachment)));
+      attachments.push(...await attachmentUi.readAttachments(selected, attachments));
       renderAttachments();
     } catch (error) {
       fileError = error.message;

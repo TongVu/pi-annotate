@@ -1644,7 +1644,7 @@ test("leaving a chat page sends one authenticated disconnect request with keepal
   assert.deepEqual(calls.slice(1), [{ path: "/api/close", body: {}, method: "POST", keepalive: true }]);
 });
 
-test("browser chat adds several picked or pasted files, removes them individually, and retains them on failure", async (t) => {
+test("browser chat previews pasted SVGs as PNG and retains mixed attachments on send failure", async (t) => {
   const posts = [];
   const f = await fixture(t, { chatFetch: async (path, body) => {
     if (path === "/api/response") return { ok: true, json: async () => ({ mode: "chat", protocol: 2, cursor: null, messages: [], busy: false }) };
@@ -1672,15 +1672,29 @@ test("browser chat adds several picked or pasted files, removes them individuall
   }
   assert.equal(file.multiple, true);
   const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgZGIGAAAOAAfXb+R4AAAAAElFTkSuQmCC";
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="4096" height="2048"/>';
+  w.Image = class {
+    naturalWidth = 4096;
+    naturalHeight = 2048;
+    async decode() {
+      assert.equal(this.src, `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`);
+    }
+  };
+  w.HTMLCanvasElement.prototype.getContext = () => ({ drawImage() {} });
+  const src = `data:image/png;base64,${png}`;
+  w.HTMLCanvasElement.prototype.toDataURL = function (type) {
+    assert.equal(type, "image/png");
+    assert.deepEqual([this.width, this.height], [2048, 1024]);
+    return src;
+  };
   const pasted = waitForFileCount(1);
   const event = new w.Event("paste", { cancelable: true });
-  Object.defineProperty(event, "clipboardData", { value: { files: [new w.File([Buffer.from(png, "base64")], "clipboard.png", { type: "image/png" })] } });
+  Object.defineProperty(event, "clipboardData", { value: { files: [new w.File([svg], "diagram.SVG")] } });
   input.dispatchEvent(event);
   assert.equal(event.defaultPrevented, true);
   await pasted;
-  assert.deepEqual(filenames(), ["clipboard.png"]);
-  const preview = list.querySelector('[aria-label="Preview clipboard.png"]');
-  const src = `data:image/png;base64,${png}`;
+  assert.deepEqual(filenames(), ["diagram.SVG"]);
+  const preview = list.querySelector('[aria-label="Preview diagram.SVG"]');
   assert.equal(preview.querySelector("img").src, src);
   preview.click();
   assert.equal(f.$("image-preview").open, true);
@@ -1701,28 +1715,28 @@ test("browser chat adds several picked or pasted files, removes them individuall
   ] });
   file.dispatchEvent(new w.Event("change"));
   await picked;
-  assert.deepEqual(filenames(), ["clipboard.png", "picked.png", "draft.txt", "Example.java"]);
+  assert.deepEqual(filenames(), ["diagram.SVG", "picked.png", "draft.txt", "Example.java"]);
   const removeFile = list.querySelector('.file-attachment [aria-label="Remove draft.txt"]');
   assert.equal(removeFile.textContent, "×");
   removeFile.click();
-  assert.deepEqual(filenames(), ["clipboard.png", "picked.png", "Example.java"]);
+  assert.deepEqual(filenames(), ["diagram.SVG", "picked.png", "Example.java"]);
   const removeImage = list.querySelector('[aria-label="Remove picked.png"]');
   assert.equal(removeImage.textContent, "×");
   removeImage.click();
   assert.equal(f.$("image-preview").open, false);
-  assert.deepEqual(filenames(), ["clipboard.png", "Example.java"]);
+  assert.deepEqual(filenames(), ["diagram.SVG", "Example.java"]);
   assert.equal(list.querySelectorAll("img").length, 1);
   assert.equal(posts.length, 0);
   assert.equal(f.$("chat-send").disabled, false);
   f.$("chat-send").click();
   await tick();
   assert.match(f.$("status").textContent, /Pi is busy/);
-  assert.deepEqual(filenames(), ["clipboard.png", "Example.java"]);
+  assert.deepEqual(filenames(), ["diagram.SVG", "Example.java"]);
   f.$("chat-send").click();
   await tick();
   assert.equal(posts[0].text, "", "attachment-only sends are allowed");
   assert.deepEqual(posts[0].attachments, [
-    { name: "clipboard.png", mimeType: "image/png", data: png },
+    { name: "diagram.SVG", mimeType: "image/png", data: png },
     { name: "Example.java", mimeType: "", data: "Y29kZQ==" },
   ]);
   assert.deepEqual(posts[0], posts[1]);

@@ -4,7 +4,7 @@ export function mountComposerDraft(window, { sender, attachmentUi, status, setTo
   const chatInput = $("chat-input");
   const chatFile = $("chat-file");
   const action = $("chat-send");
-  const { renderAttachmentList, readAttachment, checkAttachmentLimits } = attachmentUi;
+  const { renderAttachmentList, readAttachments } = attachmentUi;
   let attachments = [];
   let readingFiles = false;
   let sentDraft;
@@ -51,8 +51,7 @@ export function mountComposerDraft(window, { sender, attachmentUi, status, setTo
     readingFiles = true;
     updateControls();
     try {
-      checkAttachmentLimits(files, attachments);
-      setAttachments([...attachments, ...await Promise.all(files.map(readAttachment))]);
+      setAttachments([...attachments, ...await readAttachments(files, attachments)]);
       status(`${files.length === 1 ? "File" : `${files.length} files`} attached. Press Enter or click Send when ready.`);
     } catch (error) {
       status(error.message, true);
