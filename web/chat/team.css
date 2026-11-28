@@ -6,6 +6,28 @@
 #team-attention-dot:not([hidden]) { position: absolute; inset: 2px 2px auto auto; width: 7px; height: 7px; border-radius: 50%; background: var(--team-warning, #e0ad70); }
 #chat-tools #chat-tools-content[hidden] { display: none; }
 #team-panel { overflow: auto; min-height: 0; padding: 2px 2px 12px; color: var(--text); }
+#team-roles .team-agent-wrap { position: relative; min-width: 0; }
+#team-roles .team-card { width: 100%; height: 100%; }
+#team-roles .team-agent-gear { position: absolute; z-index: 2; top: 5px; right: 5px; display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 1px solid var(--border); border-radius: 50%; background: var(--panel); }
+#team-roles .team-agent-gear:hover:not(:disabled), #team-roles .team-agent-gear[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); }
+#team-roles .team-agent-gear:disabled { opacity: .55; }
+.team-agent-settings { position: absolute; z-index: 5; top: 40px; right: 4px; width: min(280px, calc(100vw - 48px)); padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); box-shadow: 0 8px 28px #0003; text-align: left; }
+.team-agent-settings[hidden] { display: none; }
+.team-agent-settings label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; }
+.team-agent-settings [role="combobox"] { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); font: inherit; font-size: 12px; }
+.team-agent-settings [role="combobox"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.team-agent-model-options { position: absolute; z-index: 6; left: 12px; right: 12px; max-height: 180px; overflow: auto; margin: 4px 0 0; padding: 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); list-style: none; box-shadow: 0 6px 18px #0003; }
+.team-agent-model-options li { padding: 7px 8px; border-radius: 5px; font-size: 12px; overflow-wrap: anywhere; cursor: pointer; }
+.team-agent-model-options li:hover, .team-agent-model-options li:focus, .team-agent-model-options li[aria-selected="true"] { background: color-mix(in srgb, var(--panel), var(--accent) 12%); }
+.team-agent-effort-label { display: block; margin: 10px 0 5px; color: var(--muted); font-size: 11px; }
+.team-agent-efforts { display: flex; flex-wrap: wrap; gap: 5px; }
+.team-agent-efforts button { min-height: 30px; padding: 4px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--text); font: inherit; font-size: 11px; }
+.team-agent-efforts button[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--panel), var(--accent) 16%); }
+.team-agent-efforts button:disabled { opacity: .55; }
+.team-agent-settings-status, .team-agent-settings-error { margin: 8px 0 0; font-size: 11px; overflow-wrap: anywhere; }
+.team-agent-settings-status { color: var(--muted); }
+.team-agent-settings-error { color: var(--attachment-error, #ffb4a6); }
+.team-agent-settings-error:empty { display: none; }
 .chat-page:has(main > .chat-heading #team-view-toggle[aria-expanded="true"]) { --chat-heading-height: var(--chat-toolbar-height); }
 .chat-page main:has(#team-view-toggle[aria-expanded="true"]) { --chat-tools-width: var(--chat-tools-size, minmax(220px, 340px)); --turn-rail-width: 0px; }
 .chat-page main:has(#team-view-toggle[aria-expanded="true"]) #chat-tools { display: grid; }
@@ -17,11 +39,16 @@
 .team-setup-intro .team-eyebrow { font-size: 11px; letter-spacing: .14em; font-weight: 700; }
 #team-start { padding: clamp(12px, 3vw, 22px); border: 1px solid var(--border); border-radius: 16px; background: var(--panel); }
 #team-start label, #team-direction label { margin: 0 0 6px; font-weight: 600; }
+#team-start > label { display: block; }
+#team-start textarea { margin-block: 0; }
+#team-start .attachment-list { margin-block: 0; }
+#team-start .team-setup-hint { max-width: 78ch; line-height: 1.5; }
 #team-start textarea, #team-direction textarea { margin: 0; font-size: 14px; }
-#team-brief { display: block; min-height: clamp(200px, 42dvh, 480px); max-height: max(200px, 65dvh); }
-#team-start .attachment-list { padding-inline: 0; }
-.team-setup-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 8px; }
-.team-submit-actions { display: flex; align-items: center; gap: 10px; }
+#team-brief { display: block; min-height: clamp(200px, 42dvh, 480px); max-height: max(200px, 65dvh); border: 0; border-radius: 12px 12px 0 0; background: transparent; }
+.team-start-composer { overflow: visible; }
+#team-start .attachment-list { padding-inline: 8px; }
+.team-setup-actions { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; padding: 4px 8px 8px; }
+.team-submit-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 .team-setup-hint, #team-setup-status, #team-status { font-size: 12px; color: var(--muted); }
 .team-setup-hint, #team-setup-status { margin: 8px 0 0; }
 #team-setup-status.error { color: var(--attachment-error, #ffb4a6); }
@@ -30,15 +57,17 @@ button.team-icon:not([hidden]) { display: grid; place-items: center; flex: none;
 button.team-icon.secondary:not(:disabled):hover { background: color-mix(in srgb, var(--panel), var(--border) 45%); }
 #team-stop { margin-top: 8px; }
 #team-roles:not([hidden]) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-#team-roles .team-card:not([hidden]) { display: grid; justify-items: center; align-content: start; gap: 4px; min-width: 0; padding: 8px 4px; text-align: center; background: var(--panel); font-size: 12px; line-height: 1.25; overflow-wrap: anywhere; }
-#team-roles .team-card:first-child { grid-column: 1 / -1; grid-template-columns: auto auto; justify-content: center; align-items: center; gap: 8px; }
+#team-roles .team-agent-wrap:not(.team-lead-wrap) { min-height: 144px; }
+#team-roles .team-card:not([hidden]) { display: grid; justify-items: center; align-content: start; gap: 4px; min-width: 0; padding: 12px 8px; text-align: center; background: var(--panel); font-size: 12px; line-height: 1.25; overflow-wrap: anywhere; }
+#team-roles .team-lead-wrap { grid-column: 1 / -1; }
+#team-roles .team-lead-wrap .team-card { display: flex; justify-content: center; align-items: center; gap: 8px; }
 #team-roles .team-card:disabled { opacity: 1; }
 #team-roles .team-card:not(:disabled):hover, #team-roles .team-card[aria-current="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--panel), var(--accent) 10%); }
 .team-card-state { color: var(--muted); font-size: 11px; }
 .team-card[data-state="paused"] .team-card-state { color: var(--team-warning, #e0ad70); font-weight: 700; }
-.team-card:first-child .team-card-state { display: none; }
+.team-lead-wrap .team-card-state { display: none; }
 .team-pet { width: 72px; max-width: 100%; height: 68px; }
-.team-card:first-child .team-pet { width: 27px; height: 27px; }
+.team-lead-wrap .team-pet { width: 27px; height: 27px; }
 .team-card[data-state="working"] .team-pet g { animation: team-bob 1.15s steps(1, end) infinite; }
 .team-pet .pet-eye { animation: team-blink 4s steps(1, end) infinite; }
 .team-card[data-state="working"] .pet-key { animation: team-blink .45s steps(1, end) infinite; }
@@ -50,14 +79,18 @@ button.team-icon.secondary:not(:disabled):hover { background: color-mix(in srgb,
 #team-workspace summary { cursor: pointer; }
 #team-paths, #team-result-workspace { overflow-wrap: anywhere; }
 .chat-page main:is(.team-viewing, :has(:is(#team-setup, #team-result):not([hidden]))) :is(#conversation, #chat-rail, #subchat-origin) { display: none; }
-#team-result .team-setup-content { margin-block: 0 auto; }
+#team-result:not([hidden]) { min-width: 0; overflow-x: hidden; overflow-y: auto; }
+#team-result .team-setup-content { width: min(100%, 1040px); min-width: 0; max-width: 100%; margin-block: 0 auto; }
+#team-result :is(pre, code) { max-width: 100%; }
+#team-result p code { display: block; overflow-wrap: anywhere; white-space: normal; }
+#team-result pre { white-space: pre; overscroll-behavior-inline: contain; }
+#team-result-diff { max-height: 55dvh; }
 .team-result-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .team-result-heading h1 { margin: 4px 0; font-size: clamp(26px, 4vw, 38px); }
 .team-result-heading .team-eyebrow, .team-result-note { color: var(--muted); font-size: 13px; }
 .team-result-heading .team-eyebrow { letter-spacing: .14em; font-weight: 700; margin: 0; }
 #team-result h2 { margin: 16px 0 8px; }
-#team-result pre { overflow: auto; margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
-#team-result-diff { max-height: 55dvh; }
+#team-result pre { width: 100%; box-sizing: border-box; overflow: auto; margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
 #team-conversation:not([hidden]) { grid-area: 2 / transcript / span 2 / -1; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; }
 .team-heading { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; justify-content: space-between; padding: 8px 16px; border-bottom: 1px solid var(--border); }
 .team-heading h2 { margin: 0; font-size: 15px; }
@@ -66,6 +99,7 @@ button.team-icon.secondary:not(:disabled):hover { background: color-mix(in srgb,
 #team-transcript strong { color: var(--muted); font-size: 12px; }
 #team-transcript p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 0; font-size: 14px; }
 #team-direction { padding: 12px 16px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid var(--border); }
+#team-blocker-note { width: min(100%, 78ch); margin: 0 auto 8px; color: var(--team-warning, #e0ad70); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
 .team-direction-label { display: block; margin: 0 0 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
 .team-composer { width: min(100%, 78ch); margin-inline: auto; }
 .team-composer:focus-within { box-shadow: 0 0 0 1px var(--accent); }
@@ -80,6 +114,13 @@ button.team-icon.secondary:not(:disabled):hover { background: color-mix(in srgb,
 @media (max-width: 600px) {
   #team-direction { padding-inline: 10px; }
   .team-composer-hint { font-size: 10px; }
+  :is(#team-setup, #team-result):not([hidden]) { padding: 14px 10px; }
+  #team-start { padding: 12px; }
+  #team-brief { min-height: clamp(160px, 36dvh, 360px); }
+  .team-agent-settings { position: fixed; top: auto; right: 12px; bottom: 12px; left: 12px; width: auto; max-height: min(70dvh, 460px); overflow: auto; }
+  .team-agent-model-options { position: static; max-height: 140px; }
+  .team-setup-actions { gap: 6px; }
+  .team-setup-hint { font-size: 11px; }
 }
 @media (prefers-color-scheme: light) {
   .chat-page { --team-warning: #8a4b17; }

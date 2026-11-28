@@ -6,29 +6,64 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setImmediate as turn, setTimeout as delay } from "node:timers/promises";
 import { JSDOM } from "jsdom";
-import { createAgentTeam, inspectTeamWorkspace, prepareTeamWorkspace, resolveTeamModel, teamThinkingLevel, teamWritePath } from "../src/agent-team.ts";
-import { teamReportType } from "../src/chat-transcript.ts";
+import { assistTeamStaleEdit, createAgentTeam, inspectTeamWorkspace, prepareTeamWorkspace, resolveTeamModel, teamModelChoices, teamRoleDefaults, teamThinkingLevel, teamWritePath } from "../src/agent-team.ts";
+import { teamHandoffType, teamReportType } from "../src/chat-transcript.ts";
 import { startChatServer } from "../src/server.ts";
 import { startChatPage } from "../web/app.js";
 import { mountAgentTeam } from "../web/chat/team.js";
 import { mountTranscript } from "../web/chat/transcript.js";
 
-test("team model is exactly OpenAI GPT-6 Luna at high effort, with no fallback", () => {
-  const models = [{ provider: "openai", id: "gpt-6.2-sol" }, { provider: "openai", id: "gpt-5.6-luna" }];
+test("role model defaults and selected models/efforts are validated without fallback", () => {
+  const sol = { provider: "openai", id: "gpt-6.2-sol" };
   const luna = { provider: "openai", id: "gpt-6-luna" };
+  assert.deepEqual(teamRoleDefaults, {
+    po: { model: "openai/gpt-6.2-sol", effort: "medium" },
+    architect: { model: "openai/gpt-6.2-sol", effort: "medium" },
+    backend: { model: "openai/gpt-6-luna", effort: "high" },
+    frontend: { model: "openai/gpt-6-luna", effort: "high" },
+  });
+  assert.deepEqual(teamModelChoices([sol, luna], (model) => model === sol ? ["low", "medium"] : ["medium", "high"]), [
+    { key: "openai/gpt-6.2-sol", label: "gpt-6.2-sol (openai)", efforts: ["low", "medium"] },
+    { key: "openai/gpt-6-luna", label: "gpt-6-luna (openai)", efforts: ["medium", "high"] },
+  ]);
   assert.equal(teamThinkingLevel, "high");
-  assert.equal(resolveTeamModel([...models, luna], () => ["medium", "high"]), luna);
-  assert.throws(() => resolveTeamModel(models, () => ["high"]), /require GPT-6 Luna/);
-  assert.throws(() => resolveTeamModel([luna], () => ["medium"]), /must support high/);
+  assert.equal(resolveTeamModel([sol, luna], () => ["medium", "high"], "openai/gpt-6-luna", "high"), luna);
+  assert.throws(() => resolveTeamModel([sol], () => ["medium"], "openai/gpt-6-luna", "high"), /unavailable/);
+  assert.throws(() => resolveTeamModel([luna], () => ["medium"], "openai/gpt-6-luna", "high"), /not supported/);
+});
+
+test("role settings can change only before start and are applied to that role's worker", async () => {
+  const choices = [
+    { key: "openai/gpt-6.2-sol", label: "Sol", efforts: ["medium"] },
+    { key: "openai/gpt-6-luna", label: "Luna", efforts: ["high"] },
+  ];
+  const { team, calls } = mockTeam({ modelChoices: choices, resolveRoleSettings: (role, selected) => {
+    const choice = choices.find(({ key }) => key === selected.model);
+    if (!choice) throw new Error(`Model ${selected.model} unavailable.`);
+    if (!choice.efforts.includes(selected.effort)) throw new Error(`${selected.effort} unsupported for ${selected.model}.`);
+    return { model: { provider: "openai", id: selected.model.split("/")[1] }, thinkingLevel: selected.effort };
+  } });
+  assert.deepEqual(team.snapshot().settings.po, { model: "openai/gpt-6.2-sol", effort: "medium" });
+  assert.deepEqual(team.snapshot().settings.backend, { model: "openai/gpt-6-luna", effort: "high" });
+  assert.throws(() => team.updateSettings("po", { model: "openai/nope", effort: "medium" }), /unavailable/);
+  assert.throws(() => team.updateSettings("po", { model: "openai/gpt-6-luna", effort: "medium" }), /unsupported/);
+  team.updateSettings("po", { model: "openai/gpt-6-luna", effort: "high" });
+  assert.deepEqual(team.snapshot().roles.find(({ id }) => id === "po").model, "openai/gpt-6-luna");
+  team.start("Run the task");
+  await turn();
+  assert.equal(calls[0].model.id, "gpt-6-luna");
+  assert.equal(calls[0].thinkingLevel, "high");
+  assert.throws(() => team.updateSettings("backend", { effort: "medium" }), /only be changed before/);
+  team.close();
 });
 
 const paths = { cwd: "/tmp/shared-team", head: "base" };
 const exampleChanges = { files: " M api.js\n?? ui.js", diff: "diff --git a/api.js b/api.js\n+<img src=x>\n+renderPanel()", truncated: false };
-function mockTeam({ prepare = async ({ workspace }) => workspace ?? paths, saveAttachments, inspectWorkspace = async () => exampleChanges } = {}) {
+function mockTeam({ prepare = async ({ workspace }) => workspace ?? paths, saveAttachments, inspectWorkspace = async () => exampleChanges, modelChoices, resolveRoleSettings, captureHandoff, assistStaleEdit } = {}) {
   const calls = [];
   const disposed = [];
   let openedWorkers = 0;
-  const team = createAgentTeam({ prepare, saveAttachments, inspectWorkspace, openWorker: async (opts) => {
+  const team = createAgentTeam({ prepare, saveAttachments, inspectWorkspace, modelChoices, resolveRoleSettings, captureHandoff, assistStaleEdit, openWorker: async (opts) => {
     const worker = ++openedWorkers;
     let listener, resolve;
     const abort = () => { resolve?.(); return Promise.resolve(); };
@@ -110,6 +145,68 @@ test("two identical tool errors pause without making another model turn", async 
   team.close();
 });
 
+const stalePath = "web/chat/team.css";
+const staleDetail = `Could not find edits[0] in ${stalePath}. The oldText must match exactly including all whitespace and newlines.`;
+function staleEdit(call, id) {
+  call.event({ type: "tool_execution_start", toolCallId: id, toolName: "team_edit", args: { path: stalePath, edits: [{ oldText: "old", newText: "new" }] } });
+  call.event({ type: "tool_execution_end", toolCallId: id, toolName: "team_edit", isError: true, result: { content: [{ type: "text", text: staleDetail }] } });
+}
+async function reachBackend(team, calls) {
+  team.start("Improve the shared composer");
+  await turn();
+  calls[0].finish("done", "Scope set");
+  await turn();
+  calls[1].finish("done", "Design set");
+  await turn();
+}
+
+test("stale edits get one re-read retry and one Main chat assist on the same worker, then pause", async (t) => {
+  const assisted = [];
+  const { team, calls } = mockTeam({ assistStaleEdit: async (blocker) => {
+    assisted.push(blocker);
+    return "Main chat checked the current target; re-read it and retry the smallest exact edit.";
+  } });
+  t.after(team.close);
+  await reachBackend(team, calls);
+  const worker = calls[2].worker;
+  staleEdit(calls[2], "first");
+  calls[2].finish("blocked", staleDetail);
+  await turn();
+  assert.match(calls[3].text, /Re-read the current file at "web\/chat\/team\.css".*smallest unique oldText/);
+  assert.equal(calls[3].worker, worker);
+  assert.deepEqual(assisted, []);
+  assert.equal(team.snapshot().roles.find(({ id }) => id === "backend").status, "working");
+  staleEdit(calls[3], "second");
+  staleEdit(calls[3], "third");
+  await turn();
+  assert.deepEqual(assisted, [{ role: "Backend implementer", path: stalePath, detail: staleDetail, edit: { oldText: "old", newText: "new" }, workspace: paths }]);
+  assert.match(calls[4].text, /Main chat checked the current target/);
+  assert.equal(calls[4].worker, worker);
+  assert.ok(team.snapshot("backend").messages.some(({ who }) => who === "Main chat"));
+  staleEdit(calls[4], "last");
+  calls[4].finish("retry", "Still stale");
+  await turn();
+  const role = team.snapshot().roles.find(({ id }) => id === "backend");
+  assert.equal(role.status, "paused");
+  assert.match(role.report, /Could not recover the exact-match edit/);
+  assert.equal(calls.length, 5);
+});
+
+test("a real product decision still pauses even after a stale edit was reported", async (t) => {
+  let assisted = false;
+  const { team, calls } = mockTeam({ assistStaleEdit: async () => { assisted = true; return "Unexpected assist"; } });
+  t.after(team.close);
+  await reachBackend(team, calls);
+  staleEdit(calls[2], "before-decision");
+  calls[2].finish("blocked", "Should this change apply to all chats or Teams only?");
+  await turn();
+  const role = team.snapshot().roles.find(({ id }) => id === "backend");
+  assert.equal(role.status, "paused");
+  assert.match(role.report, /all chats or Teams only/);
+  assert.equal(assisted, false);
+  assert.equal(calls.length, 3);
+});
+
 test("the shared worktree starts from committed HEAD, exposes the combined diff, and limits writes", async (t) => {
   const repo = await mkdtemp(join(tmpdir(), "team-test-repo-"));
   t.after(() => rm(repo, { recursive: true, force: true }));
@@ -131,14 +228,28 @@ test("the shared worktree starts from committed HEAD, exposes the combined diff,
   assert.match(result.diff, /\+backend edits/);
   assert.match(result.diff, /\+frontend uses backend edits/);
   assert.equal(result.truncated, false);
+  assert.deepEqual(result.patchCheck, { status: "passed" });
+  await writeFile(join(root, "ui.txt"), "trailing whitespace \n");
+  const bad = await inspectTeamWorkspace(workspace, true);
+  assert.equal(bad.patchCheck.status, "issues");
+  assert.match(bad.patchCheck.details, /ui\.txt:1: trailing whitespace/);
+  const assist = (edit) => assistTeamStaleEdit({ workspace, path: "ui.txt", edit });
+  assert.match(await assist(), /Main chat confirmed.*Re-read the current file/);
+  assert.match(await assist({ oldText: "  trailing whitespace\n", newText: "clean text" }), /matches line 1 after trimming whitespace/);
+  assert.match(await assist({ oldText: "A different line", newText: "trailing whitespace" }), /replacement text occurs once and the old text is absent/);
+  assert.equal(await readFile(join(root, "ui.txt"), "utf8"), "trailing whitespace \n", "automatic help is read-only");
   assert.equal(await readFile(join(repo, "app.txt"), "utf8"), "unstaged user changes");
   await symlink(other, join(root, "escape"), "dir");
   await symlink(join(other, "new.txt"), join(root, "dangling"));
-  for (const path of ["../frontend/app.txt", ".git", "escape/new.txt", "dangling"]) await assert.rejects(teamWritePath(root, path), /worktree|symlink/);
+  for (const path of ["../frontend/app.txt", ".git", "escape/new.txt", "dangling"]) {
+    await assert.rejects(teamWritePath(root, path), /worktree|symlink/);
+    await assert.rejects(assistTeamStaleEdit({ workspace, path }), /worktree|symlink/);
+  }
 });
 
-test("team API requires the live chat token and same-origin POSTs; close disposes workers", async (t) => {
-  const { team, calls, disposed } = mockTeam();
+test("team API requires the live chat token and same-origin POSTs; close disposes workers without handing off", async (t) => {
+  let delivered = false;
+  const { team, calls, disposed } = mockTeam({ captureHandoff: () => () => (delivered = true) });
   const opened = await startChatServer({ chat: { getBranch: () => [], isIdle: () => true, team } });
   t.after(opened.close);
   const url = new URL(opened.url);
@@ -148,12 +259,21 @@ test("team API requires the live chat token and same-origin POSTs; close dispose
   assert.equal((await api("/api/team")).status, 401);
   assert.equal((await start({ ...headers, Origin: "http://another.invalid" })).status, 403);
   assert.equal((await (await api("/api/response", { headers })).json()).team, true);
+  const initial = await (await api("/api/team", { headers })).json();
+  assert.equal(initial.settings.po.model, "openai/gpt-6.2-sol");
+  assert.equal(initial.settings.backend.effort, "high");
+  assert.ok(Array.isArray(initial.modelChoices));
+  const update = await api("/api/team", { method: "POST", headers, body: JSON.stringify({ action: "settings", role: "po", settings: { model: "openai/gpt-6-luna", effort: "medium" } }) });
+  assert.equal(update.status, 200);
+  assert.equal((await update.json()).settings.po.model, "openai/gpt-6-luna");
   assert.equal((await start(headers)).status, 202);
   assert.equal(calls.length, 1);
   assert.equal((await start(headers)).status, 400);
   opened.close();
   assert.equal(disposed.length, 1);
   assert.equal(team.snapshot().phase, "stopped");
+  await turn();
+  assert.equal(delivered, false);
 });
 
 test("closing and reopening the browser view keeps the running team and workspace", async (t) => {
@@ -286,7 +406,7 @@ test("served Teams view sends attachments, shows the combined result, and gives 
   assert.equal(calls.length, 0);
   $("team-submit").click();
   await until(() => calls.length === 1 && $("team-setup").hidden, "Start did not reach the runner and show team status");
-  assert.deepEqual(prepared, [{ hasImages: true, workspace: undefined }, { hasImages: true, workspace: undefined }]);
+  assert.deepEqual(prepared, Array.from({ length: 2 }, () => ({ hasImages: true, workspace: undefined, settings: teamRoleDefaults })));
   assert.equal($("team-panel").hidden, false);
   assert.deepEqual([...$("team-roles").querySelectorAll(".team-card:not([hidden]):not(:disabled) strong")].map((name) => name.textContent), [
     "Main chat", "Product owner", "Backend implementer", "Frontend implementer", "Software architect",
@@ -319,6 +439,11 @@ test("served Teams view sends attachments, shows the combined result, and gives 
   assert.match($("team-result-files").textContent, /api\.js[\s\S]+ui\.js/);
   assert.match($("team-result-diff").textContent, /<img src=x>/);
   assert.equal($("team-result-diff").querySelector("img"), null);
+  toggle.click();
+  assert.equal($("team-result").hidden, true, "main chat view replaces the team result without discarding it");
+  toggle.click();
+  assert.equal($("team-result").hidden, false, "returning to Teams restores the completed result");
+  assert.match($("team-result-diff").textContent, /<img src=x>/);
   $("team-feedback").click();
   assert.equal($("team-result").hidden, true);
   assert.equal($("team-setup").hidden, false);
@@ -327,7 +452,7 @@ test("served Teams view sends attachments, shows the combined result, and gives 
   $("team-brief").dispatchEvent(new window.Event("input"));
   $("team-submit").click();
   await until(() => calls.length === 6 && $("team-setup").hidden, "Feedback did not reach the runner");
-  assert.deepEqual(prepared[2], { hasImages: false, workspace: paths });
+  assert.deepEqual(prepared[2], { hasImages: false, workspace: paths, settings: teamRoleDefaults });
   assert.equal(calls[5].worker, calls[0].worker);
   assert.match(calls[5].text, /Build the status screen[\s\S]+User feedback for round 2:\nMake the status easier to read/);
   assert.equal(calls[5].options.images, undefined, "do not resend past round attachments");
@@ -386,7 +511,7 @@ test("invalid team attachments fail before preparation and large text uses a pri
   assert.ok(calls[0].text.length < 2000, "Large contents should not be sent inline");
 });
 
-test("legacy team reports remain readable in the main transcript without becoming branchable", async (t) => {
+test("Main chat shows a handoff receipt, not the raw handoff, and still renders legacy team reports", async (t) => {
   const branch = [{ id: "previous", type: "message", message: { role: "assistant", content: "I’m ready." } }];
   const opened = await startChatServer({ chat: { getBranch: () => branch, isIdle: () => true } });
   t.after(opened.close);
@@ -396,9 +521,11 @@ test("legacy team reports remain readable in the main transcript without becomin
   assert.equal((await get()).cursor, "previous");
   branch.push({ id: "report", type: "custom_message", customType: teamReportType, display: true, content: "**Tests still needed.** <img src=x>" });
   branch.push({ id: "hidden", type: "custom_message", customType: "unrelated", display: true, content: "Do not show other custom messages." });
+  branch.push({ id: "handoff", type: "custom_message", customType: teamHandoffType, display: false, details: { round: 2 }, content: "Private handoff notes" });
   const { messages, cursor } = await get("?after=previous");
-  assert.deepEqual(messages.map(({ role }) => role), ["team-report"]);
-  assert.equal(messages[0].canBranch, undefined);
+  assert.deepEqual(messages.map(({ role }) => role), ["team-report", "team-handoff"]);
+  assert.ok(messages.every(({ canBranch }) => canBranch === undefined));
+  assert.doesNotMatch(JSON.stringify(messages), /Private handoff notes/);
   assert.deepEqual((await get(`?after=${cursor}`)).messages, []);
 
   const dom = new JSDOM(await readFile(new URL("../web/index.html", import.meta.url), "utf8"));
@@ -409,6 +536,83 @@ test("legacy team reports remain readable in the main transcript without becomin
   assert.equal(report.querySelector("h2").textContent, "Software architect · Team report");
   assert.equal(report.querySelector("strong").textContent, "Tests still needed.");
   assert.equal(report.querySelector("img, [data-response-id], .reply-branch"), null);
+  const receipt = dom.window.document.querySelector("#response .team-handoff-turn");
+  assert.equal(receipt.querySelector("h2").textContent, "Team handoff");
+  assert.match(receipt.textContent, /Round 2 received/);
+  assert.equal(receipt.querySelector("[data-response-id], .reply-branch"), null);
+});
+
+test("team role controls show backend choices, update a role, and lock after start", async (t) => {
+  const dom = new JSDOM(await readFile(new URL("../web/index.html", import.meta.url), "utf8"));
+  t.after(() => dom.window.close());
+  const d = dom.window.document;
+  const modelChoices = [
+    { key: "openai/gpt-6.2-sol", label: "Sol", efforts: ["medium", "high"] },
+    { key: "openai/gpt-6-luna", label: "Luna", efforts: ["high"] },
+  ];
+  const settings = { po: { model: modelChoices[0].key, effort: "medium" }, architect: { model: modelChoices[0].key, effort: "medium" }, backend: { model: modelChoices[1].key, effort: "high" }, frontend: { model: modelChoices[1].key, effort: "high" } };
+  let phase = "idle";
+  const roles = [{ id: "po", name: "Product owner" }, { id: "architect", name: "Software architect" }, { id: "backend", name: "Backend implementer" }, { id: "frontend", name: "Frontend implementer" }];
+  const posts = [];
+  const current = () => ({ phase, revision: 1, modelChoices, settings, roles: roles.map((role) => ({ ...role, ...settings[role.id], status: "queued" })) });
+  const ui = mountAgentTeam(dom.window, { onViewChange() {}, api: async (_path, body) => {
+    if (body?.action === "settings") { posts.push(body); Object.assign(settings[body.role], body.settings); return current(); }
+    return current();
+  } });
+  await ui.refresh();
+  d.getElementById("team-view-toggle").click();
+  const poCard = d.querySelector('.team-card[data-role="po"]').parentElement;
+  const poGear = poCard.querySelector(".team-agent-gear");
+  poGear.click();
+  assert.equal(poGear.getAttribute("aria-expanded"), "true");
+  const pointerErrors = [];
+  dom.window.addEventListener("error", (event) => pointerErrors.push(event.error));
+  d.getElementById("team-brief").dispatchEvent(new dom.window.Event("pointerdown", { bubbles: true }));
+  assert.deepEqual(pointerErrors, []);
+  assert.equal(poGear.getAttribute("aria-expanded"), "false");
+  poGear.click();
+  assert.match(poCard.querySelector(".team-agent-settings-status").textContent, /Sol · medium effort/);
+  const modelInput = poCard.querySelector('[role="combobox"]');
+  modelInput.value = "Luna";
+  modelInput.dispatchEvent(new dom.window.Event("input"));
+  poCard.querySelector('.team-agent-model-options [role="option"]').click();
+  await turn();
+  assert.deepEqual(posts, [{ action: "settings", role: "po", settings: { model: modelChoices[1].key, effort: "high" } }]);
+  assert.deepEqual(settings.architect, { model: modelChoices[0].key, effort: "medium" }, "only the selected role is changed");
+  phase = "active";
+  await ui.refresh(true);
+  assert.equal(poGear.disabled, true);
+  assert.match(poCard.querySelector(".team-agent-settings-status").textContent, /locked/);
+});
+
+test("Teams recovers from a temporary request failure even if the revision did not change", async (t) => {
+  const dom = new JSDOM(await readFile(new URL("../web/index.html", import.meta.url), "utf8"));
+  t.after(() => dom.window.close());
+  const d = dom.window.document;
+  const model = { key: "openai/gpt-6.2-sol", label: "Sol", efforts: ["medium"] };
+  const settings = { po: { model: model.key, effort: "medium" } };
+  const snapshot = { phase: "idle", revision: 1, settings, modelChoices: [model], roles: [{ id: "po", name: "Product owner", status: "queued" }] };
+  let fetches = 0;
+  const ui = mountAgentTeam(dom.window, { onViewChange() {}, api: async (path) => {
+    fetches++;
+    if (fetches === 1) return snapshot;
+    assert.match(path, /revision=1/);
+    if (fetches === 2) throw new TypeError("Connection interrupted");
+    if (fetches === 3) return { revision: 1 };
+    throw Object.assign(new Error("Expired"), { status: 410 });
+  } });
+  await ui.refresh();
+  d.getElementById("team-view-toggle").click();
+  const gear = d.querySelector(".team-agent-gear");
+  assert.equal(gear.disabled, false);
+  await ui.refresh();
+  assert.equal(gear.disabled, true);
+  await ui.refresh();
+  assert.equal(gear.disabled, false);
+  await ui.refresh();
+  await ui.refresh();
+  assert.equal(fetches, 4, "an expired listener is not polled again");
+  assert.equal(gear.disabled, true);
 });
 
 test("the sidebar opens a pet's transcript and routes direction only to its paused role", async (t) => {
@@ -444,6 +648,8 @@ test("the sidebar opens a pet's transcript and routes direction only to its paus
   assert.match(thread.textContent, /Notes for po/);
   assert.equal(thread.querySelector("img"), null);
   assert.equal(d.getElementById("team-direction").hidden, false);
+  assert.equal(d.getElementById("team-blocker-note").textContent, "Need a decision");
+  assert.equal(d.getElementById("team-blocker-note").hidden, false);
   d.getElementById("team-input").value = "Keep the smaller scope";
   d.getElementById("team-direction").dispatchEvent(new dom.window.Event("submit", { cancelable: true }));
   await turn();

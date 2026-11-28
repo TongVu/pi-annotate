@@ -199,23 +199,25 @@
         </div>
         <form id="team-start">
           <label for="team-brief">What should the team work on?</label>
-          <textarea id="team-brief" rows="10" maxlength="32000" placeholder="Describe the task and what a good result looks like…"></textarea>
-          <input id="team-files" type="file" multiple hidden>
-          <ul id="team-attachments" class="attachment-list" aria-label="Files in the team draft" hidden></ul>
-          <div class="team-setup-actions">
-            <button id="team-attach" type="button" class="secondary team-icon" aria-label="Attach files" title="Attach files">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.4 11-9.2 9.2a6 6 0 0 1-8.5-8.5L14.3 1.2A4 4 0 0 1 20 6.9L9.4 17.5a2 2 0 0 1-2.8-2.8l9.9-9.9"/></svg>
-            </button>
-            <div class="team-submit-actions">
-              <button id="team-submit" type="submit" class="team-icon" aria-label="Start team" title="Start team" disabled>
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20V4m-6 6 6-6 6 6"/></svg>
+          <div class="chat-composer team-start-composer">
+            <textarea id="team-brief" rows="10" maxlength="32000" placeholder="Describe the task and what a good result looks like…"></textarea>
+            <input id="team-files" type="file" multiple hidden>
+            <ul id="team-attachments" class="attachment-list" aria-label="Files in the team draft" hidden></ul>
+            <div class="team-setup-actions">
+              <button id="team-attach" type="button" class="secondary team-icon" aria-label="Attach files" title="Attach files">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.4 11-9.2 9.2a6 6 0 0 1-8.5-8.5L14.3 1.2A4 4 0 0 1 20 6.9L9.4 17.5a2 2 0 0 1-2.8-2.8l9.9-9.9"/></svg>
               </button>
-              <button id="team-cancel-start" type="button" class="secondary team-icon" aria-label="Stop team" title="Stop team" hidden>
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-              </button>
+              <div class="team-submit-actions">
+                <button id="team-submit" type="submit" class="team-icon" aria-label="Start team" title="Start team" disabled>
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20V4m-6 6 6-6 6 6"/></svg>
+                </button>
+                <button id="team-cancel-start" type="button" class="secondary team-icon" aria-label="Stop team" title="Stop team" hidden>
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+                </button>
+              </div>
             </div>
           </div>
-          <p class="team-setup-hint">Up to 10 text files or PNG, JPEG, GIF, and WebP images. GPT-6 Luna · high effort. The team sees only what you send in Teams. Edits stay in a shared workspace, separate from your checkout.</p>
+          <p class="team-setup-hint">Defaults: Product owner and architect use Sol · medium; implementers use Luna · high. Configure each role with its gear before starting. Up to 10 text files or PNG, JPEG, GIF, and WebP images. The team sees only what you send in Teams; edits stay in a shared workspace, separate from your checkout.</p>
           <p id="team-setup-status" role="status"></p>
         </form>
       </div>
@@ -243,6 +245,7 @@
       </div>
       <div id="team-transcript" tabindex="0" aria-label="Role transcript"></div>
       <form id="team-direction" class="team-direction" hidden>
+        <p id="team-blocker-note" role="status" hidden></p>
         <label class="team-direction-label" for="team-input">Your direction</label>
         <div class="chat-composer team-composer">
           <textarea id="team-input" aria-label="Your direction" rows="2" maxlength="8000" placeholder="Reply to this role…"></textarea>

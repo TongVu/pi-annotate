@@ -4,10 +4,13 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { setTimeout as delay } from "node:timers/promises";
+import { createAgentTeam } from "../src/agent-team.ts";
+import { teamHandoffType } from "../src/chat-transcript.ts";
 import { registerChatExtension } from "../src/index.ts";
 import { AUTO_CHAT_SESSION, NEW_CHAT_TARGET } from "../src/resume-chat.ts";
 
-function fixture(t, { dashboard = false, launchPage = async () => {}, sendUserMessage = () => {}, ...dashboardOptions } = {}) {
+function fixture(t, { dashboard = false, launchPage = async () => {}, sendUserMessage = () => {}, sendMessage = () => {}, ...options } = {}) {
   const handlers = new Map();
   const commands = new Map();
   const flags = new Map();
@@ -20,7 +23,8 @@ function fixture(t, { dashboard = false, launchPage = async () => {}, sendUserMe
     setSessionName: () => {},
     getSettings: () => ({}),
     sendUserMessage,
-  }, launchPage, dashboardOptions);
+    sendMessage,
+  }, launchPage, options);
   t.after(() => handlers.get("session_shutdown")());
   const ctx = {
     mode: "tui",
@@ -54,6 +58,120 @@ test("/chat is the sole registered browser command and opens a live session", as
   assert.equal((await response.json()).mode, "chat");
   await f.run("close");
   await assert.rejects(() => fetch(url.origin));
+});
+
+test("completed Teams rounds hand off once to their Main chat, independent of the browser", async (t) => {
+  const delivered = [];
+  const assignments = [];
+  const reviews = [];
+  const main = [{ id: "private", type: "message", message: { role: "user", content: "Private Main chat text" } }];
+  let branch = main;
+  const f = fixture(t, {
+    sendUserMessage: () => assert.fail("a team handoff must not impersonate a user"),
+    sendMessage(message, options) {
+      delivered.push({ message, options });
+      branch.push({ ...message, id: `handoff-${delivered.length}`, type: "custom_message" });
+    },
+    createTeam: ({ captureHandoff }) => createAgentTeam({
+      captureHandoff,
+      prepare: async ({ workspace }) => workspace ?? { cwd: "/tmp/team-result", head: "base" },
+      inspectWorkspace: async () => ({ files: " M ui.js", diff: "Raw patch content", truncated: false }),
+      async openWorker() {
+        let listener;
+        return {
+          subscribe(fn) { listener = fn; return () => { listener = undefined; }; },
+          dispose() {},
+          async prompt(text) {
+            assignments.push(text);
+            const review = text.includes("Read the combined changes");
+            if (review) await new Promise((resolve) => reviews.push(resolve));
+            const decision = text.includes("Define the smallest viable design") && !text.includes("\n\nUser direction:");
+            const report = review ? "Review notes: preview not run" : decision ? "Choose the smaller UI" : "Stage handoff";
+            listener?.({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: JSON.stringify({ status: decision ? "blocked" : "done", report }) }] } });
+          },
+        };
+      },
+    }),
+  });
+  f.ctx.sessionManager.getBranch = () => branch;
+  function connect() {
+    const url = openedUrl(f.notices);
+    return async (path, body) => {
+      const response = await fetch(url.origin + path, { headers: { Authorization: `Bearer ${url.hash.slice(1)}`, Origin: url.origin, "Content-Type": "application/json" },
+        ...(body && { method: "POST", body: JSON.stringify(body) }) });
+      assert.ok(response.ok, `${path}: ${response.status}`);
+      return response.json();
+    };
+  }
+  async function waitFor(read) {
+    for (let i = 0; i < 100; i++) {
+      const value = await read();
+      if (value) return value;
+      await delay(10);
+    }
+    assert.fail("Timed out waiting for the team");
+  }
+  const start = (request, action, brief, attachments) => request("/api/team", { action, brief, attachments });
+  const direct = async (request, direction) => {
+    const role = await waitFor(async () => (await request("/api/team")).roles.find(({ status }) => status === "paused"));
+    return request("/api/team", { action: "resume", role: role.id, pause: role.pause, direction });
+  };
+  await f.run();
+  let request = connect();
+  await start(request, "start", "Show the role conversation", [{ name: "spec.txt", mimeType: "text/plain", data: Buffer.from("Attachment payload").toString("base64") }]);
+  await direct(request, "Keep only the reply composer");
+  await waitFor(() => reviews.length === 1);
+  assert.equal(delivered.length, 0, "nothing is sent before review");
+  await f.run("close");
+  reviews[0]();
+  await waitFor(() => delivered.length === 1);
+  assert.deepEqual(delivered[0].options, { triggerTurn: true, deliverAs: "followUp" });
+  assert.match(delivered[0].message.content, /report back to the user now; do not wait/);
+  assert.equal(delivered[0].message.customType, teamHandoffType);
+  assert.equal(delivered[0].message.display, false);
+  const info = ({ message }) => JSON.parse(message.content.split("\n\n").at(-1));
+  assert.deepEqual(info(delivered[0]), {
+    round: 1, brief: "Show the role conversation", feedback: "", directions: [{ role: "Software architect", text: "Keep only the reply composer" }],
+    earlierDirectionsOmitted: false, workspace: { cwd: "/tmp/team-result", head: "base" }, changedFiles: " M ui.js", changesTruncated: false,
+    reports: { scope: "Stage handoff", design: "Stage handoff", backend: "Stage handoff", frontend: "Stage handoff", review: "Review notes: preview not run" },
+  });
+  assert.match(assignments[0], /Attachment payload/);
+  assert.doesNotMatch(delivered[0].message.content, /Attachment payload|Private Main chat text|Raw patch content/);
+  assert.ok(assignments.every((text) => !text.includes("Private Main chat text")));
+  await f.run();
+  request = connect();
+  const mainView = await request("/api/response?after=private");
+  assert.deepEqual(mainView.messages.map(({ role }) => role), ["team-handoff"]);
+  assert.match(mainView.messages[0].text, /Round 1 received.*will review the result and report back here/);
+  assert.doesNotMatch(mainView.messages[0].text, /Show the role conversation|Review notes/);
+  assert.equal(delivered.length, 1, "reopening does not re-deliver");
+
+  await start(request, "feedback", "Clarify the send action");
+  await direct(request, "Use a label");
+  await waitFor(() => reviews.length === 2);
+  reviews[1]();
+  await waitFor(() => delivered.length === 2);
+  assert.equal(info(delivered[1]).round, 2);
+  assert.equal(info(delivered[1]).brief, "Show the role conversation");
+  assert.equal(info(delivered[1]).feedback, "Clarify the send action");
+  assert.deepEqual(info(delivered[1]).directions, [{ role: "Software architect", text: "Use a label" }]);
+
+  await start(request, "feedback", "Try a smaller label");
+  await direct(request, "Keep the icon too");
+  await waitFor(() => reviews.length === 3);
+  f.handlers.get("session_before_tree")();
+  branch = [];
+  reviews[2]();
+  await f.run();
+  request = connect();
+  const result = await waitFor(async () => {
+    const snapshot = await request("/api/team");
+    return snapshot.phase === "done" && snapshot;
+  });
+  assert.match(result.issue, /Main chat changed.*available in Teams/);
+  assert.ok(result.result);
+  assert.deepEqual(branch, []);
+  assert.equal(delivered.length, 2);
 });
 
 test("stop targets the active browser message, not queued, terminal, or later prompts", async (t) => {

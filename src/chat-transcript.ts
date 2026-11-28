@@ -3,8 +3,14 @@ import { imageMimeType } from "./chat-attachments.ts";
 import { renderMarkdown } from "./markdown.ts";
 
 export const teamReportType = "pi-chat-team-report";
+export const teamHandoffType = "pi-chat-team-handoff";
 
 export function renderChatEntry(entry) {
+  if (entry.type === "custom_message" && entry.customType === teamHandoffType) {
+    const round = entry.details?.round;
+    if (!Number.isSafeInteger(round) || round < 1) return;
+    return { id: entry.id, role: "team-handoff", ...renderMarkdown(`Round ${round} received. Main chat will review the result and report back here.`) };
+  }
   if (entry.type === "custom_message" && entry.customType === teamReportType && entry.display && typeof entry.content === "string") {
     return { id: entry.id, role: "team-report", ...renderMarkdown(entry.content) };
   }

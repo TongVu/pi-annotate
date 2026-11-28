@@ -118,12 +118,13 @@ export function mountTranscript(window, { fetchImage, isViewingLive, isCommentOp
     const turn = document.createElement("section");
     const assistant = message.role === "assistant";
     const teamReport = message.role === "team-report";
-    turn.className = `chat-turn ${teamReport ? "team-report-turn" : assistant ? "assistant-turn" : "user-turn"}`;
+    const handoff = message.role === "team-handoff";
+    turn.className = `chat-turn ${handoff ? "team-handoff-turn" : teamReport ? "team-report-turn" : assistant ? "assistant-turn" : "user-turn"}`;
     turn.dataset.entryId = message.id;
     const content = document.createElement("div");
-    if (assistant || teamReport) {
+    if (assistant || teamReport || handoff) {
       const label = document.createElement("h2");
-      label.textContent = teamReport ? "Software architect · Team report" : "Pi";
+      label.textContent = handoff ? "Team handoff" : teamReport ? "Software architect · Team report" : "Pi";
       turn.append(label);
     } else {
       turn.setAttribute("aria-label", "Your message");
