@@ -20,14 +20,16 @@
     ]
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*"
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
   },
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "check": "node --check src/server.ts && node --check src/annotations.ts && node --check src/markdown.ts && node --check src/chat-notes.ts && node --check src/dashboard.ts && node --check src/focus-browser.ts && node --check web/app.js && node --check web/chat/notes.js && node --check web/dashboard.js && npm test"
   },
   "devDependencies": {
-    "jsdom": "27.2.0"
+    "jsdom": "27.2.0",
+    "typebox": "1.3.27"
   },
   "dependencies": {
     "highlight.js": "11.12.0",
