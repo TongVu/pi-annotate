@@ -118,7 +118,7 @@ test("dashboard pet stages follow session status without changing card actions",
     assert.equal(stage.dataset.pet, reaction);
     assert.equal(stage.getAttribute("aria-hidden"), "true");
     assert.equal(stage.previousElementSibling.textContent, "Session preview");
-    assert.equal(stage.nextElementSibling.querySelector("button.open").dataset.id, reaction);
+    assert.equal(stage.closest(".card").querySelector(".row button.open").dataset.id, reaction);
     const indicator = card.querySelector(".pill");
     assert.ok(indicator.querySelector(`.dot.${status}`));
     assert.equal(indicator.textContent, "", "the status indicator has no visible label");
@@ -132,11 +132,51 @@ test("dashboard pet stages follow session status without changing card actions",
   sessions[3].terminalWorking = true;
   document.getElementById("refresh").click();
   await waitFor(() => cardFor("disconnected").querySelector(".pet-stage").dataset.pet === "terminal-working");
+  const stageButton = document.getElementById("layout-pet-stage");
+  const compactButton = document.getElementById("layout-compact");
+  assert.equal(stageButton.getAttribute("aria-pressed"), "true");
+  document.querySelector('.stat[data-status-filter="disconnected"]').click();
+  assert.equal(document.querySelectorAll(".card").length, 2);
+  compactButton.click();
+  assert.equal(compactButton.getAttribute("aria-pressed"), "true");
+  assert.equal(stageButton.getAttribute("aria-pressed"), "false");
+  assert.equal(dom.window.document.body.dataset.layout, "compact");
+  assert.equal(document.querySelectorAll(".card").length, 2, "switching layouts preserves the status filter");
+  assert.equal(document.querySelectorAll(".card .pet-stage").length, 2);
+  assert.equal(document.querySelector('.card [data-pet="terminal-working"]')?.classList.contains("pet-stage"), true);
+  assert.equal(dom.window.localStorage.getItem("pi-dashboard-layout"), "compact");
+  document.getElementById("refresh").click();
+  await waitFor(() => document.body.dataset.layout === "compact" && cardFor("disconnected").querySelector(".pet-stage").dataset.pet === "terminal-working");
+  assert.equal(document.querySelectorAll(".card").length, 2, "refresh preserves the active filter and compact layout");
+  document.getElementById("clear-status-filter").click();
+  assert.ok(cardFor("saved").querySelector(".pet-stage"), "Pet stage retains the saved archive box");
+  assert.equal(cardFor("saved").querySelector(".pet-stage").dataset.pet, "saved");
+  assert.equal(cardFor("saved").querySelector(".pet-stage").getAttribute("aria-hidden"), "true");
+  assert.equal(cardFor("saved").querySelector(".pet-stage").parentElement.className, "card-content");
+  compactButton.click();
+  assert.equal(cardFor("saved").querySelector(".pet-stage").dataset.pet, "saved", "compact saved cards omit pet space via layout styling");
+  stageButton.click();
+  assert.equal(document.querySelectorAll(".card").length, cases.length);
   const card = cardFor("disconnected");
   assert.equal(card.querySelector(".open").textContent, "Reopen chat");
   card.querySelector(".pet-stage").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
   assert.deepEqual(requests, [{ id: "disconnected", intent: "open" }]);
   await waitFor(() => cardFor("disconnected").querySelector(".open").getAttribute("aria-disabled") === "false");
+});
+
+test("dashboard restores its browser-local card layout preference", async (t) => {
+  const html = await readFile(new URL("../web/dashboard.html", import.meta.url), "utf8");
+  const script = await readFile(new URL("../web/dashboard.js", import.meta.url), "utf8");
+  const dom = new JSDOM(html, { url: "http://127.0.0.1:3456/#layout-reload", runScripts: "outside-only" });
+  t.after(() => dom.window.close());
+  dom.window.localStorage.setItem("pi-dashboard-layout", "compact");
+  dom.window.fetch = async () => ({ ok: true, json: async () => ({ sessions: [{ ...saved, modified: +saved.modified, status: "saved", action: "resume" }] }) });
+  dom.window.eval(script);
+  await waitFor(() => dom.window.document.querySelector(".card"));
+  assert.equal(dom.window.document.body.dataset.layout, "compact");
+  assert.equal(dom.window.document.getElementById("layout-compact").getAttribute("aria-pressed"), "true");
+  dom.window.document.getElementById("layout-pet-stage").click();
+  assert.equal(dom.window.localStorage.getItem("pi-dashboard-layout"), "stage");
 });
 
 test("dashboard copies the selected project's exact directory path", async (t) => {

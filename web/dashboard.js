@@ -59,6 +59,10 @@ let sessions = [];
 let browserSelect = false;
 let projects = [];
 let view = "all";
+let layout = (() => {
+  try { return localStorage.getItem("pi-dashboard-layout") === "compact" ? "compact" : "stage"; }
+  catch { return "stage"; }
+})();
 let project;
 let statusFilter;
 let lastData;
@@ -261,7 +265,11 @@ function cards(cwd, items, namesById) {
       card.append(lineage);
     }
     if (typeof session.bookmarked === "boolean") card.append(bookmarkButton(session));
-    if (session.preview) card.append(el("p", "", session.preview));
+    const content = el("div", "card-content");
+    const copy = el("div", "card-copy");
+    if (session.preview) copy.append(el("p", "", session.preview));
+    content.append(copy, petStage(session));
+    card.append(content);
     const row = el("div", "row");
     const when = el("time", "", session.modified ? `Updated ${age(session.modified)}` : "");
     if (session.modified) {
@@ -278,11 +286,19 @@ function cards(cwd, items, namesById) {
       row.append(verify);
     }
     row.append(actionButton(session));
-    card.append(petStage(session), row);
+    card.append(row);
     grid.append(card);
   }
   section.append(grid);
   return section;
+}
+
+function setLayout(next) {
+  layout = next;
+  document.body.dataset.layout = layout;
+  $("layout-pet-stage").setAttribute("aria-pressed", String(layout === "stage"));
+  $("layout-compact").setAttribute("aria-pressed", String(layout === "compact"));
+  try { localStorage.setItem("pi-dashboard-layout", layout); } catch {}
 }
 
 function render() {
@@ -689,6 +705,9 @@ document.addEventListener("click", (event) => {
 });
 $("legend").append(...["working", "ready", "disconnected", "error", "saved"].map((state) => pill(state)), codexQuota);
 filter.addEventListener("input", render);
+$("layout-pet-stage").addEventListener("click", () => { setLayout("stage"); render(); });
+$("layout-compact").addEventListener("click", () => { setLayout("compact"); render(); });
+setLayout(layout);
 clearStatus.addEventListener("click", () => {
   stats.querySelector(`[data-status-filter="${statusFilter}"]`)?.focus({ preventScroll: true });
   statusFilter = undefined;

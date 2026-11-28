@@ -451,8 +451,12 @@ test("served Teams view sends attachments, shows the combined result, and gives 
   assert.equal($("team-setup").hidden, false);
   assert.equal(heading.parentElement.tagName, "MAIN", "Teams must not hide the toolbar with the live composer");
   assertPreStartRoster(window.document);
-  assert.equal($("team-submit").parentElement.parentElement, $("team-attach").parentElement);
-  assert.equal($("team-attach").nextElementSibling, $("team-submit").parentElement, "Attach files sits immediately before the start/stop action slot");
+  const setupActions = window.document.querySelector(".team-setup-actions");
+  assert.ok(setupActions, "the setup footer exists");
+  assert.equal($("team-attachments").parentElement, setupActions);
+  assert.equal($("team-attachments").nextElementSibling, $("team-attach").parentElement);
+  assert.equal($("team-attach").parentElement, $("team-submit").parentElement, "Attach files and Send requirement share the action group");
+  assert.equal($("team-attach").nextElementSibling, $("team-submit"), "Attach files sits immediately before Send requirement");
   assert.ok($("team-brief").rows >= 10);
   $("team-brief").value = "Build the status screen";
   $("team-brief").dispatchEvent(new window.Event("input"));
